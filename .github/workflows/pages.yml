@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: MIT OR Apache-2.0
 #
 # The website (site/) on GitHub Pages: https://neuralpunk.github.io/slate-os/
-# Deployed when site/ changes on main. In the repository's settings,
-# Pages' source must be "GitHub Actions".
+# Deployed when site/ changes on main, once the repository is public
+# (while it is private the job is skipped). In the repository's
+# settings, Pages' source must be "GitHub Actions".
 
 name: Website
 
@@ -23,6 +24,7 @@ concurrency:
 
 jobs:
   deploy:
+    if: ${{ !github.event.repository.private }}
     runs-on: ubuntu-latest
     environment:
       name: github-pages
