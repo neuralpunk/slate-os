@@ -1,0 +1,13 @@
+[package]
+name = "slate-bzip2"
+description = "The bzip2 format: decompression and compression"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+slate-flate = { path = "../flate" }
+
+[lints]
+workspace = true

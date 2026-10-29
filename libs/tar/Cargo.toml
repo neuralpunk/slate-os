@@ -1,0 +1,13 @@
+[package]
+name = "slate-tar"
+description = "The tar format (POSIX ustar and pax, with GNU long names when reading): entries in, archives out"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+slate-flate = { path = "../flate" }
+
+[lints]
+workspace = true

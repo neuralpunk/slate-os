@@ -1,0 +1,13 @@
+[package]
+name = "slate-zip"
+description = "The zip format: reading (with Zip64) and writing, over slate-flate"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+slate-flate = { path = "../flate" }
+
+[lints]
+workspace = true

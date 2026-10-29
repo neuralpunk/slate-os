@@ -1,0 +1,17 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# Bluetooth (ADR 0113): slate-btd holds the host stack over /dev/hci0
+# when a controller is there (it waits for one otherwise), keeps the
+# pairings in /var/lib/slate/bluetooth, and answers Settings and slate-bt
+# on the abstract socket slate-btd. slinit runs and supervises it.
+### BEGIN INIT INFO
+# Provides:          slate-btd
+# Required-Start:
+# Required-Stop:
+# Should-Start:      logd devd
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Short-Description: Bluetooth
+# X-Slate-Exec:      /bin/slate-btd
+### END INIT INFO
+exit 0

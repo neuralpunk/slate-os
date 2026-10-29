@@ -1,0 +1,14 @@
+[package]
+name = "slate-net"
+description = "Network protocols (Ethernet, ARP, IPv4, ICMP, UDP, TCP, DHCP) from the RFCs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+slate-bpf = { path = "../bpf" }
+slate-nft = { path = "../nft" }
+
+[lints]
+workspace = true

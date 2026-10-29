@@ -1,0 +1,35 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# System initialization: slinit's sysinit entry runs this once at boot.
+mount -t tmpfs tmpfs /run 2>/dev/null
+# /etc/resolv.conf links here: the kernel's boot-time settings until netd
+# writes its own (ADR 0048).
+ln -sf /proc/net/pnp /run/resolv.conf
+[ -r /etc/hostname ] && hostname "$(cat /etc/hostname)"
+# The inbound firewall (ADR 0134): the kernel loaded it with nothing open;
+# open what /etc/slate/firewall lists, before any service listens.
+[ -x /bin/slate-firewall ] && /bin/slate-firewall load
+# Linux compatibility mode as saved by slate-compat or the installer
+# (ADR 0032); without the file the kernel command line decides.
+case $(cat /etc/slate/linux-compat 2>/dev/null) in
+on) echo 1 > /proc/sys/slate/linux_compat ;;
+off) echo 0 > /proc/sys/slate/linux_compat ;;
+esac
+# The console's keyboard layout, as the installer recorded it (ADR 0039).
+[ -r /etc/slate/keyboard ] && cat /etc/slate/keyboard > /proc/sys/slate/keyboard 2>/dev/null
+# On a SlateFS root, /home and /var are their own subvolumes, which system
+# updates and rollbacks leave alone (ADR 0027).
+root=$(awk '$2 == "/" && $3 == "slatefs" { print $1 }' /proc/mounts)
+if [ -n "$root" ]; then
+    mount -t slatefs -o subvol=home "$root" /home 2>/dev/null
+    mount -t slatefs -o subvol=var "$root" /var 2>/dev/null
+    # The Linux runtime, when it has a subvolume of its own (ADR 0102's
+    # addendum).
+    [ -d /var/lib/slate/linux ] && mount -t slatefs -o subvol=linux "$root" /var/lib/slate/linux 2>/dev/null
+fi
+# UEFI variables (ADR 0088), where Linux tools look for them.
+[ -d /sys/firmware/efi/efivars ] && mount -t efivarfs efivarfs /sys/firmware/efi/efivars 2>/dev/null
+# /var/tmp (FHS 3.0 §5.15), which systems installed before it was in the
+# image lack.
+[ -d /var/tmp ] || { mkdir -p /var/tmp && chmod 1777 /var/tmp; }
+exit 0

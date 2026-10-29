@@ -1,0 +1,13 @@
+[package]
+name = "slatefs"
+description = "SlateFS, Slate's copy-on-write file system with checksums, snapshots and subvolumes (ADR 0026)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+slate-hash = { path = "../hash" }
+
+[lints]
+workspace = true

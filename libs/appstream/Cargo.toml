@@ -1,0 +1,10 @@
+[package]
+name = "slate-appstream"
+description = "AppStream catalogs (Flathub's): a small XML reader and the component fields Slate shows (ADR 0125)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true

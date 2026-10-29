@@ -1,0 +1,8 @@
+root:x:0:
+tty:x:5:
+wheel:x:10:root
+users:x:100:
+seat:x:64:greeter
+greeter:x:65:
+sshd:x:74:
+nobody:x:65534:

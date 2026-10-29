@@ -1,0 +1,22 @@
+[package]
+name = "slatecrypt"
+description = "Slate's disk encryption format: AES-256-XTS sectors, Argon2id key slots (ADR 0036)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+aes = { version = "=0.8.4", default-features = false, features = ["zeroize"] }
+aes-kw = { version = "=0.2.1", default-features = false }
+argon2 = { version = "=0.5.3", default-features = false, features = ["zeroize"], optional = true }
+
+[features]
+# Opening and making key slots from passwords (Argon2id). The kernel goes
+# without: the unlock program opens a slot and hands over its key (ADR 0038,
+# ADR 0086).
+default = ["password"]
+password = ["dep:argon2"]
+
+[lints]
+workspace = true

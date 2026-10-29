@@ -1,0 +1,25 @@
+[package]
+name = "slate-chalk"
+description = "chalk, Slate's shell: POSIX sh with the bash extensions people use"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "chalk"
+path = "src/main.rs"
+test = false
+bench = false
+
+[dependencies]
+slate-rt = { path = "../rt" }
+slate-coreutils = { path = "../coreutils" }
+slate-regex = { path = "../../libs/regex" }
+slate-term = { path = "../../libs/term" }
+
+[lints]
+workspace = true

@@ -1,0 +1,10 @@
+[package]
+name = "slate-flate"
+description = "DEFLATE (RFC 1951) and the gzip format (RFC 1952): decompression and compression"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,10 @@
+[package]
+name = "slate-hid"
+description = "USB HID report descriptors: the fields of each report, and the values in a report"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true

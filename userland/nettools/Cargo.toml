@@ -1,0 +1,62 @@
+[package]
+name = "slate-nettools"
+description = "Slate's network tools: ip, ping, lookup, fetch, ss, slate-network and slate-firewall (ADR 0052, ADR 0054, ADR 0134)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "lookup"
+path = "src/bin/lookup.rs"
+test = false
+bench = false
+
+[[bin]]
+name = "ip"
+path = "src/bin/ip.rs"
+test = false
+bench = false
+
+[[bin]]
+name = "ping"
+path = "src/bin/ping.rs"
+test = false
+bench = false
+
+[[bin]]
+name = "ss"
+path = "src/bin/ss.rs"
+test = false
+bench = false
+
+[[bin]]
+name = "fetch"
+path = "src/bin/fetch.rs"
+test = false
+bench = false
+
+[[bin]]
+name = "slate-network"
+path = "src/bin/slate-network.rs"
+test = false
+bench = false
+
+[[bin]]
+name = "slate-firewall"
+path = "src/bin/slate-firewall.rs"
+test = false
+bench = false
+
+[dependencies]
+slate-rt = { path = "../rt" }
+slate-net = { path = "../../libs/net" }
+slate-dns = { path = "../../libs/dns" }
+slate-netconf = { path = "../../libs/netconf" }
+slate-web = { path = "../web" }
+
+[lints]
+workspace = true

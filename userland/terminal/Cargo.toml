@@ -1,0 +1,26 @@
+[package]
+name = "slate-terminal"
+description = "terminal, Strata's terminal emulator (ADR 0037)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "terminal"
+path = "src/main.rs"
+test = false
+bench = false
+
+[dependencies]
+slate-rt = { path = "../rt" }
+slate-ui = { path = "../ui" }
+slate-term = { path = "../../libs/term" }
+slate-strata = { path = "../strata" }
+slate-strata-client = { path = "../strata-client" }
+
+[lints]
+workspace = true

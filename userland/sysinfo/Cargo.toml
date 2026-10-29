@@ -1,0 +1,14 @@
+[package]
+name = "slate-sysinfo"
+description = "slate-sysinfo: what Slate's apps say about the computer (release, kernel, processor, memory, disks, uptime; processes, load, block devices), from /proc and /sys (ADR 0110, ADR 0112)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+slate-edid = { path = "../../libs/edid" }
+slate-rt = { path = "../rt" }
+
+[lints]
+workspace = true

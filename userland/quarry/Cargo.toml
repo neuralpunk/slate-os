@@ -1,0 +1,28 @@
+[package]
+name = "slate-quarry"
+description = "quarry, Slate's package manager (ADR 0025)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "quarry"
+path = "src/main.rs"
+test = false
+bench = false
+
+[dependencies]
+slate-rt = { path = "../rt" }
+slate-etcsync = { path = "../etcsync" }
+slate-qpkg = { path = "../../libs/qpkg" }
+slate-hash = { path = "../../libs/hash" }
+slate-web = { path = "../web" }
+slate-elf = { path = "../../libs/elf" }
+slate-abi = { path = "../../libs/abi" }
+
+[lints]
+workspace = true

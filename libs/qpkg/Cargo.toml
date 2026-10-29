@@ -1,0 +1,19 @@
+[package]
+name = "slate-qpkg"
+description = "quarry's package format: manifests, versions, the .qpk container, signed repository indexes (ADR 0025)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+slate-hash = { path = "../hash" }
+slate-flate = { path = "../flate" }
+# Vetted Ed25519 (ADR 0012's exception for cryptography; ADR 0025).
+ed25519-dalek = { version = "=2.2.0", default-features = false }
+# ed25519-dalek's SHA-512, in portable code: the SIMD paths enable SSE,
+# which Slate's soft-float target does not allow.
+sha2 = { version = "=0.10.9", default-features = false, features = ["force-soft"] }
+
+[lints]
+workspace = true

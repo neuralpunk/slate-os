@@ -1,0 +1,10 @@
+[package]
+name = "slate-dns"
+description = "DNS messages (RFC 1035): A-record queries and their answers, without I/O"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true

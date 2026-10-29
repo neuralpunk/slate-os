@@ -1,0 +1,15 @@
+[package]
+name = "slate-strata-client"
+description = "The library Strata's apps use: windows of shared memory drawn with slate-ui (ADR 0037)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+slate-rt = { path = "../rt" }
+slate-ui = { path = "../ui" }
+strata-proto = { path = "../../libs/strata-proto" }
+
+[lints]
+workspace = true

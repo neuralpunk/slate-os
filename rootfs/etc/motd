@@ -1,0 +1,7 @@
+  Slate 0.1 -- a clean-slate, Linux-compatible OS in Rust.
+
+  Everything here is Slate's own: the kernel, chalk (this shell),
+  coreutils, grep/sed/awk/find, etch (editor), less and slinit.
+  Try: ls /proc, ps, free, uname -a, etch notes, less /etc/inittab,
+  service, runlevel, or 'poweroff' to shut down.
+

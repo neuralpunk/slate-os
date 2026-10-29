@@ -1,0 +1,29 @@
+[package]
+name = "slate-bluetooth"
+description = "Slate's Bluetooth host: slate-btd, which owns /dev/hci0 (discovery, Secure Simple Pairing, link keys), and slate-bt, its command line (ADR 0113)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "slate-btd"
+path = "src/bin/slate-btd.rs"
+test = false
+bench = false
+
+[[bin]]
+name = "slate-bt"
+path = "src/bin/slate-bt.rs"
+test = false
+bench = false
+
+[dependencies]
+slate-hci = { path = "../../libs/hci" }
+slate-rt = { path = "../rt" }
+
+[lints]
+workspace = true

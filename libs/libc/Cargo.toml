@@ -1,0 +1,22 @@
+[package]
+name = "slate-libc"
+description = "slate-libc: a C library in Rust for C programs built for Slate (ADR 0031)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+# The static library is what C programs link (target/slate-sysroot); the
+# rlib lets the host run the unit tests.
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+slate-rt = { path = "../../userland/rt" }
+slate-net = { path = "../net" }
+slate-resolve = { path = "../../userland/resolve" }
+slate-sync = { path = "../sync" }
+slate-math = { path = "../math" }
+
+[lints]
+workspace = true

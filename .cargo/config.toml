@@ -1,0 +1,49 @@
+[alias]
+xtask = "run --quiet --package xtask --"
+
+[target.x86_64-unknown-none]
+# A position-independent higher-half kernel in the top 2 GiB, which the
+# bootloader places at random there (KASLR, ADR 0095); see
+# docs/adr/0002-kernel-build-and-boot.md. Slate's own programs build for
+# tools/x86_64-slate.json instead (ADR 0063).
+rustflags = [
+    "-C", "code-model=kernel",
+    "-C", "force-frame-pointers=yes",
+    # Forward-edge control-flow integrity (ADR 0096): every indirect call
+    # checks its target's type. core and alloc are built with it
+    # (-Zbuild-std, tools/xtask).
+    "-Z", "sanitizer=kcfi",
+    # No merging of identical functions: LLVM keeps one body under one
+    # type tag, so an indirect call to a merged-away function of another
+    # type fails the check (a release kernel panicked on the reference PC calling
+    # BootFb::outputs, folded into Elevator::queue_depth; ADR 0096).
+    "-Z", "merge-functions=disabled",
+    # The target has no SSE: curve25519-dalek (quarry's Ed25519, ADR 0025)
+    # must use its portable 64-bit backend, not the AVX2 one it picks on
+    # nightly.
+    "--cfg", 'curve25519_dalek_backend="serial"',
+    # Likewise ChaCha20 and Poly1305 (slate-sshd, ADR 0030): portable code.
+    "--cfg", 'chacha20_backend="soft"',
+    "--cfg", 'poly1305_backend="soft"',
+    # And AES (disk encryption, ADR 0036): the aes crate's AES-NI backend
+    # does not compile for a soft-float target (LLVM cannot split its
+    # vector operations), so it stays software; slatecrypt has its own
+    # AES-NI XTS in inline assembly (ADR 0039).
+    "--cfg", "aes_force_soft",
+]
+
+# Slate's own programs (ADR 0063): SSE2 and hardware floating point,
+# static position-independent executables that relocate themselves (ADR
+# 0092; relocation and code models, frame pointers in the target spec).
+# slate-loader for BIOS uses the same spec made static
+# (tools/x86_64-slate-loader.json). The vetted crates keep their portable
+# backends, as on the kernel's target (ADR 0025, ADR 0030, ADR 0036).
+[target.x86_64-slate]
+rustflags = [
+    "--cfg", 'curve25519_dalek_backend="serial"',
+    "--cfg", 'chacha20_backend="soft"',
+    "--cfg", 'poly1305_backend="soft"',
+    "--cfg", "aes_force_soft",
+    # GHASH under AES-GCM (TLS, ADR 0053): portable too.
+    "--cfg", "polyval_force_soft",
+]

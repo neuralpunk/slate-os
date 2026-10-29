@@ -1,0 +1,23 @@
+[package]
+name = "slate-seatd"
+description = "seatd, Slate's seat daemon: hands DRM and input devices to the active session over libseat's seatd protocol (ADR 0033)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "seatd"
+path = "src/main.rs"
+test = false
+bench = false
+
+[dependencies]
+slate-rt = { path = "../rt" }
+slate-login = { path = "../login" }
+
+[lints]
+workspace = true

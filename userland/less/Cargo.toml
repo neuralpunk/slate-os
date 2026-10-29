@@ -1,0 +1,25 @@
+[package]
+name = "slate-less"
+description = "less, Slate's pager"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "less"
+path = "src/main.rs"
+test = false
+bench = false
+
+[dependencies]
+slate-rt = { path = "../rt" }
+slate-abi = { path = "../../libs/abi" }
+slate-tui = { path = "../tui" }
+slate-regex = { path = "../../libs/regex" }
+
+[lints]
+workspace = true

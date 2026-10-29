@@ -1,0 +1,14 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# The system log (ADR 0060): syslog(3) messages from /dev/log and the
+# kernel's log, in /var/log/messages. slinit runs and supervises it.
+### BEGIN INIT INFO
+# Provides:          logd
+# Required-Start:
+# Required-Stop:
+# Default-Start:     1 2 3 4 5
+# Default-Stop:      0 6
+# Short-Description: system log
+# X-Slate-Exec:      /bin/logd
+### END INIT INFO
+exit 0

@@ -1,0 +1,53 @@
+[package]
+name = "slate-install"
+description = "slate-install: the text and graphical installers and their install engine (ADR 0023, ADR 0029, ADR 0034)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "slate-install"
+path = "src/main.rs"
+test = false
+bench = false
+
+[[bin]]
+name = "slate-boot"
+path = "src/boot_main.rs"
+test = false
+bench = false
+
+[[bin]]
+name = "slate-install-gui"
+path = "src/gui_main.rs"
+test = false
+bench = false
+
+[dependencies]
+slate-rt = { path = "../rt" }
+slate-coreutils = { path = "../coreutils" }
+slate-cpio = { path = "../../libs/cpio", features = ["alloc"] }
+slate-esp = { path = "../../libs/esp" }
+slate-fat = { path = "../../libs/fat" }
+slate-fsprobe = { path = "../../libs/fsprobe" }
+slate-mbr = { path = "../../libs/mbr" }
+slate-gpt = { path = "../../libs/gpt", features = ["alloc"] }
+slate-qpkg = { path = "../../libs/qpkg" }
+slate-hash = { path = "../../libs/hash" }
+slatefs = { path = "../../libs/slatefs" }
+slatecrypt = { path = "../../libs/slatecrypt" }
+slate-ui = { path = "../ui" }
+slate-display = { path = "../display" }
+slate-term = { path = "../../libs/term" }
+slate-netconf = { path = "../../libs/netconf" }
+
+[dev-dependencies]
+slate-cpio = { path = "../../libs/cpio", features = ["alloc"] }
+fatfs = { version = "=0.3.6", default-features = false, features = ["std", "alloc"] }
+
+[lints]
+workspace = true

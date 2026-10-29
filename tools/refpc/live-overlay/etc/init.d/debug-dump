@@ -1,0 +1,15 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# Development live media only (SLATE_LIVE_OVERLAY=tools/refpc/live-overlay,
+# ADR 0076): dumps the boot's state to the medium's own disk for reading
+# from another system, then restarts unless asked to stay.
+### BEGIN INIT INFO
+# Provides:          debug-dump
+# Required-Start:    logd netd sshd
+# Required-Stop:
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Short-Description: boot state dump (development media)
+# X-Slate-Exec:      /bin/sh /usr/lib/slate-test/debug-dump.sh
+### END INIT INFO
+exit 0

@@ -1,0 +1,10 @@
+[package]
+name = "slate-ext4"
+description = "ext4 file system: on-disk format, reading and writing (from the ext4 on-disk format documentation)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true

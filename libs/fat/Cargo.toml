@@ -1,0 +1,13 @@
+[package]
+name = "slate-fat"
+description = "Writes FAT32 volumes (Microsoft FAT specification, fatgen103) for EFI System Partitions"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dev-dependencies]
+fatfs = { version = "=0.3.6", default-features = false, features = ["std", "alloc"] }
+
+[lints]
+workspace = true

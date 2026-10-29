@@ -1,0 +1,25 @@
+[package]
+name = "slate-graphics-trial"
+description = "slate-graphics-trial: the first start with full graphics asks whether to keep it, and goes back to standard graphics without an answer (ADR 0173)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "slate-graphics-trial"
+path = "src/main.rs"
+test = false
+bench = false
+
+[dependencies]
+slate-rt = { path = "../rt" }
+slate-ui = { path = "../ui" }
+slate-display = { path = "../display" }
+slate-sysinfo = { path = "../sysinfo" }
+
+[lints]
+workspace = true

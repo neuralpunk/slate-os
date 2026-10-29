@@ -1,0 +1,7 @@
+name: qbare
+version: 1.0
+arch: x86_64
+abi: slate
+summary: The same app, declaring nothing
+license: MIT OR Apache-2.0
+permissions: none

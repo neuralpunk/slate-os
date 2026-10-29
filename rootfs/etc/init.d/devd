@@ -1,0 +1,15 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# The device manager (ADR 0033): keeps the libudev device database in
+# /run/udev that libinput and wlroots read. slinit runs and supervises it.
+### BEGIN INIT INFO
+# Provides:          devd
+# Required-Start:
+# Required-Stop:
+# Should-Start:      logd
+# Default-Start:     1 2 3 4 5
+# Default-Stop:      0 6
+# Short-Description: device database
+# X-Slate-Exec:      /bin/devd
+### END INIT INFO
+exit 0

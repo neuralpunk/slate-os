@@ -1,0 +1,6 @@
+name: qbad
+version: 1.0
+abi: any
+summary: Declares a permission Slate doesn't know
+license: MIT OR Apache-2.0
+permissions: teleport

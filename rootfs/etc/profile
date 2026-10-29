@@ -1,0 +1,29 @@
+export PATH=/bin:/sbin:/usr/bin:/usr/sbin
+export PS1='\u@slate:\w\$ '
+# In Strata's terminal: graphite's prompt (docs/design/WM_STYLE.md section 7),
+# user@host in bold chalk, the path in `muted`, the sign in `inactive`:
+# the terminal gives its theme's greys (ADR 0124), xterm's otherwise.
+if [ -n "$STRATA_TERMINAL" ]; then
+    export PS1='\[\e[1;${STRATA_PROMPT_USER:-97}m\]\u@\h\[\e[0m\] \[\e[${STRATA_PROMPT_PATH:-38;5;245}m\]\w\[\e[0m\] \[\e[${STRATA_PROMPT_SIGN:-38;5;243}m\]\$\[\e[0m\] '
+fi
+# A graphical login (the login screen) is Strata itself: the shell gives
+# way to it, so nothing is left behind when it ends (ADR 0039).
+if [ "$SLATE_SESSION" = strata ] && [ -x /bin/strata ]; then
+    unset SLATE_SESSION
+    exec strata
+fi
+# A login on the console starts the desktop where it is installed (ADR
+# 0037), but not for root: Strata's "Log out" ends the session, and
+# super + shift + e leaves to this shell.
+if [ -z "$STRATA_TERMINAL" ] && [ -f /etc/slate/session ] && [ -x /bin/strata ] &&
+    [ "$(id -u)" -ne 0 ] && [ "$(tty)" = /dev/console ]; then
+    strata
+    [ $? -eq 0 ] && exit
+fi
+# The desktop chosen at install, removed since (Settings can't add it back:
+# it is a Strata app): how to bring it back (ADR 0102's second addendum).
+if [ -z "$STRATA_TERMINAL" ] && [ -f /etc/slate/session ] && [ ! -x /bin/strata ] && [ "$(tty)" = /dev/console ]; then
+    echo "Strata, the desktop, isn't installed. To bring it back: slate-approve desktop=add"
+fi
+alias ll='ls -l'
+export EDITOR=etch VISUAL=etch PAGER=less

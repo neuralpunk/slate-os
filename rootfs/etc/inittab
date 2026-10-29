@@ -1,0 +1,26 @@
+# /etc/inittab: what slinit runs (id:runlevels:action:process).
+# Runlevels: 0 power off, 1/S single user, 2-5 multi-user, 6 reboot.
+id:3:initdefault:
+
+si::sysinit:/etc/rc.d/rc.sysinit
+
+# Single user: a root shell on the console.
+su:S1:wait:/bin/login -f root
+
+# Full graphics on trial (ADR 0173): keep it, or back to standard
+# graphics without an answer, before anyone logs in.
+gt:2345:wait:/bin/slate-graphics-trial
+
+# Multi-user: log in on the console.
+c1:2345:respawn:/bin/getty -L console linux
+
+# The system booted: confirm it, so an update on trial is kept (ADR 0027).
+ok:2345:once:/bin/slate-update boot-ok
+
+# Before power-off and reboot (services are stopped by then).
+sd:06:wait:/etc/rc.d/rc.shutdown
+
+ca::ctrlaltdel:/bin/shutdown -r now
+
+# The power button (ACPI, ADR 0029): a clean power-off.
+pf::powerfail:/bin/shutdown -h now

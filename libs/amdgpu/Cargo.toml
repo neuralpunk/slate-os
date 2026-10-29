@@ -1,0 +1,10 @@
+[package]
+name = "slate-amdgpu"
+description = "Reading AMD GPUs' firmware tables for Slate's display driver: the ACPI VFCT table, the AtomBIOS image's headers and display objects, and the IP discovery table"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true

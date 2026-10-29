@@ -1,0 +1,17 @@
+[package]
+name = "slate-loader"
+description = "slate-loader's core: the menu file, the kernel's ELF image, page tables, the Limine boot protocol's responses, the other CPUs, the menu screen (ADR 0089)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+slate-acpi = { path = "../../libs/acpi" }
+slate-elf = { path = "../../libs/elf" }
+slate-ui = { path = "../../userland/ui" }
+slate-esp = { path = "../../libs/esp" }
+slate-edid = { path = "../../libs/edid" }
+
+[lints]
+workspace = true

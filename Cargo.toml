@@ -1,0 +1,28 @@
+[workspace]
+resolver = "3"
+members = ["kernel", "kernel/vdso", "libs/*", "userland/*", "boot/*", "tools/xtask"]
+# The kernel only builds for x86_64-unknown-none, and the vDSO needs special
+# link flags; plain `cargo build`/`cargo test` on the host covers the other
+# crates. `cargo xtask` drives the kernel and the vDSO.
+default-members = ["libs/*", "boot/core", "tools/xtask"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+missing_debug_implementations = "warn"
+
+[workspace.lints.clippy]
+undocumented_unsafe_blocks = "deny"
+# `x % n == 0` reads fine and is everywhere in address arithmetic.
+manual_is_multiple_of = "allow"
+
+[profile.dev]
+opt-level = 1
+
+[profile.release]
+debug = true

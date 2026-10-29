@@ -1,0 +1,25 @@
+# Settings the account tools read (ADR 0057; the keys and their meaning
+# are those login.defs(5) documents). Only these keys are used.
+
+# Ranges for new users and groups (useradd, groupadd); -r picks system
+# IDs from the top of the SYS_ ranges.
+UID_MIN 1000
+UID_MAX 60000
+SYS_UID_MIN 101
+SYS_UID_MAX 999
+GID_MIN 1000
+GID_MAX 60000
+SYS_GID_MIN 101
+SYS_GID_MAX 999
+
+# Password ageing for new accounts, in days (shadow(5); 99999: never).
+PASS_MIN_DAYS 0
+PASS_MAX_DAYS 99999
+PASS_WARN_AGE 7
+
+# useradd makes the home directory, and a group of the user's own.
+CREATE_HOME yes
+USERGROUPS_ENAB yes
+
+# Where mail spools are (useradd's CREATE_MAIL_SPOOL, userdel -r).
+MAIL_DIR /var/spool/mail

@@ -1,0 +1,27 @@
+Init scripts for slinit. Each executable script here takes start, stop,
+restart and status, and carries an LSB header:
+
+### BEGIN INIT INFO
+# Provides:          name
+# Required-Start:    other services it needs
+# Required-Stop:
+# Should-Start:      services to start first when present
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Short-Description: what it is
+# X-Slate-Exec:      /path/to/daemon --foreground   (optional: slinit runs
+#                    and supervises it, restarting with backoff)
+### END INIT INFO
+
+slinit starts and stops scripts in the order these headers imply.
+`service NAME start|stop|restart|status` asks slinit to do so by hand.
+Slate ships eight services: sshd, its own SSH server (ADR 0030),
+slate-brokerd, the privilege broker (ADR 0032), devd, the device
+database, seatd, the seat daemon (ADR 0033), netd, the network daemon
+(ADR 0048), logd, the system log (ADR 0060), slate-btd, Bluetooth
+(ADR 0113), and fstrim, the weekly trim (ADR 0122).
+
+A service's output (and that of everything it starts) goes to
+/var/log/services/NAME.log; `service NAME log` shows it. Its processes
+carry the service's name (/proc/PID/status `Service:`), so stopping it
+stops all of them.

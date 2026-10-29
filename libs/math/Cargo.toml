@@ -1,0 +1,10 @@
+[package]
+name = "slate-math"
+description = "Slate's floating-point functions (exp, log, pow, the trigonometric family): the core of slate-libc's <math.h>"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true

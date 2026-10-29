@@ -1,0 +1,35 @@
+[package]
+name = "slate-sshd"
+description = "slate-sshd: Slate's own SSH server (RFC 4251-4254; ADR 0030)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "sshd"
+path = "src/main.rs"
+test = false
+bench = false
+
+[dependencies]
+slate-rt = { path = "../rt" }
+slate-coreutils = { path = "../coreutils" }
+slate-login = { path = "../login" }
+slate-hash = { path = "../../libs/hash" }
+# Vetted cryptography (ADR 0012's exception; ADR 0030): Ed25519 host keys
+# and client keys, X25519 key exchange (curve25519-dalek's Montgomery
+# form, already vetted under ed25519-dalek), ChaCha20 and Poly1305.
+ed25519-dalek = { version = "=2.2.0", default-features = false }
+curve25519-dalek = { version = "=4.1.3", default-features = false }
+sha2 = { version = "=0.10.9", default-features = false, features = ["force-soft"] }
+chacha20 = { version = "=0.10.2", default-features = false, features = ["legacy"] }
+poly1305 = { version = "=0.9.1", default-features = false }
+# ML-KEM-768 for mlkem768x25519-sha256 (ADR 0061), the same exception.
+ml-kem = { version = "=0.3.2", default-features = false, features = ["alloc", "hazmat"] }
+
+[lints]
+workspace = true

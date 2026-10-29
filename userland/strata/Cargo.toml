@@ -1,0 +1,50 @@
+[package]
+name = "slate-strata"
+description = "Strata, Slate's own tiling window manager and display server (ADR 0037)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "strata"
+path = "src/main.rs"
+test = false
+bench = false
+
+[[bin]]
+name = "strata-keys"
+path = "src/keys_main.rs"
+test = false
+bench = false
+
+[[bin]]
+name = "strata-settings"
+path = "src/settings_main.rs"
+test = false
+bench = false
+
+[[bin]]
+name = "strata-login"
+path = "src/greeter_main.rs"
+test = false
+bench = false
+
+[dependencies]
+slate-netconf = { path = "../../libs/netconf" }
+slate-ui = { path = "../ui" }
+slate-image = { path = "../../libs/image" }
+slate-display = { path = "../display" }
+slate-rt = { path = "../rt" }
+slate-abi = { path = "../../libs/abi" }
+slate-sysinfo = { path = "../sysinfo" }
+slate-bluetooth = { path = "../bluetooth" }
+slate-hci = { path = "../../libs/hci" }
+slate-strata-client = { path = "../strata-client" }
+strata-proto = { path = "../../libs/strata-proto" }
+
+[lints]
+workspace = true

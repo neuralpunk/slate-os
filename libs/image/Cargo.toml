@@ -1,0 +1,14 @@
+[package]
+name = "slate-image"
+description = "Reading PNG, JPEG, GIF and BMP images, and scaling them"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+slate-flate = { path = "../flate" }
+slate-math = { path = "../math" }
+
+[lints]
+workspace = true

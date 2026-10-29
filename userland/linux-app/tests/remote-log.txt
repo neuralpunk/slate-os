@@ -1,0 +1,36 @@
+        ID: io.gitlab.librewolf-community
+       Ref: app/io.gitlab.librewolf-community/x86_64/stable
+      Arch: x86_64
+    Branch: stable
+Collection: org.flathub.Stable
+  Download: 163.4 MB
+ Installed: 502.9 MB
+   Runtime: org.freedesktop.Platform/x86_64/25.08
+       Sdk: org.freedesktop.Sdk/x86_64/25.08
+
+    Commit: bd08625d1c6456f7f177007537cca81ba9f427dbe5ecf008806daec83fd38dea
+    Parent: 523871b4c948f91b6c04bf2c9e1c8a6ccb7e0507fe1c0a0a1d5d1d0c588487e2
+   Subject: Update librewolf module (#271) (03f2caf8c147)
+      Date: 2026-10-22 23:09:44 +0000
+   History: 
+
+    Commit: 523871b4c948f91b6c04bf2c9e1c8a6ccb7e0507fe1c0a0a1d5d1d0c588487e2
+   Subject: Update librewolf module (#270) (82adf3719e30)
+      Date: 2026-10-21 17:55:53 +0000
+
+    Commit: bf276d6ce319448aa43869a8b496c3b36b88df75b8c694da4930ce509adcea4d
+   Subject: Update librewolf module (#269) (131ed57fd7fd)
+      Date: 2026-10-14 01:22:49 +0000
+
+    Commit: 91c07edaafcc86143b2ba6a79823fe42270e62259409f31386719faa5fd4d4cd
+   Subject: Update librewolf module (#266) (589a51054457)
+      Date: 2026-10-01 18:02:55 +0000
+
+    Commit: f5e4ebc76689e77b9ac5212e2828abd9746ab48015b54d28e7ec12bbf2a17ab3
+   Subject: Merge pull request #264 from flathub/any1here-patch-1 (412f3959e4ec)
+      Date: 2026-09-23 06:41:36 +0000
+
+    Commit: 2c57586269d0ce887867bc90bba32cddee04569678c59113face5e9cc05187b0
+   Subject: Merge pull request #262 from flathub/update-master-4771b93 (bf19e10e8631)
+      Date: 2026-09-17 19:31:16 +0000
+

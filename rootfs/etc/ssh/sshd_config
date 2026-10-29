@@ -1,0 +1,32 @@
+# /etc/ssh/sshd_config: Slate's SSH server (ADR 0030, ADR 0061).
+# The keywords are sshd_config(5)'s; `sshd -t` checks this file and
+# `sshd -T` prints the settings in effect. Unknown keywords, Match and
+# Include are errors (sshd will not start). The values below are the
+# defaults.
+
+#Port 22
+#HostKey /etc/ssh/ssh_host_ed25519_key
+
+# Root logs in with a key only; installed systems give root no password.
+#PermitRootLogin prohibit-password
+#PasswordAuthentication yes
+#PubkeyAuthentication yes
+#AuthorizedKeysFile .ssh/authorized_keys .ssh/authorized_keys2
+#AllowUsers
+#DenyUsers
+#AllowGroups
+#DenyGroups
+#MaxAuthTries 6
+#LoginGraceTime 2m
+
+# Keepalives: 0 sends none.
+#ClientAliveInterval 0
+#ClientAliveCountMax 3
+#RekeyLimit 1G none
+#KexAlgorithms mlkem768x25519-sha256,curve25519-sha256,curve25519-sha256@libssh.org
+
+#Banner none
+#PrintMotd yes
+
+# sftp and scp (which speaks SFTP).
+Subsystem sftp internal-sftp

@@ -1,0 +1,13 @@
+[package]
+name = "slate-netconf"
+description = "/etc/slate/network (ADR 0048, ADR 0054): netd's settings file, read and edited"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+slate-net = { path = "../net" }
+
+[lints]
+workspace = true

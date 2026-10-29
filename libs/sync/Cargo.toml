@@ -1,0 +1,10 @@
+[package]
+name = "slate-sync"
+description = "Synchronization primitives shared by the Slate kernel and tools"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true

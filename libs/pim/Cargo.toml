@@ -1,0 +1,10 @@
+[package]
+name = "slate-pim"
+description = "iCalendar (RFC 5545) and vCard (RFC 6350): reading, writing and recurrence"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true

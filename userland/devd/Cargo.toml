@@ -1,0 +1,22 @@
+[package]
+name = "slate-devd"
+description = "devd, Slate's device manager: a libudev-compatible device database in /run/udev (ADR 0033)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "devd"
+path = "src/main.rs"
+test = false
+bench = false
+
+[dependencies]
+slate-rt = { path = "../rt" }
+
+[lints]
+workspace = true

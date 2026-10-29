@@ -1,0 +1,10 @@
+[package]
+name = "slate-mbr"
+description = "MBR partition tables with extended partitions (UEFI 2.10, section 5.2)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true

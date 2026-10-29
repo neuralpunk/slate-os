@@ -1,0 +1,17 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# The seat daemon (ADR 0033): hands DRM and input devices to the active
+# graphical session over /run/seatd.sock (libseat's seatd backend). Root
+# and the members of the seat group may use it. slinit runs and
+# supervises it.
+### BEGIN INIT INFO
+# Provides:          seatd
+# Required-Start:
+# Required-Stop:
+# Should-Start:      logd devd
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Short-Description: seat daemon
+# X-Slate-Exec:      /bin/seatd
+### END INIT INFO
+exit 0

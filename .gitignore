@@ -1,0 +1,19 @@
+# Build output, images, logs, downloads and the development signing key
+# (target/quarry/dev.key) all live in target/. AMD's firmware, VBIOS and
+# register dumps are kept there too and are never committed.
+/target
+
+# Disk images and ISOs made by hand outside target/.
+*.img
+*.iso
+
+# Where the GPU bench's reference PC is (cargo xtask gpu-bench).
+/refpc.conf
+
+# Local tool state.
+/.claude/
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store

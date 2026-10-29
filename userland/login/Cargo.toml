@@ -1,0 +1,134 @@
+[package]
+name = "slate-login"
+description = "Logging in and accounts: getty, login, su, passwd, the account tools and the privilege broker, on /etc/passwd, /etc/group and /etc/shadow"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+# login and getty run as root. su and passwd run as the user and ask the
+# privilege broker, slate-brokerd (ADR 0032), when they need root.
+[[bin]]
+name = "login"
+path = "src/bin/login.rs"
+test = false
+bench = false
+
+[[bin]]
+name = "su"
+path = "src/bin/su.rs"
+test = false
+bench = false
+
+[[bin]]
+name = "passwd"
+path = "src/bin/passwd.rs"
+test = false
+bench = false
+
+[[bin]]
+name = "newgrp"
+path = "src/bin/newgrp.rs"
+test = false
+bench = false
+
+[[bin]]
+name = "slate-approve"
+path = "src/bin/approve.rs"
+test = false
+bench = false
+
+[[bin]]
+name = "slate-brokerd"
+path = "src/bin/brokerd.rs"
+test = false
+bench = false
+
+# Account administration (ADR 0057): root only, except chsh and chage -l,
+# which ask the broker or read only.
+[[bin]]
+name = "useradd"
+path = "src/bin/useradd.rs"
+test = false
+bench = false
+
+[[bin]]
+name = "usermod"
+path = "src/bin/usermod.rs"
+test = false
+bench = false
+
+[[bin]]
+name = "userdel"
+path = "src/bin/userdel.rs"
+test = false
+bench = false
+
+[[bin]]
+name = "groupadd"
+path = "src/bin/groupadd.rs"
+test = false
+bench = false
+
+[[bin]]
+name = "groupmod"
+path = "src/bin/groupmod.rs"
+test = false
+bench = false
+
+[[bin]]
+name = "groupdel"
+path = "src/bin/groupdel.rs"
+test = false
+bench = false
+
+[[bin]]
+name = "gpasswd"
+path = "src/bin/gpasswd.rs"
+test = false
+bench = false
+
+[[bin]]
+name = "chpasswd"
+path = "src/bin/chpasswd.rs"
+test = false
+bench = false
+
+[[bin]]
+name = "chage"
+path = "src/bin/chage.rs"
+test = false
+bench = false
+
+[[bin]]
+name = "chsh"
+path = "src/bin/chsh.rs"
+test = false
+bench = false
+
+# sudo (ADR 0058): through the broker, never set-user-ID.
+[[bin]]
+name = "sudo"
+path = "src/bin/sudo.rs"
+test = false
+bench = false
+
+# sudoreplay (ADR 0159): sudo's I/O logs played back.
+[[bin]]
+name = "sudoreplay"
+path = "src/bin/sudoreplay.rs"
+test = false
+bench = false
+
+[dependencies]
+slate-rt = { path = "../rt" }
+slate-coreutils = { path = "../coreutils" }
+slate-crypt = { path = "../crypt" }
+slate-netconf = { path = "../../libs/netconf" }
+slate-diskutil = { path = "../diskutil" }
+
+[lints]
+workspace = true

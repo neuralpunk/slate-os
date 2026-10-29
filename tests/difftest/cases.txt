@@ -1,0 +1,1078 @@
+# Each line runs with Slate's tools and with GNU's (LC_ALL=C, TZ=UTC);
+# output and exit status must match.
+ls d
+ls -a d
+ls -1F d
+ls -R tree
+ls -d d d/a
+ls nope; echo $?
+cat d/a d/nonl
+cat -n d/lines
+cat -A d/w
+cat -s d/lines
+echo hello world
+echo -n x; echo y
+echo -e 'a\tb\\n'
+printf '%5.2f|%-4s|%x|%o|%c|%5d|%-5d|\n' 3.14159 ab 255 8 xyz 42 42
+printf '%s %s\n' a b c
+printf '%b\n' 'x\ty'
+printf '%03d %+d %e %g %g\n' 7 7 12345.678 0.0001 123456789
+seq 5
+seq 2 2 10
+seq -w 8 11
+seq -s, 3
+seq 1 0.5 3
+basename /a/b/c.txt .txt
+basename -a /x/y /z/
+dirname /a/b/c
+dirname a
+dirname /
+head -n 3 d/lines
+head -n -8 d/lines
+head -c 5 d/lines
+tail -n 2 d/lines
+tail -n +9 d/lines
+tail -c 4 d/lines
+wc d/lines
+wc -l d/lines d/a
+wc -c d/nonl
+sort d/s
+sort -n d/s
+sort -r d/s
+sort -u d/s
+sort -k2 d/fruit
+sort -n -k1 d/fruit
+sort -t: -k2 d/colon
+sort -f -k2 d/fruit
+uniq d/s
+sort d/s | uniq -c
+sort d/s | uniq -d
+cut -d: -f2 d/colon
+cut -c1-3 d/lines
+cut -d: -f1,3 d/colon
+cut -s -d: -f2 d/lines
+tr a-z A-Z < d/lines
+tr -d aeiou < d/lines
+tr -s ' ' < d/w
+tr -c 'a-z\n' '_' < d/w
+tac d/v1
+rev d/v1
+nl d/v1
+paste d/v1 d/v2
+paste -s -d, d/v1
+fold -w 3 d/lines
+comm d/v1 d/v2
+expand d/w
+expr 2 + 3 '*' 4
+expr 7 / 2; expr 7 % 2
+expr length hello
+expr 3 '>' 2
+test -d d && echo dir
+test -f d/link; echo $?
+[ 1 -lt 2 ] && echo lt
+[ abc = abc -a x != y ]; echo $?
+test -z ''; echo $?
+test; echo $?
+stat -c '%s %F %a %n' d/a d/sub
+md5sum d/a d/nonl
+sha256sum d/a
+md5sum d/a > d/a.md5 && md5sum -c d/a.md5
+readlink d/link
+readlink -f d/link
+realpath d/link d/sub/..
+realpath -m d/missing/x
+du -s tree
+diff d/v1 d/v2; echo $?
+diff -u d/v1 d/v2 | tail -n +3
+diff d/v1 d/v1; echo $?
+diff -q d/v1 d/v2; echo $?
+diff -r tree tree; echo $?
+strings d/nul
+printf 'abcd\0xy\0longerstring\n' | strings
+printf 'abcd\0xy\0longerstring\n' | strings -n 2
+date -d @0
+date -d @1700000000 +%Y-%m-%dT%H:%M:%S
+TZ=Europe/London date -d @1792400000
+TZ=America/New_York date -d @1780000000 +'%F %T %Z %z %s'
+TZ=Asia/Kolkata date -R -d @1792400000
+TZ=Australia/Lord_Howe date -d @1767225600 +'%T %Z %z'
+TZ='EST5EDT,M3.2.0,M11.1.0' date -d @1792400000
+TZ='<+0330>-3:30' date -d @0 +'%H:%M %Z'
+TZ=Europe/Paris date -u -d @1792400000
+TZ=UTC date -d '2026-10-20 12:34:56' +%s
+date -u -d '2026-10-20T12:34' +%s
+TZ=Europe/London date -d '2026-07-01 08:00:00' +%s
+TZ=Europe/London date -d @0
+# date --debug's steps, --resolution, TZ="..." in the string (ADR 0147).
+date --resolution
+date --debug -d '2026-10-01' 2>&1
+date --debug -d '2026-10-01 12:00' 2>&1
+date --debug -d '2026-10-01 +1 month -2 days' 2>&1
+date --debug -d '2026-10-01 12:00 +0200' 2>&1
+date --debug -d '2026-01-31 12:00 next month' 2>&1
+date --debug -d '2026-10-01 3 days ago' 2>&1
+date --debug -d '2026-10-01 12:00:00.5 +1 sec' 2>&1
+date --debug -d '2026-10-01 EST' 2>&1
+date --debug -d '2026-10-15 +1 year 2 hours 30 min ago' 2>&1
+date --debug -d '@1700000000' 2>&1
+date -u --debug -d '2026-10-01 12:00' +%s 2>&1
+date --debug -d 'TZ="Asia/Kolkata" 2026-10-01 12:00' 2>&1
+date -d 'TZ="America/New_York" 2026-07-04 09:30' +%s
+date -d 'TZ="Europe/London" 1970-01-01 01:00' +%s
+date -d 'TZ="Nowhere/Atlantis" 2026-01-01' +%s
+date --debug 2>&1 | grep -c 'output format'
+date -d '2026-10-01 next fri +1 day' +%F; date -d '2026-10-01 fri -1 week' +%F
+date --debug -d '2026-10-01 next fri +1 day' 2>&1
+TZ=UTC date -d '@1793000000 fri' +%F
+TZ=America/New_York date -d @100000000 +'%F %T %Z %z'
+TZ=Asia/Kolkata date -d @-900000000 +'%F %T %Z %z'
+TZ=Europe/Moscow date -d @1300000000 +'%F %T %Z %z'
+TZ=Europe/Paris date -d '1990-07-01 12:00' +%s
+TZ=Europe/Amsterdam date -d '1930-07-01 12:00' +'%T %Z %z'
+TZ=Asia/Gaza date -d @2100000000 +'%F %T %Z %z'
+TZ=America/Sao_Paulo date -d @1500000000 +'%F %T %Z %z'
+TZ=America/New_York date -d '2026-03-08' '+%s %Z'
+TZ=Asia/Kolkata date -d '2026-10-20T12:34:56Z' '+%F %T %Z'
+TZ=Australia/Lord_Howe date -d '1999-12-31 23:59:59' +%s
+true; echo $?
+false; echo $?
+env -i A=1 env
+printenv HOME >/dev/null; echo $?
+mkdir -p x/y/z && ls -R x
+touch t1 && test -f t1 && rm t1 && echo gone
+cp d/a c1 && cat c1 && rm c1
+cp -r tree t2 && ls -R t2 && rm -r t2
+mkdir m && mv m m2 && ls -d m2 && rmdir m2
+ln -s d/a sl && readlink sl && rm sl
+chmod 640 d/v1 && stat -c %a d/v1
+chmod u+x,g-r d/v1 && stat -c %a d/v1
+chmod a=r d/v1 && stat -c %a d/v1
+rm nonexistent; echo $?
+rm -f nonexistent; echo $?
+rmdir d/sub; ls d/sub
+echo a b c | xargs -n 1 echo x
+printf '1\n2\n' | xargs echo
+cmp d/v1 d/v2; echo $?
+yes | head -n 3
+seq 100000 | head -n 2
+yes abc | head -c 10
+seq 50000 | tail -n 2
+yes | tr y n | head -n 2
+seq 1000 | wc
+# grep (BRE, ERE, fixed strings, options)
+grep o d/lines
+grep -n 'e$' d/lines
+grep -c e d/lines
+grep -v e d/lines
+grep -i BANANA d/fruit
+grep -E '^(one|t[a-z]+)$' d/lines
+grep -E 'e{2}|x' d/lines
+grep '^t\(w\|h\)' d/lines
+grep 'e\{2\}' d/lines
+grep -o 'e[a-z]' d/lines
+grep -ob 'n' d/lines
+grep -w on d/lines; echo $?
+grep -x 'two' d/lines
+grep -F '.' d/fruit; echo $?
+grep -F -e one -e six d/lines
+grep -l e d/lines d/fruit d/colon
+grep -L e d/lines d/fruit d/colon
+grep -h one d/lines d/v1
+grep -H one d/lines
+grep -m 2 e d/lines
+grep -n -A 1 four d/lines
+grep -n -B 2 six d/lines
+grep -C 1 -e two -e nine d/lines
+grep -c x d/lines d/w
+grep -q seven d/lines; echo $?
+grep nope d/lines; echo $?
+grep x nofile; echo $?
+grep -s x nofile; echo $?
+grep a d; echo $?
+grep -r v1 d | sort
+grep -rl hello d
+grep -E '[[:digit:]]+ [[:upper:]]' d/fruit
+grep 'k[0-9]:\(v[0-9]\):' d/colon
+grep -E '(.)\1' d/lines
+grep -e '' -c d/lines
+grep -E 'a|' -c d/fruit
+grep '\<t' d/lines
+grep 'n\>' d/lines
+grep -E '\bf' d/fruit
+grep -iw 'APPLE' d/fruit
+grep -z b d/nul | od -c
+grep a d/nul; echo $?
+printf 'x\ny\n' | grep -v x
+printf 'ab\ncd\n' | grep -e a -e d
+printf 'aaa\n' | grep -o 'a*'
+printf 'foo-bar foo_bar\n' | grep -ow foo
+printf 'abcabc\n' | grep -oE '(abc){2}'
+egrep 'one|two' d/lines
+fgrep 'x y' d/w
+grep -E '*a' d/fruit
+grep '[' d/fruit; echo $?
+grep -E 'a{1,2' d/fruit; echo $?
+grep -E 'a{2,1}' d/fruit; echo $?
+expr abc : 'a\(.*\)c'
+expr abcd : '.*'
+expr abc : 'x\(.\)'; echo $?
+expr aaa : 'a*'
+expr match hello 'h.l'
+# sed
+sed 's/o/0/' d/lines
+sed 's/e/E/g' d/lines
+sed 's/e/E/2' d/lines
+sed -n 's/e/E/gp' d/lines
+sed -n '3p' d/lines
+sed -n '$p' d/lines
+sed -n '2,4p' d/lines
+sed -n '/four/,/six/p' d/lines
+sed -n '/two/,+2p' d/lines
+sed -n '0,/e/p' d/lines
+sed -n '1~3p' d/lines
+sed -n '2,~4p' d/lines
+sed '3,$d' d/lines
+sed '/e/!d' d/lines
+sed '2q' d/lines
+sed '2Q' d/lines; echo $?
+sed '3q5' d/lines; echo $?
+sed -n '/t/{s/t/T/;p}' d/lines
+sed '1!G;h;$!d' d/v1
+sed -n '$=' d/lines
+sed = d/v1
+sed 'N;s/\n/+/' d/lines
+sed '$!N;P;D' d/v1
+sed ':a;N;$!ba;s/\n/,/g' d/lines
+sed 'y/abc/xyz/' d/fruit
+sed -E 's/([a-z]+) ([a-z]+)/\2 \1/' d/fruit
+sed 's/\([0-9]*\) \(.*\)/[\2:\1]/' d/fruit
+sed 's/[aeiou]/\U&/g' d/fruit
+sed -E 's/(\w)(\w*)/\u\1\L\2/g' d/fruit
+sed 's/a*/x/g' d/fruit
+sed 's|/|:|g' d/colon
+sed -e 's/k/K/' -e 's/v/V/' d/colon
+sed '2i\
+inserted' d/v1
+sed '2a appended' d/v1
+sed '$a\
+end' d/v1
+sed '2c\
+changed' d/v1
+sed '1,2c X' d/v1
+sed 'n;d' d/lines
+sed -n 'h;n;G;p' d/v2
+sed -n l d/w
+sed -n 'l 10' d/lines
+sed s/x/y/ d/nonl | od -c
+sed p d/nonl
+sed -s -n '$p' d/v1 d/v2
+sed -n '$p' d/v1 d/v2
+sed '/one/r d/a' d/v1
+sed 's/o/0/w out.txt' d/v1 >/dev/null; cat out.txt
+sed -n '/^t/w out2' d/lines; cat out2
+cp d/v1 ed1 && sed -i 's/one/ONE/' ed1 && cat ed1
+cp d/v1 ed2 && sed -i.bak 's/two/2/' ed2 && cat ed2 ed2.bak
+sed -n '/one/{n;p}' d/lines
+sed 's/x/y/;tdone;s/$/!/;:done' d/w
+sed -E 's/(a|b)+/<&>/' d/fruit
+sed 's/e/\n/' d/v1
+sed -z 's/\n/,/g' d/v1
+sed --expression=s/one/1/ d/v1
+echo hello | sed 's/l/L/3'
+echo abc | sed 'y/abc/\n\t\\/' | od -c
+echo 'a.b.c' | sed 's/\./-/2g'
+echo aaa | sed 's/a/b/2g'
+echo hello world | sed 's/\(hello\) \(world\)/\2 \1/'
+echo path/to/file | sed 's#/#\\#g'
+echo x | sed -n '/x/{p;p}'
+echo x | sed '/x/ { s/x/y/ ; }'
+printf '1\n2\n3\n' | sed -n '2{p;q}'
+printf 'a\nb\n' | sed '$!{N};P;D'
+echo abc | sed 's/b*/X/2'
+sed 's/a/b' d/v1; echo $?
+sed 'k' d/v1; echo $?
+sed '/x' d/v1; echo $?
+sed 'b nowhere' d/v1; echo $?
+sed nofile-script nonexist; echo $?
+cp d/v2 ed3 && chmod 600 ed3 && sed -i.orig 's/2/two/' ed3 && stat -c %a ed3 ed3.orig && cat ed3
+# find
+find tree
+find tree -type d
+find tree -type f
+find d -name '*1' | sort
+find d -iname 'V*' | sort
+find d -type l | sort
+find d -xtype l
+find d -path 'd/s*' | sort
+find . -path ./d -prune -o -name f -print
+find d -maxdepth 0
+find tree -mindepth 2
+find tree -maxdepth 1
+find tree -depth
+find d -empty | sort
+find d -size 0 | sort
+find d -size +1c -size -12c | sort
+find d -size -1k -type f | sort
+find d -perm 644 -type f | sort
+find d -perm -u=r -name 'v*' | sort
+find d -perm /o=w | sort
+find d -newer d/a | sort
+find d ! -newer d/a -type f | sort
+find d -mtime +1000 -type f | sort
+find d -mtime -1 | sort
+find d -mmin -5 -type d | sort
+find d -name a -o -name s | sort
+find d \( -name a -o -name s \) -print | sort
+find d -not -type d -name '[av]*' | sort
+find tree -printf '%p %f %h %d %y\n'
+find tree -printf '%P|%-6f|%5d|\n'
+find d/a -printf '%s %m %M %TY-%Tm-%Td %TH:%TM\n'
+find tree -print0 | od -c
+find tree -name f -exec echo found {} \;
+find tree -type d -exec echo dirs {} +
+find tree -name f -execdir pwd \; | sed "s#.*/##"
+find tree -name b -quit -print
+find tree -regex '.*/a/b'
+find tree -regextype posix-extended -regex 'tree(/a)+'
+find tree -iregex 'TREE/A'
+find d -links 1 -type f -name 'v*' | sort
+find d -lname 'mis*'
+find nonexistent; echo $?
+find tree -frobnicate; echo $?
+find tree -type q; echo $?
+find tree -name; echo $?
+find tree d/a -maxdepth 0
+find d/ -maxdepth 1 -name 'a*' | sort
+mkdir -p del/x/y && touch del/x/y/z && find del -delete && ls del; echo $?
+find tree -name 'f' -printf 'yes\n' , -name 'b' -printf 'b\n'
+find tree -samefile tree/a/b/f
+find tree -type d -empty
+find -maxdepth 1 -name 'd'
+find tree -user "$(id -un)" -name f
+find tree -uid "$(id -u)" -name f
+# awk
+awk '{print $2}' d/fruit
+awk '{print NR": "$0}' d/lines
+awk 'NR==3' d/lines
+awk 'NR>=2 && NR<=4 {print}' d/lines
+awk '/e$/' d/lines
+awk '!/e/' d/lines
+awk '/two/,/four/' d/lines
+awk -F: '{print $1, $3}' d/colon
+awk -F: -v OFS=- '{$1=$1; print}' d/colon
+awk 'BEGIN{FS=":"} {print NF}' d/colon
+awk '{s += $1} END {print s, s/NR}' d/fruit
+awk '{print length($0)}' d/lines
+awk 'length > 4' d/lines
+awk '{print toupper(substr($0,1,1)) substr($0,2)}' d/lines
+awk '{n[$1 % 2]++} END {print n[0], n[1]}' d/fruit
+awk '{a[NR]=$0} END {for (i=NR; i>0; i--) print a[i]}' d/v1
+awk 'BEGIN{for(i=1;i<=5;i++) printf "%d ", i*i; print ""}'
+awk 'BEGIN{x=1; while (x<100) x*=3; print x}'
+awk 'BEGIN{do {i++} while (i<3); print i}'
+awk 'BEGIN{printf "%s|%5s|%-5s|%.2s\n", "a","b","c","def"}'
+awk 'BEGIN{printf "%d %o %x %X %e %f %g %c\n", 42.9, 8, 255, 255, 1234.5, 3.14159, 0.000012, 65}'
+awk 'BEGIN{print 1==1.0, "a"<"b", 2<10, "2"<"10", "abc" ~ /b/, "abc" !~ /^b/}'
+awk '{print ($1 > 2) ? "big" : "small"}' d/fruit
+awk '$1 > 2' d/fruit
+awk '$2 ~ /^[A-Z]/' d/fruit
+awk 'BEGIN{s="hello world"; gsub(/o/,"0",s); print s; n=sub(/l+/,"L",s); print n, s}'
+awk '{gsub(/[aeiou]/,"<&>"); print}' d/fruit
+awk 'BEGIN{print index("foobar","bar"), match("aXbXXc",/X+/), RSTART, RLENGTH}'
+awk 'BEGIN{n=split("a,b,,c",p,","); for(i=1;i<=n;i++) printf "[%s]", p[i]; print ""}'
+awk 'BEGIN{n=split("  a  b  ",p); print n, p[1], p[2]}'
+awk 'BEGIN{n=split("a1b22c",p,/[0-9]+/); print n, p[1], p[3]}'
+awk 'BEGIN{print substr("hello",2,3), substr("hello",0), substr("hello",-1,3), substr("hello",4,100)}'
+awk 'BEGIN{print int(3.9), int(-3.9), 7%3, -7%3, 2^10, 2**3**2}'
+awk 'BEGIN{print 1/3, 100/3, 1e6, 1e7, 123456789, 0.1+0.2, 3.0}'
+awk 'BEGIN{OFMT="%.2f"; print 3.14159; x=3.14159; print x ""}'
+awk 'BEGIN{CONVFMT="%.3f"; x=3.14159; print (x "")}'
+awk 'BEGIN{a["x"]=1; a["y"]=2; delete a["x"]; print ("x" in a), ("y" in a), length(a)}'
+awk 'BEGIN{a[1,2]=3; for (k in a) {split(k, p, SUBSEP); print p[1], p[2], a[k]}}'
+awk 'BEGIN{if ((1,2) in b) print "no"; b[1,2]; if ((1,2) in b) print "yes"}'
+awk 'function f(x) { return x*2 } {print f($1)}' d/fruit
+awk 'function fact(n) { return n<=1 ? 1 : n*fact(n-1) } BEGIN{print fact(10)}'
+awk 'function fill(arr, n) { for (i=1;i<=n;i++) arr[i]=i*i } BEGIN{fill(sq, 4); print sq[3], length(sq)}'
+awk 'function loc(a,   i) { i = a + 1; return i } BEGIN{i=5; print loc(1), i}'
+awk '{ $3 = "X"; print; print NF }' d/fruit
+awk '{ NF = 1; print }' d/fruit
+awk 'BEGIN{ $0 = "a b c"; print NF, $2; $5="e"; print; print NF }'
+awk 'NR==1{next} {print}' d/v1
+awk 'FNR==1{print FILENAME}' d/v1 d/v2
+awk 'END{print NR, $0}' d/lines
+awk 'BEGIN{while ((getline line < "d/v1") > 0) n++; print n, line}'
+awk 'BEGIN{"echo hi there" | getline x; print x; close("echo hi there")}'
+awk 'BEGIN{while (("cat d/v2" | getline) > 0) print NF, $0}'
+awk '{getline; print}' d/lines
+awk 'NR==2{getline x; print "got", x} END{print NR}' d/v2
+awk '{print > "out-" NR ".txt"} END{close("out-1.txt"); while ((getline l < "out-1.txt") > 0) print "f:", l}' d/v1
+awk '{print | "sort -r"}' d/v1
+awk 'BEGIN{printf "a\tb\\n\n"; print "q\"q"}'
+awk 'BEGIN{print length("héllo")}'
+awk 'BEGIN{x; print x+0, x "", (x == 0), (x == "")}'
+awk 'BEGIN{print -2^2, 2^-1, !0, !1, -"3"}'
+awk 'BEGIN{a="10"; b=9; print (a > b)}'
+echo "10 9" | awk '{print ($1 > $2)}'
+echo "abc 2" | awk '{print ($1 > $2)}'
+awk 'BEGIN{print 1 " " 2, 1 2+3, 2 -1}'
+awk -v x=5 -v 's=a\tb' 'BEGIN{print x*2, s}'
+awk '{print x, $1}' x=1 d/v1 x=2 d/v2
+awk 'BEGIN{exit 3} END{print "end"}'; echo $?
+awk '{exit} END{print "end", NR}' d/lines
+awk 'BEGIN{RS=""}{print NR": "$1"|"$NF}' d/lines
+printf 'a b\n\n\nc d\ne\n' | awk 'BEGIN{RS=""}{print NR, NF}'
+printf 'a;b;c' | awk 'BEGIN{RS=";"}{print NR, $0}'
+printf 'a1b22c' | awk 'BEGIN{RS="[0-9]+"}{print $0, RT}'
+awk 'BEGIN{printf "%5.1f%%\n", 45.678}'
+awk 'BEGIN{printf "%*d|%-*s|\n", 5, 42, 4, "ab"}'
+awk 'BEGIN{print substr("abcdef", 3); print tolower("ABC") toupper("def")}'
+awk 'BEGIN { s = sprintf("%03d-%s", 7, "x"); print s, length(s) }'
+awk 'BEGIN{print gensub(/(a)(b)/, "\\2\\1", "g", "abab"), gensub(/o/, "0", 2, "foo boo")}'
+awk 'BEGIN{match("foo=bar", /(\w+)=(\w+)/, m); print m[1], m[2], m[2,"start"]}'
+awk '{ for (i = NF; i > 0; i--) printf "%s%s", $i, (i > 1 ? OFS : ORS) }' d/fruit
+awk 'BEGIN { while (i++ < 5) { if (i == 2) continue; if (i == 4) break; print i } }'
+awk '/one/ { print "first" } /one/ { print "second" }' d/v1
+awk 'BEGIN { getline; print "read:", $0 } { print }' d/v1
+awk '{ $0 = toupper($0); print $1 }' d/v1
+awk -F'\t' '{print NF}' d/w
+awk -F '[ :]+' '{print $2}' d/colon
+awk 'BEGIN{FS=""} {print NF, $2}' d/v1
+awk 'BEGIN { print length() }' < d/a
+awk '{ print NR % 2 ? "odd" : "even", $0 }' d/v1
+awk 'BEGIN { x["a"]; if ("a" in x) print "in"; for (k in x) print k }'
+awk 'BEGIN { printf("%s %s\n", "paren", "printf") }'
+awk 'BEGIN { print("paren", "print") > "/dev/stdout" }'
+awk 'BEGIN { print 1; print 2 > "/dev/stderr" }' 2>&1
+awk 'BEGIN { system("echo from system"); print "after" }'
+awk 'BEGIN { r = system("exit 3"); print r }'
+awk 'BEGIN { print length(12345), length(1/4) }'
+awk 'BEGIN { print 0x10, 011, 1e3 }'
+awk 'BEGIN { s = "a.b.c"; n = gsub(/\./, "-", s); print n, s }'
+awk 'BEGIN { s = "aaa"; gsub(/x*/, "-", s); print s }'
+awk 'BEGIN { s = "hello"; gsub(/l/, "\\&", s); print s }'
+awk '{ printf "%-10s|%5d\n", $2, $1 }' d/fruit
+awk 'BEGIN { split("3 1 2", a); n = 0; for (k in a) n += a[k]; print n }'
+awk 'BEGIN { srand(1); r = rand(); print (r >= 0 && r < 1) }'
+awk '{ sum[$1 > 2] += $1 } END { print sum[0], sum[1] }' d/fruit
+awk 'NF' d/w
+awk 'BEGIN { a = "x"; a = a a a; print a }'
+awk 'BEGIN{print 1>2}'; cat 2 && rm 2
+awk 'BEGIN { print substr("hello", 2) > "sub.txt" } END { }' && cat sub.txt
+awk '{print $NF}' d/colon d/fruit
+awk '{print $(NF-1)}' d/fruit
+awk 'BEGIN{x = 5; x += 3; x -= 1; x *= 2; x /= 7; x %= 3; x ^= 3; print x}'
+awk 'BEGIN{i = 5; print i++ + ++i, i--, --i, i}'
+awk '{ lines[NR] = $0 } END { print lines[2] lines[1] }' d/v1
+sha512sum d/a d/lines
+printf '' | sha512sum
+gzip -dc lines.gz
+gunzip -c lines.gz fruit.gz
+zcat fruit.gz
+gzip -c d/lines | gzip -dc | cmp - d/lines && echo same
+gzip -9c d/lines | gunzip | wc -l
+cp d/lines gz1 && gzip gz1 && ls gz1* && gunzip gz1.gz && ls gz1* && head -2 gz1
+cp d/a gz2 && gzip -k gz2 && ls gz2* && gzip -dc gz2.gz
+gzip -d d/a; echo $?
+tar tf host.tar
+tar -tvf host.tar
+tar tzf host.tgz
+tar tf host.tar d/a tree
+tar xOf host.tar d/lines | head -3
+tar -xzf host.tgz -O d/fruit
+mkdir o && tar xf host.tar -C o && ls -R o && cat o/d/a && readlink o/d/link
+mkdir o && tar -x -f host.tgz -C o tree && find o | sort
+tar cf - d tree | tar tf - | sort
+tar czf t.tgz tree d/a && tar tzf t.tgz | sort
+tar cf t.tar d && mkdir o && tar xf t.tar -C o && cmp d/lines o/d/lines && echo same
+tar tf host.tbz && tar tf host.txz | wc -l && tar --zstd -tf host.tzst | head -2
+tar xOf host.txz d/a; tar xjOf host.tbz d/s | head -2
+tar xf host.tar nosuch; echo $?
+tar cf u.tar nosuch d/a; echo $?; tar tf u.tar
+cp host.tar r.tar && tar rf r.tar d/v1 && tar tf r.tar | tail -2
+cp host.tar dl.tar && tar --delete -f dl.tar d/lines d/fruit && tar tf dl.tar | sort
+tar cf e.tar --exclude='sub' --exclude='*s' --exclude=tree/a/b d tree && tar tf e.tar | sort
+mkdir st && tar xf host.tar -C st --strip-components=1 && find st | sort
+for c in z j J; do tar c${c}f c.$c d/a d/s && tar tf c.$c; done
+tar --zstd -cf c.zst d/a && tar tf c.zst && tar caf auto.tar.xz d/a && xz -t auto.tar.xz && tar tf auto.tar.xz
+tar cf a1.tar d/a && tar cf a2.tar d/s && tar Af a1.tar a2.tar && tar tf a1.tar
+printf 'd/a\nd/s\n' > list && tar cf l.tar -T list && tar tf l.tar
+tar cf m.tar -C tree a d/a && tar tf m.tar
+mkdir k && tar xf host.tar -C k d/a && tar xkf host.tar -C k d/a; echo $?
+tar cf o.tar --owner=root:0 --group=root:0 --mtime='2021-01-01 UTC' d/a && tar tvf o.tar
+tar cvf v.tar d/a d/s && tar xvf v.tar -C k 2>&1 | sort
+tar cf - d/a | tar tvf - | cut -c1-10
+cp host.tar up.tar && touch -d '2030-01-01' d/s && tar uf up.tar d/s d/a && tar tf up.tar | tail -1
+tar; echo $?
+mkdir gz3 && gzip gz3; echo $?
+gzip -l lines.gz fruit.gz
+gzip -t lines.gz; echo $?; printf 'not gzip' > bad.gz; gzip -t bad.gz; echo $?
+cp d/lines gz4 && gzip -S .zz gz4 && ls gz4* && gzip -d -S .zz gz4.zz && cat gz4 | head -1
+cp d/a gz5 && gzip -9 gz5 && gzip -d < gz5.gz
+mkdir -p gzr/s && cp d/a d/s gzr/s && gzip -r gzr && find gzr | sort && gunzip -r gzr && find gzr | sort
+cp lines.gz l2.gz && gunzip -c l2.gz l2.gz | wc -l
+gzip -c d/lines | gzip -c | gzip -dc | gzip -dc | cmp - d/lines && echo twice
+cat lines.gz fruit.gz | gunzip
+bzip2 -dc lines.bz2
+bzcat lines.bz2 lines.bz2 | wc -l
+bzip2 -c d/lines | bzip2 -dc | cmp - d/lines && echo same
+bzip2 -1 -c d/bin | bunzip2 | od -c | head -2
+cp d/lines bz1 && bzip2 bz1 && ls bz1* && bunzip2 bz1.bz2 && ls bz1* && head -2 bz1
+cp d/a bz2k && bzip2 -k bz2k && ls bz2k* && bzip2 -dc bz2k.bz2
+bzip2 -t lines.bz2; echo $?; printf junk > j.bz2; bzip2 -t j.bz2; echo $?; bzip2 -d j.bz2; echo $?
+cp lines.bz2 plainbz && bzip2 -d plainbz; echo $?; ls plainbz*
+bzip2 -d nosuch.bz2; echo $?
+mkdir bzd && bzip2 bzd; echo $?
+cp d/a bz3 && touch bz3.bz2 && bzip2 bz3; echo $?
+cp d/a bz4 && bzip2 bz4 && bzip2 bz4.bz2; echo $?
+bzip2 -dc < lines.bz2 | head -2; printf junk | bzip2 -dc; echo $?
+cat lines.bz2 lines.bz2 | bunzip2 | wc -l
+xz -dc lines.xz
+xzcat lines.xz fruit.xz
+unxz -c lines.lzma | head -3
+xz --format=lzma -dc lines.lzma | wc -l
+xz -c d/lines | xz -dc | cmp - d/lines && echo same
+xz -0 -c d/bin | unxz | od -c | head -2
+xz --format=lzma -c d/lines | xz -dc --format=lzma | cmp - d/lines && echo same-lzma
+xz -C sha256 -c d/fruit | xz -dc
+cp d/lines xz1 && xz xz1 && ls xz1* && unxz xz1.xz && ls xz1* && head -2 xz1
+cp d/a xz2 && xz -k xz2 && ls xz2* && xz -dc xz2.xz
+xz -t lines.xz; echo $?; printf junk > j.xz; xz -t j.xz; echo $?; xz -d j.xz; echo $?
+cp d/a noext && xz -d noext; echo $?
+cp lines.xz plainxz && xz -d plainxz; echo $?
+xz -d nosuch.xz; echo $?
+mkdir xzd && xz xzd; echo $?
+cp d/a xz3 && touch xz3.xz && xz xz3; echo $?
+cp d/a xz4 && xz xz4 && xz xz4.xz; echo $?
+printf junk | xz -dc; echo $?
+cat lines.xz fruit.xz | unxz
+xz -l lines.xz fruit.xz
+xz -F lzma -c d/lines | xz -dc | head -1
+zstd -dc lines.zst
+zstdcat lines.zst fruit.zst
+unzstd -c fruit.zst | head -2
+zstd -q -c d/lines | zstd -dc | cmp - d/lines && echo same
+zstd -q -19 -c d/bin | unzstd | od -c | head -2
+cp d/lines zs1 && zstd -q zs1 && ls zs1* && rm zs1 && zstd -q -d zs1.zst && ls zs1* && head -2 zs1
+cp d/a zs2 && zstd -q --rm zs2 && ls zs2* && zstd -dc zs2.zst
+zstd -q -c d/a -o zs3.zst; zstd -q d/a -o zs4.zst && zstd -dc zs4.zst
+zstd -t lines.zst; echo $?; printf junk > j.zst; zstd -t j.zst; echo $?; zstd -d j.zst; echo $?
+cp d/a noext2 && zstd -d noext2; echo $?
+zstd -dc nosuch.zst; echo $?
+mkdir zsd && zstd zsd; echo $?
+printf junk | zstd -dc; echo $?
+cat lines.zst fruit.zst | unzstd
+zstd -l lines.zst
+zstd -q -c d/lines | zstd -l
+# M21 phase 1: od, base64/base32, the sha family, split, join, install
+od d/bin
+od -c d/bin
+od -t x1 d/bin
+od -A x -t x2z d/bin
+od -t d1 -t u4 -t o8 d/bin
+od -An -tx4 -w8 d/bin
+od -c d/zeros
+od -v -c d/zeros
+od -t a d/bin
+od -A d -j 3 -N 5 -t c d/bin
+od -t x1 -t o2 d/bin
+od -t x2 -t o8 -N16 d/bin
+od -t c -t x1z d/bin
+od -t x2 -N 3 d/bin
+od -t f4 -N 16 d/bin
+od -t f8 -N 16 d/bin
+od -s -N 8 d/bin
+od -b d/a
+od -x d/a
+od -tx1 -tc -w1 d/a
+od -t x1 /dev/null
+od -t x1 -j 100 d/a; echo $?
+od nope; echo $?
+od -N 2 -t c - < d/bin
+od -t x1 d/a d/nonl
+base64 d/bin
+base64 -w 20 d/zeros
+base64 -w 0 d/lines
+base64 < /dev/null
+base64 d/bin | base64 -d | cmp - d/bin && echo same
+printf 'aGVs*bG8=' | base64 -d; echo " $?"
+printf 'aGVs*bG8=' | base64 -di; echo " $?"
+printf 'aGVsbG8' | base64 -d; echo " $?"
+printf 'aGVsbG8=aGk=' | base64 -d; echo
+base32 d/lines
+base32 d/lines | base32 -d
+base64 nope; echo $?
+sha1sum d/a d/lines
+sha224sum d/a
+sha384sum d/lines
+sha512sum --tag d/a
+sha256sum --tag d/a > d/a.tag && sha256sum -c d/a.tag
+# b2sum, cksum's algorithms and sum (ADR 0148).
+b2sum d/a d/nonl; b2sum -l 128 d/a; b2sum --tag -l 256 d/lines; b2sum -l 0 d/a
+b2sum -l 7 d/a; echo $?; b2sum -l 520 d/a; echo $?
+b2sum d/a d/lines > d/a.b2 && b2sum -c d/a.b2
+b2sum -l 128 d/a > d/a.b2s && b2sum -c d/a.b2s
+cksum d/a d/nonl d/lines; cksum < d/lines; cksum /dev/null
+for a in sysv bsd crc crc32b md5 sha1 sha224 sha256 sha384 sha512 blake2b sm3; do cksum -a $a d/lines; done
+cksum -a sm3 < d/a; cksum -a sha256 --untagged d/a; cksum -a sha512 --base64 d/a d/nonl
+cksum -a blake2b -l 256 d/a; cksum -l 256 d/a; echo $?; cksum -a md5 --raw d/a | od -An -tx1
+cksum -a crc32b --raw d/a | od -An -tx1; cksum -a bsd --raw d/a | od -An -tx1
+cksum -a sha1 d/a d/lines > d/a.ck && cksum -c d/a.ck; cksum -a sha256 --base64 d/a > d/a.ck64 && cksum -c d/a.ck64
+cksum -a nope d/a; echo $?
+for l in 224 256 384 512; do cksum -a sha2 -l $l d/lines; cksum -a sha3 -l $l d/lines; done
+cksum -a sha3 d/a; echo $?; cksum -a sha2 -l 100 d/a; echo $?; printf '' | cksum -a sha3 -l 256
+cksum -a sha3 -l 384 d/a d/lines > d/a.c3 && cksum -c d/a.c3; cksum -a sha2 -l 256 --untagged d/a
+seq 1 5000 | cksum -a crc32b; seq 1 100000 | cksum; seq 1 100000 | sum; seq 1 100000 | sum -s
+sum d/a d/lines; sum -s d/a d/lines; sum < d/a; sum -r d/nonl
+for e in base64 base64url base32 base32hex base16 base2msbf base2lsbf; do basenc --$e d/lines; basenc --$e d/lines | basenc --$e -d | cmp - d/lines && echo same; done
+printf 'hello wo' | basenc --z85; printf 'hello wo' | basenc --z85 | basenc --z85 -d; printf 'abc' | basenc --z85; echo $?
+printf '\373\377' | basenc --base64url; printf 'aGVsbG8' | basenc --base64 -d; printf '68656c' | basenc --base16 -d
+printf '686' | basenc --base16 -d; echo " $?"; printf 'x$y' | basenc --base64 -d -i; echo " $?"; basenc d/a; echo $?
+seq 30 | basenc --base32 -w 20; printf 'abc' | basenc --base64url -w 0; echo; printf '0110100001101001' | basenc --base2msbf -d
+printf '01101000 01101001' | basenc --base2msbf -d -i; printf 'nO1g?' | basenc --z85 -d | od -An -tx1
+sha1sum d/a > d/a.sha1 && echo bad >> d/a && sha1sum -c d/a.sha1; echo $?
+mkdir sp1 && cd sp1 && seq 700 | split -l 1 && ls | sed -n '1p;650,652p;$p' && ls | wc -l
+mkdir sp2 && cd sp2 && seq 120 | split -d -l 1 && ls | sed -n '89,92p;$p'
+mkdir sp3 && cd sp3 && seq 10 | split -a 1 -l 1 - p && ls
+mkdir sp4 && cd sp4 && seq 30 | split -a1 -l 1; echo $?; ls | wc -l
+mkdir sp5 && cd sp5 && printf '%022d' 0 | split -n 3 - q && wc -c q*
+# split -t and --filter (ADR 0148).
+mkdir sp6 && cd sp6 && seq 10 | split -l 4 --filter='echo "$FILE: $(wc -l)"'; ls | wc -l
+mkdir sp7 && cd sp7 && printf 'a;b;c;d;e' | split -t ';' -l 2 && for f in x*; do printf '%s=[%s] ' $f "$(cat $f)"; done; echo
+mkdir sp8 && cd sp8 && printf 'a\0b\0c\0' | split -t '\0' -l 2 && od -c xaa
+printf 'a;b' | split -t ';;' -l 1; echo $?; printf 'a' | split -t '' -l 1; echo $?
+mkdir sp9 && cd sp9 && seq 5 | split -n 2 --filter='cat > $FILE.f' && ls
+mkdir sp10 && cd sp10 && seq 5 | split -l 2 --filter='exit 3'; echo st=$?
+mkdir sp11 && cd sp11 && seq 20000 | split -l 2000 --filter='head -1 >/dev/null'; echo st=$?
+mkdir sp12 && cd sp12 && printf 'a;bb;ccc;dddd;' | split -C 5 -t ';' && for f in x*; do printf '%s=[%s] ' $f "$(cat $f)"; done; echo
+mkdir sp13 && cd sp13 && printf '1;2;3;4;5;' | split -n r/2 -t ';' && cat xaa; echo
+# od: --endian, long doubles, the older offset and label operands (ADR 0148).
+od --endian=big -tx2 d/e16; od --endian=little -tx4 d/e16; od --endian=big -tu8 -td2 -tx1 d/e16
+od --endian=big -tf4 d/e16; od --endian=middle d/e16; echo $?
+od -tfL d/ld; od -tf16 -tx1 d/ld | head -4; od --endian=big -tfL d/ld | head -3; od -tfLz d/ld | head -2
+od -tf10 d/ld; echo $?; od -An -tfL -w32 d/ld | head -2
+od -c d/lines +10; od -c d/lines +10.; od -c d/lines +1b; echo $?; od d/lines 10; od d/lines 19
+od --traditional -c d/lines 10 20; od --traditional -c d/lines 1; od -c +5 < d/lines; od -c - +1 < d/lines
+od --traditional -tx1 4 10 < d/lines; od -An -c d/lines +0x10 2>&1 | head -2; od -Ad --traditional -c d/lines 7. 100.
+mkdir sp6 && cd sp6 && seq 100 | split -n l/7 - r && wc -l r*
+mkdir sp7 && cd sp7 && seq 10 | split -n r/3 - s && head s*
+mkdir sp8 && cd sp8 && split -b 7 --additional-suffix=.txt ../d/lines t && ls && cat tab.txt
+mkdir sp9 && cd sp9 && split --verbose -l 4 ../d/lines u
+mkdir sp10 && cd sp10 && printf 'aaaaaaaaaaaaaaaaaaaa\nb\nc\n' | split -C 5 && wc -c x*
+mkdir sp11 && cd sp11 && printf 'aaaaaaaaaaaaaaaaaaaa\nb\nc\n' | split -n l/3 && wc -c x*
+split -n 2/3 d/lines
+split -n l/2/3 d/lines
+mkdir sp12 && cd sp12 && printf abc | split -n 5 -e && wc -c x*
+mkdir sp13 && cd sp13 && split -x -l 3 ../d/lines z && ls
+mkdir sp14 && cd sp14 && split -l 3 --numeric-suffixes=5 ../d/lines n && ls
+mkdir sp15 && cd sp15 && split -3 ../d/lines && ls
+mkdir sp16 && cd sp16 && : | split && ls | wc -l
+split nope; echo $?
+join d/j1 d/j2
+join -a1 d/j1 d/j2
+join -v2 d/j1 d/j2
+join -a1 -a2 -e NA -o auto d/j1 d/j2
+join -o 1.2,2.2,0 d/j1 d/j2
+join -e X -o 1.1,2.3 d/j1 d/j2
+join -t: d/colon d/colon
+join -t: -o 2.2,1.3 d/colon d/colon
+join -j 2 d/j1 d/j1
+join d/unsorted d/j1; echo $?
+join --nocheck-order d/unsorted d/j1; echo $?
+join --check-order d/unsorted d/j1; echo $?
+printf 'A 1\nb 2\n' > i1 && printf 'a x\nB y\n' > i2 && join -i i1 i2
+printf 'H h1\na 1\n' > h1 && printf 'H h2\na 2\n' > h2 && join --header h1 h2
+join d/j1 nope; echo $?
+mkdir in1 && cd in1 && install -v ../d/a b && stat -c %a b
+mkdir in2 && cd in2 && install -m 644 ../d/a c && stat -c %a c
+mkdir in3 && cd in3 && install -d -v x/y/z && install -D -v ../d/a p/q/r && install -v -t x ../d/a ../d/lines && ls -R
+mkdir in4 && cd in4 && install ../d/a b && install -C -v ../d/a b && install -C -v -m 600 ../d/a b && stat -c %a b
+mkdir in5 && cd in5 && install ../d/a nodir/f; echo $?
+mkdir in6 && cd in6 && install -d; echo $?
+mkdir in7 && cd in7 && install ../d/a; echo $?
+mkdir in8 && cd in8 && install -m u=rw,go=r ../d/a f && stat -c %a f
+mkdir in9 && cd in9 && mkdir dd && install ../d/a dd && ls dd && install -T ../d/a dd; echo $?
+mkdir in10 && cd in10 && install -dm 700 m && stat -c %a m
+mkdir in11 && cd in11 && install -b ../d/a b && install -b ../d/a b && ls
+mkdir in12 && cd in12 && install ../d b; echo $?
+mkdir in13 && cd in13 && install --strip-program=nostrip -s ../d/a z; echo $?
+# M21 phase 1: dd, tput, date, stty
+# dd's conversions (ADR 0145): every byte through each table, block
+# and unblock across reads, truncated records, sync with spaces, the
+# order of swab, case and tables, and their conflicts. (awk's %c of
+# 128-255 is one byte in the C locale.)
+awk 'BEGIN { printf "%c%c%c%c", 65, 200, 255, 256 }' | od -An -tx1
+seq 0 255 | awk '{printf "%c", $1}' | dd conv=ascii status=none | od -An -tx1
+seq 0 255 | awk '{printf "%c", $1}' | dd conv=ebcdic status=none | od -An -tx1
+seq 0 255 | awk '{printf "%c", $1}' | dd conv=ibm status=none | od -An -tx1
+printf 'ab\ncdefgh\nij' | dd conv=block cbs=4 2>&1 | grep -v copied | od -An -c
+printf 'a\nbbbbbb\nccccc\n' | dd conv=block cbs=2 ibs=3 2>&1 | grep -v copied | od -An -c
+printf 'ab  cdefx' | dd conv=unblock cbs=4 ibs=3 obs=5 2>&1 | grep -v copied | od -An -c
+printf 'ab\n' | dd conv=block,sync cbs=4 ibs=5 2>/dev/null | od -An -c
+printf 'aB\nxyz\n' | dd conv=ebcdic,ucase cbs=4 2>/dev/null | od -An -tx1
+printf '\201\202@@\203' | dd conv=ascii,ucase cbs=2 2>/dev/null | od -An -c
+printf 'abc' | dd conv=ascii,lcase,swab 2>/dev/null | od -An -tx1
+printf 'ab\ncd\n' | dd conv=block 2>/dev/null | od -An -c
+printf 'ab\n' | dd cbs=4 2>/dev/null | od -An -c
+dd conv=block,unblock cbs=4 </dev/null; echo $?
+dd conv=ascii,ibm </dev/null; echo $?
+dd cbs=0 </dev/null; echo $?
+dd status=default </dev/null; echo $?
+dd if=d/lines of=o1 bs=10 count=3 status=noxfer && cat o1
+dd if=d/lines bs=1K status=noxfer
+dd if=d/lines bs=7 count=2 skip=1 status=none
+dd if=d/lines bs=10 count=1 conv=ucase status=none
+printf abc | dd bs=8 conv=sync status=none | od -c
+printf hello > o4 && printf XY | dd of=o4 seek=1 bs=1 conv=notrunc status=none && cat o4
+dd if=d/lines of=o5 ibs=3 obs=5 count=4 status=noxfer
+dd if=d/lines bs=1x2 count=1 status=none
+dd if=nope; echo $?
+dd bs=0; echo $?
+dd foo=bar; echo $?
+dd if=d/lines iflag=skip_bytes,count_bytes skip=5 count=6 status=none
+dd if=d/lines of=o6 bs=4 count=1 conv=excl status=none && dd if=d/lines of=o6 conv=excl; echo $?
+printf abc | dd conv=lcase,ucase; echo $?
+printf abcd | dd conv=swab status=none
+dd if=/dev/zero bs=100 count=3 2>&1 >/dev/null | head -2
+dd if=d/lines bs=4 count=2 status=none | od -c
+printf '' | dd status=noxfer
+dd if=d/lines seek=2 bs=4 count=1 of=o7 status=none && od -c o7
+for c in clear sgr0 bold smul rmul rev smso el ed civis cnorm sc rc home smcup rmcup dim sitm cuu1 cub1 cuf1 ri bel cr; do tput -T xterm-256color $c | od -An -c; done
+tput -T xterm-256color cup 5 10 | od -An -c
+tput -T xterm-256color setaf 1 | od -An -c
+tput -T xterm-256color setaf 9 | od -An -c
+tput -T xterm-256color setab 200 | od -An -c
+tput -T xterm-256color colors; tput -T xterm colors; tput -T linux colors; tput -T vt100 colors
+tput -T xterm-256color cols; tput -T xterm-256color lines
+COLUMNS=99 tput -T xterm-256color cols
+# The terminfo database (ADR 0144): sgr, E3 and -x, extended
+# capabilities, long names, other terminals, -S.
+tput -T xterm-256color sgr 0 1 0 0 0 1 0 0 0 | od -An -c
+tput -T xterm-256color sgr 1 0 1 1 1 0 1 0 1 | od -An -c
+tput -T linux sgr 0 0 1 0 0 1 0 0 1 | od -An -c
+tput -T xterm-256color -x clear | od -An -c
+tput -x -T linux clear | od -An -c
+tput -T xterm-256color E3 | od -An -c
+tput -T xterm-256color AX; echo $?
+tput -T xterm-256color XM | od -An -c
+tput -T xterm-256color Smulx 3; echo $?
+tput -T xterm-256color longname; echo; tput -T vt220 longname; echo; tput -T tmux-256color longname
+tput -T tmux-256color setaf 3 | od -An -c; tput -T tmux-256color colors
+tput -T rxvt-256color cup 1 2 | od -An -c; tput -T rxvt-256color kf1 | od -An -c
+tput -T vt220 bold | od -An -c; tput -T vt220 setaf 1; echo $?
+tput -T xterm-direct colors; tput -T xterm-direct setaf 16777215 | od -An -c
+printf 'bold\nsgr0\ncols\n' | tput -T xterm-256color -S | od -An -c
+tput -T nosuchterminal bold; echo $?
+tput -T xterm-256color nosuchcap; echo $?
+tput -T xterm-256color nosuch; echo $?
+tput -T nosuchterm clear; echo $?
+tput clear; echo $?
+tput -T xterm-256color longname; echo
+tput -T xterm-256color am; echo $?; tput -T xterm-256color hs; echo $?
+tput -T vt100 setaf 1; echo $?
+tput -T linux clear | od -An -c; tput -T linux civis | od -An -c; tput -T linux kf1 | od -An -c
+tput -T vt100 kbs | od -An -c; tput -T screen flash | od -An -c; tput -T screen smam; echo $?
+tput -T xterm-256color flash | od -An -c
+tput -T xterm-256color cuu 3 | od -An -c
+date -d '2020-01-02 03:04:05'
+date -d '2020-01-02' '+%F %T %a %A %b %B %j %u %w %y %C'
+date -d '2020-01-02T03:04:05Z' +%s
+date -d '2020-01-02T03:04:05+02:00' '+%F %T'
+date -d '1/2/2020' +%F
+date -d '2 Jan 2020' +%F; date -d 'Jan 2, 2020 3pm' '+%F %T'
+date -d 'Thu, 02 Jan 2020 10:00:00 +0000' '+%F %T'
+date -d '02-jan-2020' +%F; date -d 20200102 +%F; date -d 2020/01/02 +%F; date -d 10/22/26 +%F
+date -d @86400; date -d @-1 '+%F %T'; date -d @1.5 '+%T.%N'; date -d @-1.5 '+%F %T.%N'
+date -d '2020-01-31 +1 month' +%F; date -d '2020-01-02 next week' +%F
+date -d '2020-01-02 +3 days 2 hours ago' '+%F %T'
+date -d '2020-01-02 10:00 EST' '+%F %T'; date -d '2020-01-02 10:00 UTC+3' '+%F %T'
+date -d '2020-01-02 3pm' '+%T'; date -d 'oct 22 10:00 2026' '+%F %T'
+date -d '2020-01-02T10:00:00.25' '+%T.%N %3N'
+date -d 'Sun, 06 Nov 1994 08:49:37 GMT' '+%F %T'
+date -d bogus; echo $?
+date -d '2020-02-30'; echo $?
+date -d '2020-01-02 24:00'; echo $?
+date -d '2020-01-02 03:04:05' '+%-d %_m %^a %e %k %l %P %q %U %W %V %G %g|%10Y|%-H|%_5S|%#b|%:z|%::z|%%'
+date -d '2021-01-03' '+%U %W %V %G'; date -d '2020-12-31' '+%U %W %V %G %j'
+date -u -d '2020-01-02 03:04:05' -R; date -d '2020-01-02 03:04:05' -I; date -d '2020-01-02 03:04:05' -Iseconds
+date -d '2020-01-02 03:04:05' --iso-8601=ns; date -d '2020-01-02 03:04:05' --rfc-3339=seconds
+date -d '2020-01-02 03:04:05' --rfc-email
+touch -d '2020-01-02 03:04:05' d/a; date -r d/a '+%F %T'
+printf '2020-01-02\n@0\nbad\n' > df && date -f df +%F; echo $?
+stty; echo $?
+stty -a; echo $?
+# M21 phase 1: find, sed, sort, df, du and ls gaps
+find d -newermt '2021-01-01' | sort
+find d -newer d/a -name 'j*' | sort
+find tree d/a -newermm d/a | sort
+find d -name 'j*' -fprint fp1 && sort fp1
+find d -name 'j*' -fprint0 fp2 && tr '\0' '\n' < fp2 | sort
+find d -name 'j*' -fprintf fp3 '%f %s\n' && sort fp3
+find d/a -fls fp4 && wc -l < fp4
+find d -name 'j*' -fprint fp5 -print | sort
+find d/a -printf '%F\n'
+find d/lines -printf '%S\n'
+printf 'a.b\n' | sed 's/\x2e/X/'
+printf 'a.b\n' | sed 's/b/\x26\d065\o102/'
+printf 'abc\n' | sed 's/\x5e/Q/'
+printf 'abc\n' | sed 'y/abc/\x41\d066\o103/'
+printf 'a]\n' | sed 's/[\x5d]/R/'
+sed 's/l/\cA/' d/a | od -c
+printf 'echo hi\n' | sed e
+printf 'a\n' | sed 'e echo pre'
+printf 'echo X\nb\n' | sed 's/^echo/echo got/e'
+sed F d/a d/v1
+sed -n '$=' d/a d/v1
+sed -s -n '$=' d/a d/v1
+seq 20 | sort -S 1K -n | head -3
+seq 3000 | sort -r -S 64K | head -3
+seq 3000 | sort -n -S 64K | tail -2
+seq 3000 | sort -u -S 64K | wc -l
+sort -m d/v1 d/v2
+sort -c d/s; echo $?
+sort -C d/s; echo $?
+sort -c d/v1; echo $?
+seq 5 | sort -c; echo $?
+sort -T /nope-dir -S 64K d/lines | head -2
+df -i . | tail -1 | awk '{print ($2 > 0)}'
+df --output=source,target . | head -1
+df -x nosuchtype . | wc -l
+df -t nosuchtype .; echo $?
+df nope; echo $?
+du --inodes tree
+du --inodes -s d
+du --exclude='*.gz' -a . | grep -c gz
+du --exclude=b tree
+printf 'f\n' > exl && du -X exl -a tree
+du -0 -s tree | od -c | tail -2
+du -x -s tree | cut -f2
+ls -l --time-style=full-iso d/colon | cut -d' ' -f6-
+ls -l --time-style=long-iso d/colon | cut -d' ' -f6-
+ls -l --time-style=iso d/colon | cut -d' ' -f6-
+ls -l --time-style=locale d/colon | cut -d' ' -f6-
+ls -l --time-style=+%Y/%m/%d d/colon | cut -d' ' -f6-
+ls -l --time-style=posix-long-iso d/colon | cut -d' ' -f6-
+ls --full-time d/colon | cut -d' ' -f6-
+ls -l --time-style=bogus d/colon; echo $?
+TIME_STYLE=long-iso ls -l d/colon | cut -d' ' -f6-
+# setsid (util-linux)
+setsid -w echo in a new session
+setsid -w sh -c "exit 3"; echo $?
+setsid; echo $?
+setsid -w nosuchcommand 2>/dev/null; echo $?
+# lspci (pciutils), on the host's own /sys and pci.ids; skipped where lspci is missing
+if [ -x /usr/bin/lspci ]; then lspci; else echo skip; fi
+if [ -x /usr/bin/lspci ]; then lspci -n; else echo skip; fi
+if [ -x /usr/bin/lspci ]; then lspci -nnD; else echo skip; fi
+if [ -x /usr/bin/lspci ]; then lspci -mm; lspci -mmn; lspci -nnmm; else echo skip; fi
+if [ -x /usr/bin/lspci ]; then lspci -i /dev/null -nnmm; lspci -i /dev/null; else echo skip; fi
+if [ -x /usr/bin/lspci ]; then lspci -x -s 00:; lspci -n -d ::0600; else echo skip; fi
+# lsusb (usbutils), on the host's /sys; names may come from udev's database there, so only the IDs are compared
+if [ -x /usr/bin/lsusb ]; then lsusb | cut -c1-32; else echo skip; fi
+if [ -x /usr/bin/lsusb ]; then lsusb -t; else echo skip; fi
+if [ -x /usr/bin/lsusb ]; then lsusb -d 1d6b: | cut -c1-32; lsusb -s 1 | cut -c1-32; else echo skip; fi
+if [ -x /usr/bin/lsusb ]; then lsusb -s 127:127; echo $?; lsusb -d ffff:fffe; echo $?; else echo skip; fi
+# sort merges its temporary runs in batches (--batch-size); stat -f's
+# whole forms; du -H, --time=WORD and --time-style; df --total and --sync.
+seq 2000 | sort -S 1K --batch-size=2 | md5sum
+seq 2000 | sort -u -n -r -S 1K --batch-size=3 | head -3
+seq 50 | sort --batch-size=1; echo $?
+stat -f -c '%T %l' /proc
+stat -f -c '%i %l %s %S %t' .
+stat -f -t /proc | cut -d' ' -f3-
+stat -f /proc | tail -3
+stat -f /proc | sed -n 2p | sed 's/ID: [0-9a-f]*/ID: X/'
+du -H d/link; du d/link
+du -a --time --time-style=+%F tree/a/b/f
+du --time=ctime --time-style=long-iso tree/a/b/f | cut -f1,3
+du --time --time-style=nonsense tree; echo $?
+du --time=nonsense tree; echo $?
+df --total . | tail -1 | awk '{print $1, $NF}'
+df --sync --output=target . | tail -1
+env printf '[%q]\n' 'a b' "it's" "it's!" 'a=b' 'a~' '~a' '#a' 'a]{}' '' "a'b\"c"
+env printf '[%q]\n' "$(printf 'a\tb')" "$(printf 'x\001')" "$(printf 'it'"'"'s\033')"
+# less copying to a pipe, through LESSOPEN (ADR 0149).
+LESSOPEN='|tr a-z A-Z < %s' less d/lines d/nonl
+LESSOPEN='||true %s' less d/a | od -c; LESSOPEN='|true %s' less d/a
+LESSOPEN='|tr a-z A-Z' less d/a; LESSOPEN='echo d/nonl %s' less d/a; LESSOPEN='|tr a-z A-Z < %s' less -L d/a
+LESSOPEN='|tr a-z A-Z < %s' LESSCLOSE='echo closed %s %s >&2' less d/a 2>&1
+printf 'xyz\n' | LESSOPEN='|-tr a-z A-Z < %s' less; printf 'xyz\n' | LESSOPEN='|tr a-z A-Z < %s' less
+# awk: gawk's array order, sorted_in, asort, IGNORECASE, PROCINFO,
+# @include and @namespace, RT and NR from getline (ADR 0150).
+awk 'BEGIN { for (i = 12; i > 0; i -= 3) a[i]; a["x"]; for (k in a) printf "%s ", k; print "" }'
+awk 'BEGIN { a["x"]=1; a["y"]=1; a["b"]=2; a["c"]="abc"; a["d"]=-1; split("@ind_str_asc @ind_str_desc @ind_num_asc @val_str_asc @val_str_desc @val_num_asc @val_num_desc @val_type_asc @val_type_desc", o); for (i = 1; i <= 9; i++) { PROCINFO["sorted_in"] = o[i]; for (k in a) printf "%s ", k; print "" } }'
+awk 'function cmp(i1, v1, i2, v2) { return v1 < v2 ? -1 : v1 > v2 } BEGIN { a[1]=3; a[2]=1; a[3]=2; PROCINFO["sorted_in"] = "cmp"; for (k in a) printf "%s ", k; print "" }'
+awk '{ split($0, f); n = asort(f, g); for (i = 1; i <= n; i++) printf "%s ", g[i]; n = asorti(f, h, "@ind_num_desc"); for (i = 1; i <= n; i++) printf "%s ", h[i]; print "" }' d/fruit
+awk 'BEGIN { a[1]="b"; a[2]=10; a[3]="a"; a[4]=2; n = asort(a); for (i = 1; i <= n; i++) printf "%s ", a[i]; print n }'
+awk 'BEGIN { PROCINFO["sorted_in"] = "nope"; a[1]; for (k in a) print k }' 2>/dev/null; echo $?
+awk 'BEGIN { IGNORECASE = 1; print ("ABC" ~ /b/), index("ABC", "b"), ("abc" == "ABC"), ("a" < "B"); s = "FOO"; gsub(/o/, "0", s); print s, match("xxAB", "ab"), split("aXbxc", p, "x"), split("aXbxc", p, "x|y") }'
+awk -v IGNORECASE=1 '/APPLE/' d/fruit
+awk 'BEGIN { print PROCINFO["platform"], PROCINFO["FS"], PROCINFO["strftime"], (PROCINFO["pid"] > 0), (PROCINFO["uid"] == PROCINFO["euid"]) }'
+printf 'function t(x) { return 3 * x }\n' > inc.awk && awk -i inc '@include "inc.awk"
+BEGIN { print t(2) }'; rm -f inc.awk
+mkdir -p ap && printf '@include "two"\nfunction one() { return two() 1 }\n' > ap/one.awk && printf 'function two() { return 2 }\n' > ap/two.awk && AWKPATH=ap awk '@include "one"
+BEGIN { print one() }'; rm -r ap
+awk '@include "nothing"
+BEGIN { }'; echo $?
+awk '@namespace "geo"
+BEGIN { pi = 3; NAMED = "cap" }
+function area(r) { return pi * r * r }
+@namespace "awk"
+BEGIN { print geo::area(2), geo::pi, pi "|", NAMED, awk::NAMED }'
+printf 'l1\nl2;l3;' | awk 'BEGIN { RS = ";|\n"; while ((getline l < "-") > 0) printf "[%s|%s]", l, RT; "printf a,b" | getline; print $0, RT, NR }'
+awk 'BEGIN { print substr("hello", 1.5, 2.7), substr("hello", 0.5), substr("hello", -1, 3.9) }'
+awk 'BEGIN { x = "10"; switch (x) { case 10: print "num"; case /1/: print "re"; default: print "d" }; for (i = 0; i < 3; i++) { switch (i) { case 1: continue; default: print "i" i } }; switch ("1.0") { case 1: print "one"; break; default: print "notone" }; switch (1.0) { case "1": print "s1" }; switch (-2) { case -2: print "neg" } }'
+echo ' 10' | awk '{ switch ($1) { case 10: print "strnum"; break; default: print "no" } }'
+awk 'BEGIN { switch (1) { case 1: case "1": print } }' 2>/dev/null; echo $?
+awk 'BEGIN { print typeof(1), typeof("a"), typeof(x), typeof(b[1]), typeof(b), isarray(b), isarray(x); c = "3"; print typeof(c + 0) }'; echo '1 a' | awk '{ split($0, d); print typeof(d[1]), typeof(d[2]), typeof($1) }'
+awk 'BEGIN { print strtonum("0x1F"), strtonum("017"), strtonum("1e3"), strtonum(" 12abc"), strtonum("-0x10"), strtonum("09"), strtonum("018"), strtonum("010.5"), strtonum(-3) }'
+awk 'BEGIN { print and(12, 10, 9), or(1, 2), xor(5, 1), lshift(3, 2), rshift(16, 2), compl(0), and(2.7, 3.9) }'; awk 'BEGIN { print and(1) }' 2>/dev/null; echo $?; awk 'BEGIN { print or(-1, 1) }' 2>/dev/null; echo $?
+awk 'BEGIN { print mktime("2020 01 01 00 00 00"), mktime("2020 1 1 0 0 0 1"), mktime("bad"), mktime("2020 13 40 25 61 61", 1), mktime("2020 1 1 0 0"), mktime("2020 1 1 0 0 0x"), mktime("-1 1 1 0 0 0", 1), mktime("2020.5 1 1 0 0 0"), mktime("+2020 -1 1 0 0 0") }'
+TZ=Europe/London awk 'BEGIN { print mktime("2020 07 01 12 00 00"), mktime("2020 07 01 12 00 00", 1), mktime("2020 07 01 12 00 00 0"), mktime("2020 01 01 12 00 00 1") }'
+awk 'BEGIN { n = patsplit("ab12cd3e", a, /[a-z]+/, s); print n, a[1], a[2], a[3], "[" s[0] "][" s[1] "][" s[2] "][" s[3] "]"; n = patsplit("12", a, /[a-z]*/, s); print n, length(s); n = patsplit("a1b", a, "[a-z]*"); print n, a[2]; FPAT = "[0-9]+"; print patsplit("x1y22", a), a[2] }'
+awk 'BEGIN { n = split("  a b  c ", a, " ", s); for (k in s) printf "%s=[%s] ", k, s[k]; print n; n = split("a1b22c", a, /[0-9]+/, s); for (k in s) printf "%s=[%s] ", k, s[k]; print n; n = split("a,b", a, ",", s); for (k in s) printf "%s=[%s] ", k, s[k]; print n; print split("", a, ",", s), length(s) }'
+awk 'BEGIN { FIELDWIDTHS = "2 3"; $0 = "abcdefgh"; print NF, $1, $2, "[" $3 "]"; FIELDWIDTHS = "1:2 2 *"; $0 = "abcdefgh"; print NF, $1, $2, $3; $0 = "abc"; print NF, $1; print PROCINFO["FS"]; FS = ","; print PROCINFO["FS"]; $0 = "a,b"; print $2 }'
+awk 'BEGIN { FIELDWIDTHS = "2 x" }' 2>/dev/null; echo $?
+awk -v FIELDWIDTHS='3 2' '{ print $2; $1 = "X"; print }' d/fruit
+awk 'BEGIN { FPAT = "([^,]*)|(\"[^\"]+\")"; $0 = "a,\"b,c\",,d"; print NF; for (i = 1; i <= NF; i++) printf "<%s>", $i; print ""; $2 = "X"; print; FPAT = "[a-z]*"; $0 = "ab12"; print NF, PROCINFO["FS"] }'
+awk 'BEGINFILE { print "BF", FILENAME, FNR, NR, ERRNO } ENDFILE { print "EF", FILENAME, FNR, NR } { print } END { print "end", FILENAME }' d/v1 nope d/a 2>/dev/null; echo $?
+awk 'BEGINFILE { if (ERRNO) { print "skip", ERRNO; nextfile } } FNR == 1' nope d/a; echo $?
+awk 'BEGINFILE { print "bf"; nextfile } ENDFILE { print "ef" } { print }' d/v1
+echo x | awk 'BEGINFILE { print "bf[" FILENAME "]" } { print "m[" FILENAME "]" } ENDFILE { print "ef" } END { print "e[" FILENAME "]" }'
+awk 'BEGINFILE { print "bf" } { nextfile } ENDFILE { print "ef", FNR }' d/v1 d/a
+awk 'BEGIN { if ((getline l < "nope") < 0) print ERRNO }'
+awk 'BEGIN {' 2>/dev/null; echo $?
+
+# Which strings subexpressions take among matches of one length (g223):
+# GNU follows the pattern's order, not POSIX's longest-subpattern rule.
+printf '%s\n' 'abc abc' | sed -E 's/(a|abc)?[^a].+/[\1]/'
+printf '%s\n' 'abcd' | sed -E 's/(a|ab)(c|bcd)(d*)/[\1,\2,\3]/'
+printf '%s\n' 'aa' | sed -E 's/a*(a*)/[\1]/'
+printf '%s\n' 'aaa' | sed -E 's/(a*)*/[\1]/'
+printf '%s\n' 'xyx' | sed -E 's/(x|xy)(x|yx)?/[\1,\2]/'
+printf '%s\n' 'abab' | sed -E 's/(ab|a)(bab)?/[\1,\2]/'
+printf '%s\n' 'foobar' | sed -E 's/(fo|foo)(o?bar)/[\1,\2]/'
+printf '%s\n' 'aaaa' | sed -E 's/(a|aa)*/[\1]/'
+printf '%s\n' 'abcabc' | sed -E 's/(a|ab|abc)*/[\1]/'
+printf '%s\n' 'ab' | sed -E 's/(a|ab)(b?)/[\1,\2]/'
+printf '%s\n' 'abc' | sed -E 's/(a|ab)(bc|c)/[\1,\2]/'
+printf '%s\n' 'abcd' | sed -E 's/(a|ab|abc)(bcd|cd|d)/[\1,\2]/'
+printf '%s\n' 'aaa' | sed -E 's/(a|aa)(a|aa)/[\1,\2]/'
+printf '%s\n' 'abab' | sed -E 's/((a)|b)*/[\1,\2]/'
+printf '%s\n' 'xab' | sed -E 's/x(a|ab)?b?/[\1]/'
+printf '%s\n' 'abcd' | sed -E 's/(ab|a)(bcd|cd|c)?d?/[\1,\2]/'
+printf 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaayq\naaaay\n' | grep -E '(a|a)*\1y$'
+
+# grep's colours (GREP_COLORS), warnings and --exclude-from (g223).
+grep --color=always -nH e d/lines d/fruit
+grep --color=always -C1 -n three d/lines
+grep --color=always -v -C1 -n e d/lines
+grep --color=always -o -b -n 'e[a-z]' d/lines
+grep --color=always -c e d/lines d/fruit
+grep --color=always -l e d/lines d/fruit
+grep --color=always -Zl e d/lines d/fruit
+grep --color=always -ZH t d/lines
+grep --color=always -A1 -e one -e six d/lines
+grep --color=always 'o*' d/lines
+grep --color=always '' d/v1
+grep --color=never e d/lines
+grep --colour=always -i BANANA d/fruit
+GREP_COLORS='mt=01;32:fn=34:se=33:ln=31' grep --color=always -nH e d/lines
+GREP_COLORS='sl=1:cx=2' grep --color=always -C1 three d/lines
+GREP_COLORS='sl=1:cx=2:rv' grep --color=always -v -C1 three d/lines
+GREP_COLORS='ms=4:mc=5' grep --color=always -v -C1 three d/lines
+GREP_COLORS='ne' grep --color=always -H t d/lines
+GREP_COLORS='ms=7:fn=3x:ln=4' grep --color=always -nH t d/lines
+GREP_COLORS='ms=:fn=:se=' grep --color=always -nH t d/lines
+GREP_COLOR='4' grep --color=always t d/lines
+grep 'a\-b' d/lines
+grep -c '\d' d/lines
+grep -c 'o\ t' d/lines
+grep -c 'x\%' d/lines
+grep -c -e '\-' -e o d/lines
+grep -E -c '*e' d/lines
+grep -E -c 'x|+e' d/lines
+grep -E -c '{1}e' d/lines
+grep '[:space:]' d/lines
+grep -c '[a\-z]\]' d/lines
+printf '*.txt\nf*\n' > ex; grep -r --exclude-from=ex e d | sort
+grep --exclude-from=missing e d/lines
+printf '{a\n{1\nx\n{1}x\n' | grep -E '{1}x'
+printf '{a\n{1\nx\n{1}x\n' | grep -E '{a'
+printf '{a\n{1\nx\n{1}x\n' | grep -E '{1'
+printf '{a\n{1\nx\n{1}x\n' | grep -E 'a|{1,2}x'
+printf '{a\n{1\nx\n{1}x\n' | grep -E '^{1}x'
+
+# Characters in a UTF-8 locale (g223).
+printf 'café\nnaïve\ncafe\n' | LC_ALL=C.UTF-8 grep -x 'caf.'
+printf 'café\nnaïve\ncafe\n' | LC_ALL=C grep -x 'caf.'
+printf 'café\nnaïve\ncafe\n' | LC_ALL=C.UTF-8 grep -c '^.....$'
+printf 'Éa\néb\nEc\n' | LC_ALL=C.UTF-8 grep -i 'é'
+printf 'Éa\néb\nEc\n' | LC_ALL=C.UTF-8 grep -iF 'É'
+printf 'Éa\néb\nEc\n' | LC_ALL=C.UTF-8 grep -o '[[:upper:]]'
+printf 'Ωμέγα 12\nabc\n' | LC_ALL=C.UTF-8 grep -o '[[:alpha:]]*'
+printf 'naïve\nnaive\n' | LC_ALL=C.UTF-8 grep -o '[^a-z]'
+printf 'déjà-vu\n' | LC_ALL=C.UTF-8 grep -o '\w*'
+printf 'café caf\n' | LC_ALL=C.UTF-8 grep -ow 'caf'
+printf 'x é y\n' | LC_ALL=C.UTF-8 sed 's/./[&]/g'
+printf 'x é y\n' | LC_ALL=C.UTF-8 sed -E 's/[[:alpha:]]+/<&>/g'
+printf 'ÉCOLE école\n' | LC_ALL=C.UTF-8 sed 's/école/X/Ig'
+printf 'añb\n' | LC_ALL=C.UTF-8 awk '/a.b/ { print "yes" }'
+printf 'añb\n' | LC_ALL=C.UTF-8 awk '{ gsub(/[ñ]/, "n"); print }'
+printf 'añb\n' | LANG=en_US.UTF-8 grep -c 'a.b'
+
+# grep -P: Perl's patterns (g223).
+printf 'foo=12 bar=345\nabcabc\nx.y\nAbc\nbcx aBc\n' | grep -oP 'a|ab'
+printf 'foo=12 bar=345\nabcabc\nx.y\nAbc\nbcx aBc\n' | grep -oP '\d+'
+printf 'foo=12 bar=345\nabcabc\nx.y\nAbc\nbcx aBc\n' | grep -oP 'bar=\K\d+'
+printf 'foo=12 bar=345\nabcabc\nx.y\nAbc\nbcx aBc\n' | grep -oP '(?<=foo=)\d+'
+printf 'foo=12 bar=345\nabcabc\nx.y\nAbc\nbcx aBc\n' | grep -oP 'b(?!c)'
+printf 'foo=12 bar=345\nabcabc\nx.y\nAbc\nbcx aBc\n' | grep -oP '\w+?='
+printf 'foo=12 bar=345\nabcabc\nx.y\nAbc\nbcx aBc\n' | grep -oP '(?i)abc'
+printf 'foo=12 bar=345\nabcabc\nx.y\nAbc\nbcx aBc\n' | grep -oP '(?:ab)+'
+printf 'foo=12 bar=345\nabcabc\nx.y\nAbc\nbcx aBc\n' | grep -oP '(?<x>ab)\k<x>'
+printf 'foo=12 bar=345\nabcabc\nx.y\nAbc\nbcx aBc\n' | grep -oP '\Qx.y\E'
+printf 'foo=12 bar=345\nabcabc\nx.y\nAbc\nbcx aBc\n' | grep -oP '(?x) a b c # comment'
+printf 'foo=12 bar=345\nabcabc\nx.y\nAbc\nbcx aBc\n' | grep -oP 'a++'
+printf 'foo=12 bar=345\nabcabc\nx.y\nAbc\nbcx aBc\n' | grep -oP '(?>a)'
+printf 'foo=12 bar=345\nabcabc\nx.y\nAbc\nbcx aBc\n' | grep -oP '\p{L}+'
+printf 'foo=12 bar=345\nabcabc\nx.y\nAbc\nbcx aBc\n' | grep -oP 'a{2,}?'
+printf 'foo=12 bar=345\nabcabc\nx.y\nAbc\nbcx aBc\n' | grep -oP '\bbar\b'
+printf 'foo=12 bar=345\nabcabc\nx.y\nAbc\nbcx aBc\n' | grep -oP 'c$'
+printf 'foo=12 bar=345\nabcabc\nx.y\nAbc\nbcx aBc\n' | grep -oP '\x41'
+printf 'foo=12 bar=345\nabcabc\nx.y\nAbc\nbcx aBc\n' | grep -oP '[\d=]+'
+printf 'foo=12 bar=345\nabcabc\nx.y\nAbc\nbcx aBc\n' | grep -oP '(a)|b\1'
+printf 'foo=12 bar=345\nabcabc\nx.y\nAbc\nbcx aBc\n' | grep -oP '(?<=a|bc)x'
+printf 'foo=12 bar=345\nabcabc\nx.y\nAbc\nbcx aBc\n' | grep -oP '[^\W\d]+'
+printf 'foo=12 bar=345\nabcabc\nx.y\nAbc\nbcx aBc\n' | grep -oP 'a(?i:B)c'
+printf 'foo=12 bar=345\nabcabc\nx.y\nAbc\nbcx aBc\n' | grep -oP '(?P<n>b)c'
+printf 'foo=12 bar=345\nabcabc\nx.y\nAbc\nbcx aBc\n' | grep -oP '\s\S'
+printf 'ab\n' | grep -P '('
+printf 'ab\n' | grep -P '(?<=a+)b'
+printf 'ab\n' | grep -P '*a'
+printf 'ab\n' | grep -P -e a -e b
+printf 'ab abc\n' | grep -Pw 'ab'
+printf 'Abc\nabc\n' | grep -Pxi 'ABC'
+printf 'ab\n' | grep -Pc ''
+printf 'ab\n' | grep -E -P a
+printf 'ab\n' | grep -F -G a
+printf 'ab\n' | grep -E -E a
+printf 'ab\n' | grep -P -n --color=always 'b'
+awk 'BEGIN { a[1][2] = 3; a[1][3] = 4; a[2]["x"] = "y"; print isarray(a[1]), isarray(a[1][2]), length(a[1]), length(a); for (i in a) for (j in a[i]) print i, j, a[i][j]; delete a[1][2]; print length(a[1]), (3 in a[1]), (2 in a[1]) }'
+awk 'function sum(arr,   k, t) { for (k in arr) t += arr[k]; return t } BEGIN { m[1][1] = 1; m[1][2] = 2; m[2][1] = 5; print sum(m[1]), sum(m[2]); split("a b c", m[3]); print m[3][2], length(m[3]); print typeof(m), typeof(m[1]), typeof(m[1][1]) }'
+awk 'BEGIN { a[1] = 1; a[1][2] = 3 }' 2>/dev/null; echo $?
+awk 'BEGIN { print typeof(x); y = x; print typeof(x); print typeof(z[1]); r = @/b+/; print typeof(r), typeof(@/a/); print ("abbc" ~ r), ("ac" ~ r); n = split("aXbXXc", p, @/X+/); print n, p[3]; print r "" }'
+awk 'BEGIN { print dcgettext("hello"), dcngettext("one", "many", 1), dcngettext("one", "many", 2), bindtextdomain("/tmp"), _"translated" }'
+awk '@load "ordchr"; BEGIN { print ord("A"), chr(66), ord("") }'
+awk '@load "fnmatch"; BEGIN { print fnmatch("*.c", "a.c", 0), fnmatch("*.c", "a.h", 0), fnmatch("A*", "abc", FNM["CASEFOLD"]) }'
+awk '@load "filefuncs"; BEGIN { stat("d/a", s); print s["type"], s["size"], s["pmode"], s["name"]; print stat("nope", t), (ERRNO != "") }'
+awk '@load "readfile"; BEGIN { x = readfile("d/a"); print length(x); print "[" readfile("nope") "]" }'
+awk '@load "time"; BEGIN { t = gettimeofday(); print (t > 1000000000), sleep(0) }'
+awk '@load "nosuch"; BEGIN { }' 2>/dev/null; echo $?
+cp d/fruit f.tmp && awk -i inplace '{ print NR ": " $0 }' f.tmp && cat f.tmp && rm f.tmp
+cp d/a g.tmp && awk -i inplace -v INPLACE_SUFFIX=.bak '{ print toupper($0) }' g.tmp && cat g.tmp g.tmp.bak && rm g.tmp g.tmp.bak
+printf 'héllo\n' | LC_ALL=C.UTF-8 awk '{ print length($0), substr($0, 2, 2), index($0, "l"); match($0, /l+/); print RSTART, RLENGTH; printf "%c%c|%c\n", 233, 66, "éa" }'
+printf 'héllo\n' | awk '{ print length($0), substr($0, 2, 2), index($0, "l") }'
+awk -M 'BEGIN { print 2^100, 100/7, 2^64 + 1, -7 % 3, 123456789012345678901234567890 * 2; x = 2^70; x++; print x, (x > 2^70), int(2^65 / 3); printf "%d %i %s\n", 2^80, -2^70, 3^40 }'
+echo 18446744073709551617 | awk -M '{ print $1 - 1, $1 * $1, ($1 > 18446744073709551616) }'
+awk '@load "readdir"; { print $2, $3 }' FS=/ tree | sort
+awk 'function f(p) { return p + 1 } BEGIN { print f(q), typeof(q); y = x; print typeof(x) }'

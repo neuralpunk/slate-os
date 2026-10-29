@@ -1,0 +1,10 @@
+[package]
+name = "strata-proto"
+description = "Strata's client protocol: the messages between Strata and its apps (ADR 0037)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true

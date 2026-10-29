@@ -1,0 +1,28 @@
+[package]
+name = "slate-linux-app"
+description = "slate-linux-app, which runs a Linux runtime's graphical program in Strata (ADR 0038)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "slate-linux-app"
+path = "src/main.rs"
+test = false
+bench = false
+
+[dependencies]
+slate-rt = { path = "../rt" }
+slate-coreutils = { path = "../coreutils" }
+slate-quarry = { path = "../quarry" }
+slate-hash = { path = "../../libs/hash" }
+slate-tls = { path = "../../libs/tls" }
+slate-flate = { path = "../../libs/flate" }
+slate-tar = { path = "../../libs/tar" }
+
+[lints]
+workspace = true

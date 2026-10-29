@@ -1,0 +1,7 @@
+name: qhello
+version: 1.0
+arch: x86_64
+abi: linux
+summary: A static Linux program
+license: MIT OR Apache-2.0
+permissions: none

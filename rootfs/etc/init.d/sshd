@@ -1,0 +1,14 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# Slate's own SSH server (ADR 0030); slinit runs and supervises it.
+### BEGIN INIT INFO
+# Provides:          sshd
+# Required-Start:
+# Required-Stop:
+# Should-Start:      logd
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Short-Description: SSH server
+# X-Slate-Exec:      /bin/sshd
+### END INIT INFO
+exit 0

@@ -1,0 +1,21 @@
+[package]
+name = "slate-loader-uefi"
+description = "slate-loader for UEFI: EFI/BOOT/BOOTX64.EFI (ADR 0089)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "slate-loader-uefi"
+path = "src/main.rs"
+test = false
+bench = false
+
+[dependencies]
+slate-loader = { path = "../core" }
+slate-ui = { path = "../../userland/ui" }
+slate-esp = { path = "../../libs/esp" }
+
+[lints]
+workspace = true

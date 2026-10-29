@@ -1,0 +1,118 @@
+[package]
+name = "slate-apps"
+description = "Slate's own apps for Strata (M28, ADR 0104 and on): Calculator, Clock, Help, Image Viewer, Archive Manager, Text Editor, Files, Calendar, Contacts, System Monitor, Disks, Software Updater, and the Web Browser's first use"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "calculator"
+path = "src/calculator_main.rs"
+test = false
+bench = false
+
+[[bin]]
+name = "web-browser"
+path = "src/browser_main.rs"
+test = false
+bench = false
+
+[[bin]]
+name = "calendar"
+path = "src/calendar_main.rs"
+test = false
+bench = false
+
+[[bin]]
+name = "clock"
+path = "src/clock_main.rs"
+test = false
+bench = false
+
+[[bin]]
+name = "archive-manager"
+path = "src/archives_main.rs"
+test = false
+bench = false
+
+[[bin]]
+name = "contacts"
+path = "src/contacts_main.rs"
+test = false
+bench = false
+
+[[bin]]
+name = "disks"
+path = "src/disks_main.rs"
+test = false
+bench = false
+
+[[bin]]
+name = "files"
+path = "src/files_main.rs"
+test = false
+bench = false
+
+[[bin]]
+name = "image-viewer"
+path = "src/viewer_main.rs"
+test = false
+bench = false
+
+[[bin]]
+name = "text-editor"
+path = "src/editor_main.rs"
+test = false
+bench = false
+
+[[bin]]
+name = "app-center"
+path = "src/appcenter_main.rs"
+test = false
+bench = false
+
+[[bin]]
+name = "software-updater"
+path = "src/updater_main.rs"
+test = false
+bench = false
+
+[[bin]]
+name = "system-monitor"
+path = "src/sysmon_main.rs"
+test = false
+bench = false
+
+[[bin]]
+name = "slate-help"
+path = "src/help_main.rs"
+test = false
+bench = false
+
+[dependencies]
+slate-appstream = { path = "../../libs/appstream" }
+slate-cpio = { path = "../../libs/cpio" }
+slate-diskutil = { path = "../diskutil" }
+slate-display = { path = "../display" }
+slate-etch = { path = "../etch" }
+slate-flate = { path = "../../libs/flate" }
+slate-image = { path = "../../libs/image" }
+slate-math = { path = "../../libs/math" }
+slate-pim = { path = "../../libs/pim" }
+slate-regex = { path = "../../libs/regex" }
+slate-rt = { path = "../rt" }
+slate-sysinfo = { path = "../sysinfo" }
+slate-strata = { path = "../strata" }
+slate-strata-client = { path = "../strata-client" }
+slate-tar = { path = "../../libs/tar" }
+slate-term = { path = "../../libs/term" }
+slate-ui = { path = "../ui" }
+slate-zip = { path = "../../libs/zip" }
+strata-proto = { path = "../../libs/strata-proto" }
+
+[lints]
+workspace = true

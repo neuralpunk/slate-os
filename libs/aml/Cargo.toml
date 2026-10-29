@@ -1,0 +1,10 @@
+[package]
+name = "slate-aml"
+description = "An ACPI Machine Language interpreter (ACPI 6.5, chapters 5, 19 and 20)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,4 @@
+# Inbound connections SlateOS lets in (ADR 0134); anything else new from
+# outside is refused. `slate-firewall allow tcp|udp PORT` adds a line,
+# `slate-firewall deny tcp|udp PORT` takes one out.
+allow tcp 22    # sshd, Slate's own SSH server (a default service)

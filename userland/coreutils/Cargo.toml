@@ -1,0 +1,29 @@
+[package]
+name = "slate-coreutils"
+description = "Slate's core utilities: one multicall program (ls, cat, cp, sort, ...)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "coreutils"
+path = "src/main.rs"
+test = false
+bench = false
+
+[dependencies]
+slate-rt = { path = "../rt" }
+slate-regex = { path = "../../libs/regex" }
+slate-hash = { path = "../../libs/hash" }
+slate-flate = { path = "../../libs/flate" }
+slate-bzip2 = { path = "../../libs/bzip2" }
+slate-xz = { path = "../../libs/xz" }
+slate-zstd = { path = "../../libs/zstd" }
+slate-tar = { path = "../../libs/tar" }
+
+[lints]
+workspace = true

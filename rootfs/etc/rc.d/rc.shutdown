@@ -1,0 +1,5 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# Last steps before slinit powers off or reboots ($RUNLEVEL is 0 or 6).
+sync
+exit 0

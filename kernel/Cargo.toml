@@ -1,0 +1,43 @@
+[package]
+name = "slate-kernel"
+description = "The Slate kernel"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "slate-kernel"
+path = "src/main.rs"
+test = false
+bench = false
+
+[dependencies]
+slate-ext4 = { path = "../libs/ext4" }
+slatefs = { path = "../libs/slatefs" }
+slatecrypt = { path = "../libs/slatecrypt", default-features = false }
+limine = "=0.6.5"
+slate-acpi = { path = "../libs/acpi" }
+slate-aml = { path = "../libs/aml" }
+slate-rtc = { path = "../libs/rtc" }
+slate-usb = { path = "../libs/usb" }
+slate-abi = { path = "../libs/abi" }
+slate-elf = { path = "../libs/elf" }
+slate-gpt = { path = "../libs/gpt" }
+slate-mbr = { path = "../libs/mbr" }
+slate-fsprobe = { path = "../libs/fsprobe" }
+slate-net = { path = "../libs/net" }
+slate-cpio = { path = "../libs/cpio" }
+slate-buddy = { path = "../libs/buddy" }
+slate-slab = { path = "../libs/slab" }
+slate-term = { path = "../libs/term" }
+slate-edid = { path = "../libs/edid" }
+slate-amdgpu = { path = "../libs/amdgpu" }
+slate-hid = { path = "../libs/hid" }
+slate-sync = { path = "../libs/sync" }
+slate-bpf = { path = "../libs/bpf" }
+# Signed programs (ADR 0090): quarry's Ed25519, the vetted crypto exception.
+slate-elfsign = { path = "../libs/elfsign" }
+
+[lints]
+workspace = true

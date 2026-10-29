@@ -1,0 +1,13 @@
+[package]
+name = "slate-etcmerge"
+description = "Three-way merges of /etc across system updates and rollbacks (ADR 0087)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+slate-cpio = { path = "../cpio", features = ["alloc"] }
+
+[lints]
+workspace = true

@@ -1,0 +1,15 @@
+# /etc/inittab of the install media (ADR 0029): the console runs the
+# installer instead of a login prompt: the graphical one, which starts
+# the text installer when there is no display (ADR 0034).
+id:3:initdefault:
+
+si::sysinit:/etc/rc.d/rc.sysinit
+
+su:S1:wait:/bin/login -f root
+
+c1:2345:respawn:/bin/slate-install-gui --live
+
+ca::ctrlaltdel:/bin/shutdown -r now
+
+# The power button (ACPI, ADR 0029): a clean power-off.
+pf::powerfail:/bin/shutdown -h now

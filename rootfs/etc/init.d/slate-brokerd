@@ -1,0 +1,15 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# The privilege broker (ADR 0032): su and passwd ask it for root, since
+# Slate programs are never set-user-ID. slinit runs and supervises it.
+### BEGIN INIT INFO
+# Provides:          slate-brokerd
+# Required-Start:
+# Required-Stop:
+# Should-Start:      logd
+# Default-Start:     1 2 3 4 5
+# Default-Stop:      0 6
+# Short-Description: privilege broker
+# X-Slate-Exec:      /bin/slate-brokerd
+### END INIT INFO
+exit 0

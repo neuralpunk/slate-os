@@ -1,0 +1,7 @@
+name: qapp
+version: 1.0
+arch: x86_64
+abi: slate
+summary: A native app that may use the network
+license: MIT OR Apache-2.0
+permissions: network

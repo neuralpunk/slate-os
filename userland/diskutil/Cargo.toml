@@ -1,0 +1,25 @@
+[package]
+name = "slate-diskutil"
+description = "slate-disk: partition tables, partitions and file systems on disks not in use, for Disks through the privilege broker (ADR 0112)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "slate-disk"
+path = "src/bin/slate-disk.rs"
+test = false
+bench = false
+
+[dependencies]
+slate-fat = { path = "../../libs/fat" }
+slate-gpt = { path = "../../libs/gpt", features = ["alloc"] }
+slate-rt = { path = "../rt" }
+slate-sysinfo = { path = "../sysinfo" }
+
+[lints]
+workspace = true

@@ -1,0 +1,10 @@
+[package]
+name = "slate-hci"
+description = "Bluetooth HCI (Core Specification 5.4, Vol 4): packets, commands, events, addresses, and a simulated BR/EDR controller with nearby devices for tests (ADR 0113)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,8 @@
+# useradd's defaults (useradd -D shows them).
+HOME=/home
+SHELL=/bin/sh
+SKEL=/etc/skel
+GROUP=100
+# An empty mail spool in login.defs' MAIL_DIR for each new user: no,
+# SlateOS delivers no mail of its own (ADR 0143).
+CREATE_MAIL_SPOOL=no

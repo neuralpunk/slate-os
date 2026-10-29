@@ -1,0 +1,7 @@
+name: hello
+version: 1.0
+abi: any
+summary: Says hello
+license: MIT OR Apache-2.0
+depends: libgreet (>= 1)
+config: /etc/hello.conf

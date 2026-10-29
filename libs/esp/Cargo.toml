@@ -1,0 +1,16 @@
+[package]
+name = "slate-esp"
+description = "The EFI System Partition's layout: a kernel per system and the boot configuration that follows the boot state (ADR 0086)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+slate-abi = { path = "../abi" }
+slate-cpio = { path = "../cpio", features = ["alloc"] }
+slate-elf = { path = "../elf" }
+slate-fat = { path = "../fat" }
+
+[lints]
+workspace = true

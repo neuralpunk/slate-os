@@ -1,0 +1,10 @@
+# Network settings for netd (ADR 0048). One section per card, [*] for
+# every card not named. Without settings a card uses DHCP.
+#
+#   [eth0]
+#   method = static          # dhcp (the default), static or off
+#   address = 192.168.1.20/24
+#   gateway = 192.168.1.1
+#   dns = 192.168.1.1 9.9.9.9
+[*]
+method = dhcp

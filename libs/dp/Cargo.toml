@@ -1,0 +1,13 @@
+[package]
+name = "slate-dp"
+description = "DisplayPort for Slate's display drivers: DPCD, AUX transactions, link bandwidth and link training, and a simulated sink to test them against"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dev-dependencies]
+slate-edid = { path = "../edid" }
+
+[lints]
+workspace = true

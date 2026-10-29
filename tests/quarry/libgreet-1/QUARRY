@@ -1,0 +1,5 @@
+name: libgreet
+version: 1
+abi: any
+summary: Greetings for hello
+license: MIT OR Apache-2.0

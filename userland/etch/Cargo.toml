@@ -1,0 +1,24 @@
+[package]
+name = "slate-etch"
+description = "etch, Slate's text editor (in the manner of nano and pico)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "etch"
+path = "src/main.rs"
+test = false
+bench = false
+
+[dependencies]
+slate-rt = { path = "../rt" }
+slate-tui = { path = "../tui" }
+slate-regex = { path = "../../libs/regex" }
+
+[lints]
+workspace = true

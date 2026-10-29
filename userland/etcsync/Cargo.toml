@@ -1,0 +1,17 @@
+[package]
+name = "slate-etcsync"
+description = "/etc across updates and rollbacks: bases, trees and three-way merges on a running system (ADR 0087)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+slate-rt = { path = "../rt" }
+slate-etcmerge = { path = "../../libs/etcmerge" }
+
+[lints]
+workspace = true

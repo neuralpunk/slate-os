@@ -1,0 +1,33 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT OR Apache-2.0
+#
+# slate-cc: compile and link C programs for Slate's native interface with
+# slate-libc (ADR 0031), using the host's C compiler ($CC, default cc) in
+# freestanding mode. `cargo xtask sysroot` (or any test build) makes the
+# sysroot: headers in include/, the library in lib/libslate-c.a.
+#
+#   tools/slate-cc -O2 -o hello hello.c
+#
+# The programs are static position-independent executables that relocate
+# themselves at start-up (ADR 0092) and carry the Slate ABI note; on Linux
+# they run too, making Linux calls. The ABI is the compiler's usual x86-64 one
+# (ADR 0063), with <math.h> and floating-point printf and scanf (ADR 0074).
+set -e
+here=$(cd "$(dirname "$0")" && pwd)
+sysroot=${SLATE_SYSROOT:-$here/../target/slate-sysroot}
+if [ ! -f "$sysroot/lib/libslate-c.a" ]; then
+    echo "slate-cc: no sysroot at $sysroot (run cargo xtask sysroot)" >&2
+    exit 1
+fi
+link=yes
+for a in "$@"; do
+    case $a in
+    -c | -S | -E | -M | -MM) link= ;;
+    esac
+done
+set -- -nostdinc -isystem "$sysroot/include" -fno-stack-protector -fPIE "$@"
+if [ -n "$link" ]; then
+    # _start lives in the library; -u pulls it in.
+    set -- "$@" -static-pie -nostdlib -Wl,--gc-sections -u _start "$sysroot/lib/libslate-c.a"
+fi
+exec "${CC:-cc}" "$@"

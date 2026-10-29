@@ -1,0 +1,17 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# The network daemon (ADR 0048): configures every network card as
+# /etc/slate/network says (DHCP by default), follows links as they come
+# and go, and writes the name servers to /run/resolv.conf. slinit runs and
+# supervises it.
+### BEGIN INIT INFO
+# Provides:          netd
+# Required-Start:
+# Required-Stop:
+# Should-Start:      logd devd
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Short-Description: network daemon
+# X-Slate-Exec:      /bin/netd
+### END INIT INFO
+exit 0

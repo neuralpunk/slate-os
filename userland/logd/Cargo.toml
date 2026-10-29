@@ -1,0 +1,22 @@
+[package]
+name = "slate-logd"
+description = "logd, Slate's system log, with logread and logger (ADR 0060)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "logd"
+path = "src/main.rs"
+test = false
+bench = false
+
+[dependencies]
+slate-rt = { path = "../rt" }
+
+[lints]
+workspace = true

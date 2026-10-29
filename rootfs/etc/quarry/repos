@@ -1,0 +1,6 @@
+# quarry repositories: one "name url" per line (http:// or file://).
+# Packages and indexes must be signed by a key in /usr/share/quarry/keys
+# (in the system image, ADR 0090).
+# No official repository exists yet (ADR 0025).
+# Every system carries its desktop's package (ADR 0071).
+install file:///var/lib/quarry/install

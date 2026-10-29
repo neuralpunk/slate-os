@@ -1,0 +1,14 @@
+[package]
+name = "slate-gpt"
+description = "GUID Partition Table encoding and parsing (UEFI 2.10, section 5.3)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[features]
+# What needs a heap (free_regions), for the userland.
+alloc = []
+
+[lints]
+workspace = true

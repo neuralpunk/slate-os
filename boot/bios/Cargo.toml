@@ -1,0 +1,32 @@
+[package]
+name = "slate-loader-bios"
+description = "slate-loader for BIOS: a boot sector and the loader in the BIOS boot partition (ADR 0089)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "slate-loader-mbr"
+path = "src/mbr.rs"
+test = false
+bench = false
+
+[[bin]]
+name = "slate-loader-bios"
+path = "src/main.rs"
+test = false
+bench = false
+
+[dependencies]
+slate-loader = { path = "../core" }
+slate-fat = { path = "../../libs/fat" }
+slate-gpt = { path = "../../libs/gpt" }
+slate-mbr = { path = "../../libs/mbr" }
+slate-rtc = { path = "../../libs/rtc" }
+slate-ui = { path = "../../userland/ui" }
+slate-acpi = { path = "../../libs/acpi" }
+slate-esp = { path = "../../libs/esp" }
+
+[lints]
+workspace = true

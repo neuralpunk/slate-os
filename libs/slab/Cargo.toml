@@ -1,0 +1,10 @@
+[package]
+name = "slate-slab"
+description = "Slab allocator for small kernel objects"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true

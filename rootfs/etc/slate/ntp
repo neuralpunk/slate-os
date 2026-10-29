@@ -1,0 +1,5 @@
+# Time servers for netd's clock setting (ADR 0052): one per line,
+# `server NAME[:PORT]` (or `server [IPV6]:PORT`), asked in order when the
+# network comes up and every 17 minutes after. Without servers, netd
+# leaves the clock alone.
+server pool.ntp.org
