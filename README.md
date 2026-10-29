@@ -1,3 +1,7 @@
+<p align="center">
+  <img src=".github/header.png" alt="SlateOS: an operating system written from scratch in Rust" width="100%">
+</p>
+
 # SlateOS
 
 SlateOS is an open-source, x86-64, Unix-like operating system written from
