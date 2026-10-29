@@ -23,8 +23,11 @@
 //! - **Connecting:** a paired device's stored key answers Link Key
 //!   Request; a device that forgot this computer fails authentication.
 //! - Legacy PIN pairing is refused (PIN Code Request Negative Reply).
+//! - **Low Energy** ([`crate::le`], ADR 0176): found by scanning beside
+//!   the inquiry, paired with SMP, reconnected when a bonded device
+//!   advertises, and HID devices driven over GATT.
 
-use alloc::collections::VecDeque;
+use alloc::collections::{BTreeMap, VecDeque};
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
@@ -44,11 +47,24 @@ pub struct Device {
     /// The link key, once paired, and its type.
     pub key: Option<([u8; 16], u8)>,
     pub connected: Option<u16>,
+    /// An LE device's own (ADR 0176).
+    pub le: Option<LeInfo>,
+}
+
+/// What an LE device has of its own: its address type (0 public, 1
+/// random) and the keys pairing left.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct LeInfo {
+    pub addr_type: u8,
+    pub keys: Option<slate_hci::smp::Keys>,
+    /// Paired without anyone choosing it (no pointer was there): it may
+    /// point but not type.
+    pub auto: bool,
 }
 
 impl Device {
     pub fn paired(&self) -> bool {
-        self.key.is_some()
+        self.key.is_some() || self.le.as_ref().is_some_and(|l| l.keys.is_some())
     }
 
     /// Its name, or its address while it has none.
@@ -123,6 +139,37 @@ pub struct Host {
     seen: Vec<BdAddr>,
     /// Things worth a log line, taken by the daemon.
     pub notes: Vec<String>,
+    // --- Low Energy (crate::le) ---
+    /// The controller does LE, its LE data packets' size, how many more it
+    /// takes now and how many each link has in it.
+    pub le_ok: bool,
+    pub(crate) le_len: usize,
+    pub(crate) le_credits: u16,
+    pub(crate) in_flight: BTreeMap<u16, u16>,
+    /// The BR/EDR buffer, which LE shares when it has none of its own.
+    pub(crate) acl_len: usize,
+    pub(crate) acl_packets: u16,
+    pub(crate) acl_out: VecDeque<Vec<u8>>,
+    pub(crate) links: Vec<crate::le::Link>,
+    pub(crate) reassembler: slate_hci::l2cap::Reassembler,
+    /// Whether the controller scans, and the device being connected to.
+    pub(crate) scanning: bool,
+    pub(crate) le_connecting: Option<BdAddr>,
+    /// Bonded devices that refused their key (they forgot this computer):
+    /// not reconnected until the person pairs or connects them again.
+    pub(crate) refused: Vec<BdAddr>,
+    /// A mouse in pairing mode is paired by itself (the daemon says, from
+    /// the setting). Those tried, and the pairing under way that nobody
+    /// asked for.
+    pub autopair: bool,
+    pub(crate) auto_tried: Vec<BdAddr>,
+    pub(crate) auto_pairing: Option<BdAddr>,
+    /// HID devices made, fed and closed, for the daemon to apply.
+    pub hid: Vec<crate::le::HidEvent>,
+    /// Randomness for pairing, and the identity key this computer hands
+    /// out.
+    pub rng: fn(&mut [u8]),
+    pub irk: [u8; 16],
 }
 
 impl Host {
@@ -143,11 +190,44 @@ impl Host {
             names: Vec::new(),
             seen: Vec::new(),
             notes: Vec::new(),
+            le_ok: false,
+            le_len: 0,
+            le_credits: 0,
+            in_flight: BTreeMap::new(),
+            acl_len: 0,
+            acl_packets: 0,
+            acl_out: VecDeque::new(),
+            links: Vec::new(),
+            reassembler: slate_hci::l2cap::Reassembler::default(),
+            scanning: false,
+            le_connecting: None,
+            refused: Vec::new(),
+            autopair: false,
+            auto_tried: Vec::new(),
+            auto_pairing: None,
+            hid: Vec::new(),
+            rng: |b| {
+                let _ = slate_rt::process::random(b);
+            },
+            irk: [0; 16],
         }
     }
 
-    fn send(&mut self, packet: Vec<u8>) {
+    pub(crate) fn send(&mut self, packet: Vec<u8>) {
         self.queue.push_back(packet);
+    }
+
+    /// A command to send before those queued.
+    pub(crate) fn queue_front(&mut self, packet: Vec<u8>) {
+        self.queue.push_front(packet);
+    }
+
+    pub(crate) fn seen_has(&self, a: BdAddr) -> bool {
+        self.seen.contains(&a)
+    }
+
+    pub(crate) fn seen_push(&mut self, a: BdAddr) {
+        self.seen.push(a);
     }
 
     /// The next command to send, if the last one was answered.
@@ -155,6 +235,7 @@ impl Host {
         if self.awaiting.is_some() {
             return None;
         }
+        self.le_update_scan();
         let p = self.queue.pop_front()?;
         self.awaiting = slate_hci::parse_command(&p).map(|(op, _)| op);
         Some(p)
@@ -175,6 +256,10 @@ impl Host {
             cmd::read_local_version(),
             cmd::read_buffer_size(),
             cmd::set_event_mask(),
+            slate_hci::le::cmd::write_le_host_support(),
+            slate_hci::le::cmd::set_event_mask(),
+            slate_hci::le::cmd::read_buffer_size(),
+            slate_hci::le::cmd::set_scan_parameters(true),
             cmd::write_simple_pairing_mode(true),
             cmd::write_inquiry_mode_extended(),
             cmd::write_class_of_device(slate_hci::CLASS_DESKTOP),
@@ -187,6 +272,7 @@ impl Host {
 
     /// Turn the radio off: connections close, nothing scans.
     pub fn power_off(&mut self) {
+        self.le_reset();
         let handles: Vec<u16> = self.devices.iter().filter_map(|d| d.connected).collect();
         for h in handles {
             self.send(cmd::disconnect(h, slate_hci::ERR_REMOTE_USER_TERMINATED));
@@ -201,6 +287,7 @@ impl Host {
 
     /// The controller went away.
     pub fn lost(&mut self) {
+        self.le_reset();
         self.queue.clear();
         self.awaiting = None;
         self.discovering = false;
@@ -212,7 +299,7 @@ impl Host {
         }
     }
 
-    fn ready(&self) -> Result<(), String> {
+    pub(crate) fn ready(&self) -> Result<(), String> {
         match &self.state {
             State::On => Ok(()),
             State::Off => Err("Bluetooth is off".into()),
@@ -249,11 +336,11 @@ impl Host {
         Ok(())
     }
 
-    fn device(&mut self, a: BdAddr) -> Option<&mut Device> {
+    pub(crate) fn device(&mut self, a: BdAddr) -> Option<&mut Device> {
         self.devices.iter_mut().find(|d| d.addr == a)
     }
 
-    fn name_of(&self, a: BdAddr) -> String {
+    pub(crate) fn name_of(&self, a: BdAddr) -> String {
         self.devices.iter().find(|d| d.addr == a).map_or_else(|| a.to_string(), Device::shown)
     }
 
@@ -265,6 +352,9 @@ impl Host {
         let d = self.devices.iter().find(|d| d.addr == a).ok_or("No such device nearby")?;
         if purpose == Purpose::Connect && !d.paired() {
             return Err(alloc::format!("{} isn't paired", d.shown()));
+        }
+        if d.le.is_some() {
+            return self.le_begin(a, purpose);
         }
         let (mode, clock) = (d.page_scan_mode, d.clock_offset);
         if self.discovering {
@@ -300,10 +390,13 @@ impl Host {
     /// Forget a paired device: its key goes, and its connection.
     pub fn remove(&mut self, a: BdAddr) -> Result<(), String> {
         let d = self.device(a).ok_or("No such device")?;
-        if d.key.is_none() {
+        if !d.paired() {
             return Err("It isn't paired".into());
         }
         d.key = None;
+        if let Some(l) = d.le.as_mut() {
+            l.keys = None;
+        }
         let handle = d.connected;
         let name = d.shown();
         if let Some(h) = handle {
@@ -316,11 +409,13 @@ impl Host {
         Ok(())
     }
 
-    fn finish(&mut self, ok: bool, text: String) {
+    pub(crate) fn finish(&mut self, ok: bool, text: String) {
         if let Some(op) = self.op.take() {
             let pairing = op.purpose == Purpose::Pair;
-            // Pairing holds a connection for nothing else: close it.
-            if let (true, Some(h)) = (pairing, op.handle) {
+            let le = self.links.iter().any(|l| l.addr == op.addr);
+            // BR/EDR pairing holds a connection for nothing else: close it
+            // (an LE device's link stays: its profiles run on it).
+            if let (true, false, Some(h)) = (pairing, le, op.handle) {
                 self.send(cmd::disconnect(h, slate_hci::ERR_REMOTE_USER_TERMINATED));
             }
             self.notes.push(alloc::format!(
@@ -334,7 +429,7 @@ impl Host {
         self.said = Some((text, !ok));
     }
 
-    fn error_words(status: u8) -> &'static str {
+    pub(crate) fn error_words(status: u8) -> &'static str {
         match status {
             slate_hci::ERR_PAGE_TIMEOUT => "it didn't answer",
             slate_hci::ERR_AUTHENTICATION_FAILURE => "the pairing was refused",
@@ -344,8 +439,12 @@ impl Host {
         }
     }
 
-    /// An event from the controller, framed.
+    /// An event (or LE data) from the controller, framed.
     pub fn event(&mut self, packet: &[u8]) {
+        if packet.first() == Some(&slate_hci::H4_ACL) {
+            self.le_acl(packet);
+            return;
+        }
         let Some(e) = slate_hci::parse_event(packet) else { return };
         match e {
             Event::Complete { opcode, ret } => {
@@ -355,6 +454,11 @@ impl Host {
                 let status = ret.first().copied().unwrap_or(0);
                 match opcode {
                     slate_hci::OP_READ_BD_ADDR if status == 0 => self.addr = BdAddr::from_wire(&ret[1..]),
+                    slate_hci::OP_READ_BUFFER_SIZE if status == 0 && ret.len() >= 8 => {
+                        self.acl_len = usize::from(u16::from_le_bytes([ret[1], ret[2]]));
+                        self.acl_packets = u16::from_le_bytes([ret[4], ret[5]]);
+                    }
+                    slate_hci::le::OP_LE_READ_BUFFER_SIZE => self.le_buffer(status, &ret),
                     slate_hci::OP_RESET if status != 0 => {
                         self.state = State::Failed(alloc::format!("the controller didn't reset ({status:#04x})"));
                         self.queue.clear();
@@ -378,7 +482,7 @@ impl Host {
                             let n = self.op.map(|o| self.name_of(o.addr)).unwrap_or_default();
                             self.finish(false, alloc::format!("Couldn't reach {n}: {}.", Self::error_words(status)));
                         }
-                        _ => {}
+                        _ => self.le_status(opcode, status),
                     }
                 }
             }
@@ -411,6 +515,7 @@ impl Host {
                                 nearby: true,
                                 key: None,
                                 connected: None,
+                                le: None,
                             });
                             self.notes.push(alloc::format!("found {}", self.name_of(f.addr)));
                         }
@@ -464,7 +569,8 @@ impl Host {
                 let known = self.devices.iter().any(|d| d.addr == addr && d.paired());
                 self.send(if known { cmd::accept_connection(addr) } else { cmd::reject_connection(addr) });
             }
-            Event::Disconnected { handle, .. } => {
+            Event::Disconnected { handle, reason, .. } => {
+                self.le_disconnected(handle, reason);
                 for d in &mut self.devices {
                     if d.connected == Some(handle) {
                         d.connected = None;
@@ -539,22 +645,29 @@ impl Host {
                 self.state = State::Failed(alloc::format!("the controller reported a hardware error ({code:#04x})"));
                 self.lost();
             }
+            Event::EncryptionChange { status, handle, on } => self.le_encryption(status, handle, on),
+            Event::Completed(list) => self.le_completed(&list),
+            Event::Le(e) => self.le_event(e),
             Event::Other(_) => {}
         }
     }
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use slate_hci::sim::{Controller, nearby};
 
     /// Run `h` against `c` until neither has anything more to say.
-    fn settle(h: &mut Host, c: &mut Controller) {
+    pub(crate) fn settle(h: &mut Host, c: &mut Controller) {
         for _ in 0..1000 {
             let mut moved = false;
             while let Some(p) = h.next_command() {
                 c.command(&p);
+                moved = true;
+            }
+            while let Some(p) = h.next_acl() {
+                c.acl(&p);
                 moved = true;
             }
             for e in c.take_events() {

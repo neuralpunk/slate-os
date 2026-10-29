@@ -45,6 +45,10 @@ const READ_CAPACITY_10: u8 = 0x25;
 const READ_10: u8 = 0x28;
 const WRITE_10: u8 = 0x2A;
 const SYNCHRONIZE_CACHE_10: u8 = 0x35;
+const START_STOP_UNIT: u8 = 0x1B;
+/// START STOP UNIT's byte 4: LOEJ with START clear, stop and eject
+/// (SBC-3 §5.25).
+const STOP_AND_EJECT: u8 = 0x02;
 const READ_16: u8 = 0x88;
 const WRITE_16: u8 = 0x8A;
 const SERVICE_ACTION_IN_16: u8 = 0x9E;
@@ -393,6 +397,17 @@ impl BlockDevice for UsbDisk {
     }
     fn removable(&self) -> bool {
         self.removable
+    }
+    fn power_off(&self) -> Option<Result<(), IoError>> {
+        {
+            let mut io = self.io.lock();
+            // Devices without a cache, or a medium to eject, may refuse
+            // either; neither stops the device from going.
+            let _ = self.command(&mut io, &[SYNCHRONIZE_CACHE_10, 0, 0, 0, 0, 0, 0, 0, 0, 0], Data::None);
+            let _ = self.command(&mut io, &[START_STOP_UNIT, 0, 0, 0, STOP_AND_EJECT, 0], Data::None);
+        }
+        log_info!("USB port {}: {} powered off", self.dev.port, self.name);
+        Some(if super::xhci::request_removal(&self.dev, 5000) { Ok(()) } else { Err(IoError) })
     }
 }
 

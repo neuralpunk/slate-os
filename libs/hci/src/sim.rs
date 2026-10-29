@@ -19,7 +19,9 @@
 //!   Complete, Link Key Notification and Authentication Complete;
 //! - Disconnect, Remote_Name_Request, and the setup commands.
 //!
-//! It holds no radio, no timing and no ACL data: events come at once.
+//! It holds no radio and no timing: events come at once. With the `smp`
+//! feature it has LE devices too ([`crate::sim_le`]: a mouse that pairs and
+//! reports), and carries their ACL data.
 
 use alloc::collections::VecDeque;
 use alloc::string::String;
@@ -81,6 +83,21 @@ pub struct Controller {
     out: VecDeque<Vec<u8>>,
     /// What happened, in words (the scenario logs it).
     pub log: Vec<String>,
+    /// LE devices in range (ADR 0176), whether the host scans, the
+    /// connection it is making, the next LE handle, randomness for
+    /// pairing, and the host's ACL data put back together.
+    #[cfg(feature = "smp")]
+    pub le: Vec<crate::sim_le::LeRemote>,
+    #[cfg(feature = "smp")]
+    pub(crate) le_scan: bool,
+    #[cfg(feature = "smp")]
+    pub(crate) le_initiating: Option<(u8, BdAddr)>,
+    #[cfg(feature = "smp")]
+    pub(crate) next_le_handle: u16,
+    #[cfg(feature = "smp")]
+    pub(crate) seed: u64,
+    #[cfg(feature = "smp")]
+    pub(crate) le_reassembler: crate::l2cap::Reassembler,
 }
 
 impl Controller {
@@ -95,6 +112,18 @@ impl Controller {
             next_handle: 0x0B,
             out: VecDeque::new(),
             log: Vec::new(),
+            #[cfg(feature = "smp")]
+            le: Vec::new(),
+            #[cfg(feature = "smp")]
+            le_scan: false,
+            #[cfg(feature = "smp")]
+            le_initiating: None,
+            #[cfg(feature = "smp")]
+            next_le_handle: 0,
+            #[cfg(feature = "smp")]
+            seed: 0x5EED,
+            #[cfg(feature = "smp")]
+            le_reassembler: crate::l2cap::Reassembler::default(),
         }
     }
 
@@ -103,17 +132,23 @@ impl Controller {
         self.out.drain(..).collect()
     }
 
-    fn ev(&mut self, code: u8, params: &[u8]) {
+    pub(crate) fn ev(&mut self, code: u8, params: &[u8]) {
         self.out.push_back(event(code, params));
     }
 
-    fn complete(&mut self, opcode: u16, ret: &[u8]) {
+    /// A packet for the host (an event or ACL data), framed.
+    #[cfg(feature = "smp")]
+    pub(crate) fn push(&mut self, packet: Vec<u8>) {
+        self.out.push_back(packet);
+    }
+
+    pub(crate) fn complete(&mut self, opcode: u16, ret: &[u8]) {
         let mut p = alloc::vec![1, opcode as u8, (opcode >> 8) as u8];
         p.extend_from_slice(ret);
         self.ev(EV_COMMAND_COMPLETE, &p);
     }
 
-    fn status(&mut self, opcode: u16, status: u8) {
+    pub(crate) fn status(&mut self, opcode: u16, status: u8) {
         self.ev(EV_COMMAND_STATUS, &[status, 1, opcode as u8, (opcode >> 8) as u8]);
     }
 
@@ -179,10 +214,16 @@ impl Controller {
     /// A command from the host, framed.
     pub fn command(&mut self, packet: &[u8]) {
         let Some((op, p)) = parse_command(packet) else { return };
+        #[cfg(feature = "smp")]
+        if self.le_command(op, p) {
+            return;
+        }
         let addr = BdAddr::from_wire(p).unwrap_or_default();
         match op {
             OP_RESET => {
                 self.conns.clear();
+                #[cfg(feature = "smp")]
+                self.le_reset();
                 self.scan = 0;
                 self.complete(op, &[0]);
             }

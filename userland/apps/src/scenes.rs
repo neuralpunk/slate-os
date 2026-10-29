@@ -62,6 +62,8 @@ fn scenes() -> Vec<(&'static str, Canvas)> {
             Icon::Sliders,
             Icon::Activity,
             Icon::Download,
+            Icon::Cards,
+            Icon::Flag,
         ];
         let mut canvas = Canvas::new(icons.len() as i32 * 56 + 16, 104, g.window);
         let mut cache = GlyphCache::new();
@@ -290,17 +292,18 @@ fn scenes() -> Vec<(&'static str, Canvas)> {
         out.push(("files-properties-light", window(&mut f, 900, 600, &Palette::DAY)));
         f.props = None;
         // Copying in the background: how far it is.
-        f.transfer = Some(crate::files::Transfer {
+        f.transfers = std::vec![crate::files::Transfer {
             list: std::vec![(String::from("/a"), String::from("/b")); 4],
             cut: false,
             total: 2_400_000_000,
             done: 1_000_000_000,
             at: 1,
             removing: false,
+            counted: true,
             job: None,
-        });
+        }];
         out.push(("files-copying", window(&mut f, 900, 600, &g)));
-        f.transfer = None;
+        f.transfers.clear();
         // Dragging the chosen files onto the letters folder.
         f.dragging = Some(crate::files::Dragging {
             paths: std::vec![format!("{h}/Documents/budget 2026.ods"), format!("{h}/Documents/photos.tar.gz")],
@@ -338,6 +341,22 @@ fn scenes() -> Vec<(&'static str, Canvas)> {
         d.view = View::Grid;
         out.push(("files-grid-documents", window(&mut d, 900, 600, &g)));
         out.push(("files-grid-documents-light", window(&mut d, 900, 600, &Palette::DAY)));
+        // Text files' first lines as their thumbnails.
+        let notes = format!("{h}/Documents/notes.md");
+        std::fs::write(
+            &notes,
+            "# Notes\n\nBuy bread, milk\nCall the garage\n\n- slate 0.9 out\n- fix the gate\n\tindented\n",
+        )
+        .unwrap();
+        std::fs::File::options().write(true).open(&notes).unwrap().set_modified(t).unwrap();
+        d.load();
+        let _ = window(&mut d, 900, 600, &g);
+        for _ in 0..4 {
+            d.tick(crate::kit::Now::default());
+        }
+        out.push(("files-grid-text", window(&mut d, 900, 600, &g)));
+        out.push(("files-grid-text-light", window(&mut d, 900, 600, &Palette::DAY)));
+        std::fs::remove_file(&notes).unwrap();
         let trash = Trash { dir: format!("{h}/.local/share/Trash"), top: None };
         trash.put(&format!("{h}/Documents/plan.txt"), 1_603_108_800).unwrap();
         f.menu = None;
@@ -562,6 +581,80 @@ fn scenes() -> Vec<(&'static str, Canvas)> {
         u.updates = crate::updater::tests::sample().updates;
         u.restart_wanted = true;
         out.push(("updater-apps-all", window(&mut u, 680, 760, &g)));
+    }
+    {
+        // Solitaire (ADR 0177): a deal, in both themes; a run dragged
+        // over a column; drawing three; solved.
+        use crate::solitaire::{Held, Pile, Solitaire};
+        let mut s = Solitaire::new(7, false);
+        out.push(("solitaire", window(&mut s, 820, 640, &g)));
+        out.push(("solitaire-light", window(&mut s, 820, 640, &Palette::DAY)));
+        s.cursor = (Pile::Tab(3), 3);
+        s.keys_used = true;
+        let from = (0..7).find(|&i| s.game.table.tab[i].len() == 7).unwrap_or(6);
+        let k = s.game.table.tab[from].len() - 1;
+        s.held = Some(Held {
+            from: Pile::Tab(from),
+            index: k,
+            grab: (20.0, 20.0),
+            at: (420.0, 420.0),
+            moved: true,
+            by_keys: false,
+        });
+        out.push(("solitaire-dragging", window(&mut s, 820, 640, &g)));
+        s.held = None;
+        let mut s = Solitaire::new(7, true);
+        for _ in 0..2 {
+            s.key(0, Some('d'), 0);
+        }
+        out.push(("solitaire-draw-three", window(&mut s, 820, 640, &g)));
+        let mut s = Solitaire::new(7, false);
+        for suit in 0..4u8 {
+            s.game.table.found[usize::from(suit)] =
+                (1..=13).map(|rank| crate::solitaire::Card { rank, suit, up: true }).collect();
+        }
+        s.game.table.tab = Default::default();
+        s.game.table.stock.clear();
+        s.game.moves = 112;
+        s.won_for_scene(287_000);
+        out.push(("solitaire-won", window(&mut s, 820, 640, &Palette::DAY)));
+    }
+    {
+        // Mines (ADR 0177): a fresh board; one under way, flags placed and
+        // the keys' cursor; lost, in the light theme; cleared.
+        use crate::mines::{Mines, State};
+        let mut m = Mines::new(0, 11);
+        out.push(("mines", window(&mut m, 560, 640, &g)));
+        let mut m = Mines::new(1, 11);
+        let _ = window(&mut m, 560, 640, &g);
+        let (gx, gy) = (280.0, 330.0);
+        m.click(gx, gy);
+        // Flag every mine touching an open square, as a player would.
+        let b = m.board.clone();
+        for (i, sq) in b.squares.iter().enumerate() {
+            if sq.mine && b.around(i).iter().any(|&j| b.squares[j].open) {
+                m.board.flag(i);
+            }
+        }
+        m.keys_used = true;
+        m.cursor = m.board.at(8, 3);
+        out.push(("mines-playing", window(&mut m, 560, 640, &g)));
+        let mine = m.board.squares.iter().position(|s| s.mine && !s.flag).unwrap_or(0);
+        m.keys_used = false;
+        m.board.open(mine);
+        assert!(matches!(m.board.state, State::Lost(_)));
+        m.status = alloc::string::String::from("A mine. ctrl n starts again.");
+        out.push(("mines-lost-light", window(&mut m, 560, 640, &Palette::DAY)));
+        let mut m = Mines::new(0, 11);
+        let _ = window(&mut m, 560, 640, &g);
+        m.click(280.0, 330.0);
+        let safe: alloc::vec::Vec<usize> = (0..81).filter(|&i| !m.board.squares[i].mine).collect();
+        for i in safe {
+            m.board.open(i);
+        }
+        m.best[0] = Some(38);
+        m.status = alloc::string::String::from("Cleared, a best time.");
+        out.push(("mines-cleared", window(&mut m, 560, 640, &g)));
     }
     out
 }

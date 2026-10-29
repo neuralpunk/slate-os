@@ -21,6 +21,8 @@ extern crate std;
 
 use alloc::vec::Vec;
 
+pub mod user;
+
 /// Usage pages (HID Usage Tables §3).
 pub const PAGE_GENERIC_DESKTOP: u16 = 0x01;
 pub const PAGE_KEYBOARD: u16 = 0x07;

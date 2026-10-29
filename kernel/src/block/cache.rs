@@ -339,6 +339,13 @@ impl BlockDevice for Cached {
         BYTES.fetch_sub(n * BLOCK, Ordering::Relaxed);
         self.inner.detach();
     }
+    fn power_off(&self) -> Option<core::result::Result<(), IoError>> {
+        // What the cache holds goes to the disk first.
+        if let Err(e) = self.flush() {
+            return Some(Err(e));
+        }
+        self.inner.power_off()
+    }
 }
 
 pub const TESTS: &[crate::ktest::Test] = &[crate::ktest::Test { name: "block::cache", run: test_cache }];

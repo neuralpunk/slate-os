@@ -148,6 +148,15 @@ pub struct Plan {
     /// namesake in /etc/slate/network (`*` for every card); None keeps the
     /// system's (DHCP).
     pub network: Option<slate_netconf::Card>,
+    /// The live system's Bluetooth pairings, carried to the new system so
+    /// a Bluetooth mouse goes on working after the first restart (ADR
+    /// 0176): each file of /var/lib/slate/bluetooth (its path there and
+    /// contents).
+    pub bluetooth: Vec<(String, Vec<u8>)>,
+    /// Install the Bluetooth controllers' firmware package (the machine
+    /// has a controller that needs it; ADR 0176). A medium without the
+    /// package installs without it.
+    pub bluetooth_firmware: bool,
 }
 
 /// How the disk is laid out.
@@ -358,7 +367,86 @@ fn plan_with(
         desktop: false,
         full_graphics: false,
         network: None,
+        bluetooth: Vec::new(),
+        bluetooth_firmware: false,
     }
+}
+
+/// Whether this machine has a Bluetooth controller that needs its
+/// firmware from Slate: a MediaTek USB device (vendor 0e8d) with a
+/// Bluetooth interface (class e0), from /sys/bus/usb/devices.
+pub fn needs_bluetooth_firmware() -> bool {
+    let read = |p: &str| slate_rt::fs::read_file(p.as_bytes()).map(|b| String::from(slate_rt::lossy(&b).trim())).ok();
+    let Ok(entries) = slate_rt::fs::read_dir(b"/sys/bus/usb/devices") else { return false };
+    let names: Vec<String> = entries.iter().map(|e| String::from(slate_rt::lossy(&e.name))).collect();
+    names.iter().filter(|n| !n.contains(':')).any(|dev| {
+        read(&format!("/sys/bus/usb/devices/{dev}/idVendor")).as_deref() == Some("0e8d")
+            && names
+                .iter()
+                .filter(|i| i.starts_with(&format!("{dev}:")))
+                .any(|i| read(&format!("/sys/bus/usb/devices/{i}/bInterfaceClass")).as_deref() == Some("e0"))
+    })
+}
+
+/// Where slate-btd keeps its pairings, in the var subvolume.
+const BLUETOOTH: &str = "lib/slate/bluetooth";
+
+/// The running system's Bluetooth pairings ([`Plan::bluetooth`]): the
+/// settings, the identity key and each paired device's file.
+pub fn live_pairings() -> Vec<(String, Vec<u8>)> {
+    let dir = format!("/var/{BLUETOOTH}");
+    let mut out = Vec::new();
+    for f in ["settings", "irk"] {
+        if let Ok(d) = slate_rt::fs::read_file(format!("{dir}/{f}").as_bytes()) {
+            out.push((String::from(f), d));
+        }
+    }
+    if let Ok(entries) = slate_rt::fs::read_dir(format!("{dir}/devices").as_bytes()) {
+        for e in entries {
+            let name = String::from(slate_rt::lossy(&e.name));
+            if name.starts_with('.') || name.contains('/') {
+                continue;
+            }
+            if let Ok(d) = slate_rt::fs::read_file(format!("{dir}/devices/{name}").as_bytes()) {
+                out.push((format!("devices/{name}"), d));
+            }
+        }
+    }
+    out
+}
+
+/// The pairings in the new system: root's alone (0700 folders, 0600
+/// files), as slate-btd keeps them.
+fn put_pairings(fs: &mut Fs<Region<'_>>, var: u64, files: &[(String, Vec<u8>)], now: i64) -> Result<()> {
+    let fail = |p: &str, e: slatefs::Error| err(format!("/var/{BLUETOOTH}/{p}: {e:?}"));
+    let mut dir = ROOT_INO;
+    for d in BLUETOOTH.split('/') {
+        let mode = if d == "bluetooth" { 0o700 } else { 0o755 };
+        dir = match fs.lookup(var, dir, d.as_bytes()) {
+            Ok(i) => i,
+            Err(_) => fs.mkdir(var, dir, d.as_bytes(), mode, 0, 0).map_err(|e| fail(d, e))?,
+        };
+    }
+    let devices = match fs.lookup(var, dir, b"devices") {
+        Ok(i) => i,
+        Err(_) => fs.mkdir(var, dir, b"devices", 0o700, 0, 0).map_err(|e| fail("devices", e))?,
+    };
+    for (path, data) in files {
+        let (parent, name) = match path.strip_prefix("devices/") {
+            Some(n) => (devices, n),
+            None => (dir, path.as_str()),
+        };
+        if name.is_empty() || name.contains('/') || name.starts_with('.') {
+            continue;
+        }
+        if fs.lookup(var, parent, name.as_bytes()).is_ok() {
+            fs.unlink(var, parent, name.as_bytes()).map_err(|e| fail(path, e))?;
+        }
+        let ino = fs.create(var, parent, name.as_bytes(), 0o100_600, 0, 0, 0).map_err(|e| fail(path, e))?;
+        fs.write(var, ino, 0, data).map_err(|e| fail(path, e))?;
+        fs.set_times(var, ino, None, Some((now, 0))).map_err(|e| fail(path, e))?;
+    }
+    Ok(())
 }
 
 /// The steps, for progress reports.
@@ -833,36 +921,58 @@ const GRAPHICS_TRIAL: &str = "lib/slate/graphics-trial";
 /// `slate-firmware-gpu` from the payload's repository, its signature
 /// checked against the system's quarry keys.
 pub fn firmware_package(entries: &[slate_cpio::Entry<'_>]) -> Result<slate_qpkg::archive::Package> {
+    media_package(entries, slate_display::graphics::PACKAGE, "AMD's firmware package").map_err(|e| {
+        if e.0.contains("no such") { err("this medium has no full graphics (no AMD firmware package)") } else { e }
+    })
+}
+
+/// The Bluetooth controllers' firmware package (ADR 0176), installed when
+/// the machine has a controller that needs it.
+pub const BLUETOOTH_FIRMWARE: &str = "slate-firmware-bt";
+
+/// Package `want` from the payload's repository, its signature checked
+/// against the system's quarry keys (`what` names it in errors).
+fn media_package(entries: &[slate_cpio::Entry<'_>], want: &str, what: &str) -> Result<slate_qpkg::archive::Package> {
     let name = |e: &slate_cpio::Entry<'_>| String::from(e.name.trim_start_matches("./"));
     let keys: Vec<slate_qpkg::PublicKey> = entries
         .iter()
         .filter(|e| name(e).starts_with("usr/share/quarry/keys/") && name(e).ends_with(".pub"))
         .filter_map(|e| slate_qpkg::PublicKey::parse(&String::from_utf8_lossy(e.data)).ok())
         .collect();
-    let prefix = format!("{MEDIA_PKGS}/{}-", slate_display::graphics::PACKAGE);
+    let prefix = format!("{MEDIA_PKGS}/{want}-");
     let qpk = entries
         .iter()
         .find(|e| name(e).starts_with(&prefix) && name(e).ends_with(".qpk"))
-        .ok_or_else(|| err("this medium has no full graphics (no AMD firmware package)"))?;
+        .ok_or_else(|| err(format!("no such package on this medium: {want}")))?;
     let pkg = slate_qpkg::archive::read(qpk.data, &slate_qpkg::Keyring::new(keys))
-        .map_err(|e| err(format!("AMD's firmware package: {e}")))?;
-    if pkg.manifest.name != slate_display::graphics::PACKAGE {
-        return Err(err(format!("AMD's firmware package is {}", pkg.manifest.name)));
+        .map_err(|e| err(format!("{what}: {e}")))?;
+    if pkg.manifest.name != want {
+        return Err(err(format!("{what} is {}", pkg.manifest.name)));
     }
     Ok(pkg)
 }
 
-/// Full graphics (ADR 0173): the firmware package's files in the system,
-/// quarry's record of them (as `quarry install` leaves it, so Settings and
-/// quarry can remove it), and the trial mark.
+/// Full graphics (ADR 0173): the firmware package installed, and the
+/// trial mark.
 fn install_firmware(
     fs: &mut Fs<Region<'_>>,
     svs: &BTreeMap<&str, u64>,
     entries: &[slate_cpio::Entry<'_>],
     now: i64,
 ) -> Result<()> {
+    install_package(fs, svs, firmware_package(entries)?, now)?;
+    put_file(fs, svs["var"], GRAPHICS_TRIAL, b"full\n", now)
+}
+
+/// A package's files in the system and quarry's record of them (as
+/// `quarry install` leaves it, so Settings and quarry can remove it).
+fn install_package(
+    fs: &mut Fs<Region<'_>>,
+    svs: &BTreeMap<&str, u64>,
+    pkg: slate_qpkg::archive::Package,
+    now: i64,
+) -> Result<()> {
     use slate_qpkg::Kind;
-    let pkg = firmware_package(entries)?;
     let sys = svs["system-1"];
     let mut record = String::new();
     for e in &pkg.entries {
@@ -908,7 +1018,7 @@ fn install_firmware(
     for (f, data) in files {
         put_file(fs, sys, &format!("{db}/{f}"), data, now)?;
     }
-    put_file(fs, svs["var"], GRAPHICS_TRIAL, b"full\n", now)
+    Ok(())
 }
 
 /// The directory holding `path` in subvolume `sv` (made, 0755, where
@@ -1106,6 +1216,15 @@ pub fn install(
     progress(Step::Copy(total, total));
     if plan.full_graphics {
         install_firmware(&mut fs, &svs, &entries, now.0)?;
+    }
+    if plan.bluetooth_firmware {
+        // A medium built without it installs without it.
+        if let Ok(pkg) = media_package(&entries, BLUETOOTH_FIRMWARE, "the Bluetooth firmware package") {
+            install_package(&mut fs, &svs, pkg, now.0)?;
+        }
+    }
+    if !plan.bluetooth.is_empty() {
+        put_pairings(&mut fs, svs["var"], &plan.bluetooth, now.0)?;
     }
 
     progress(Step::Account);

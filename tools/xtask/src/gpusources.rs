@@ -8,7 +8,10 @@
 //! fetches some families only (all by default). Needs the internet.
 //!
 //! Linux is read for GPU drivers only (the addendum), and only these
-//! directories are fetched.
+//! directories are fetched; and, family `mediatek` (not fetched by
+//! default), drivers/bluetooth for MediaTek's Bluetooth firmware download,
+//! of which only btmtk.c, btmtk.h and btusb.c's MediaTek parts may be read
+//! (ADR 0176).
 
 use std::path::Path;
 use std::process::Command;
@@ -64,6 +67,13 @@ const SOURCES: &[Source] = &[
         paths: &["drivers/gpu/drm/i915/display", "drivers/gpu/drm/xe"],
     },
     Source {
+        family: "mediatek",
+        name: "linux",
+        url: "https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git",
+        version: "v7.2.12",
+        paths: &["drivers/bluetooth"],
+    },
+    Source {
         family: "dp",
         name: "linux",
         url: "https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git",
@@ -77,18 +87,16 @@ pub fn fetch() -> Result {
     let want: Vec<&str> = want.split(',').map(str::trim).collect();
     let base = target_dir().join("gpu/sources");
     std::fs::create_dir_all(&base).map_err(|e| e.to_string())?;
-    // Sources sharing a clone (Linux) get the union of their paths.
+    // Sources sharing a clone (Linux) get the union of every family's paths
+    // (a sparse checkout set to one family's would drop the others').
     let mut done: Vec<&str> = Vec::new();
     for s in SOURCES.iter().filter(|s| want.contains(&s.family)) {
         if done.contains(&s.name) {
             continue;
         }
         done.push(s.name);
-        let mut paths: Vec<&str> = SOURCES
-            .iter()
-            .filter(|o| o.name == s.name && want.contains(&o.family))
-            .flat_map(|o| o.paths.iter().copied())
-            .collect();
+        let mut paths: Vec<&str> =
+            SOURCES.iter().filter(|o| o.name == s.name).flat_map(|o| o.paths.iter().copied()).collect();
         paths.dedup();
         let dir = base.join(format!("{}@{}", s.name, s.version));
         clone(s, &dir, &paths)?;

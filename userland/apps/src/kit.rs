@@ -428,6 +428,9 @@ pub struct Job {
     got: Vec<u8>,
     /// What the work last said of how far it is.
     pub progress: Option<String>,
+    /// Everything the work said, in order, when it was started with
+    /// [`Job::listing`] (results as they are found).
+    pub said: Option<Vec<String>>,
 }
 
 /// How a [`Job`]'s work says how far it is.
@@ -463,7 +466,7 @@ impl Job {
             }
             Ok(pid) => {
                 let _ = slate_rt::io::close(w);
-                Ok(Job { pid, fd: r, got: Vec::new(), progress: None })
+                Ok(Job { pid, fd: r, got: Vec::new(), progress: None, said: None })
             }
             Err(e) => {
                 let _ = slate_rt::io::close(r);
@@ -471,6 +474,14 @@ impl Job {
                 Err(alloc::format!("{e}"))
             }
         }
+    }
+
+    /// Start `work` in a child process, keeping everything it says (in
+    /// [`Job::said`], for the caller to take).
+    pub fn listing(work: impl FnOnce(&mut Report) -> Result<String, String>) -> Result<Job, String> {
+        let mut j = Job::reporting(work)?;
+        j.said = Some(Vec::new());
+        Ok(j)
     }
 
     /// The outcome, once the work is done.
@@ -489,7 +500,11 @@ impl Job {
             while self.got.first() == Some(&b'p')
                 && let Some(end) = self.got.iter().position(|&b| b == 0)
             {
-                self.progress = Some(String::from(slate_rt::lossy(&self.got[1..end])));
+                let text = String::from(slate_rt::lossy(&self.got[1..end]));
+                match &mut self.said {
+                    Some(all) => all.push(text),
+                    None => self.progress = Some(text),
+                }
                 self.got.drain(..=end);
             }
         }

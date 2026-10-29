@@ -21,6 +21,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use slate_ui::icon::Icon;
+use slate_ui::themes::Stratum;
 
 use crate::draw::{Row, Section};
 
@@ -36,6 +37,9 @@ pub struct App {
     pub category: String,
     /// What it is for, in a line.
     pub comment: String,
+    /// Its colour in themes with app accents (`accent=`, one of the five
+    /// strata; ADR 0167's addendum).
+    pub accent: Option<Stratum>,
 }
 
 /// The categories in the order they are listed; others follow by name.
@@ -83,6 +87,7 @@ pub fn parse_app(text: &str) -> Option<App> {
         linux: false,
         category: String::from("other"),
         comment: String::new(),
+        accent: None,
     };
     for line in text.lines() {
         let Some((k, v)) = line.split_once('=') else { continue };
@@ -94,6 +99,8 @@ pub fn parse_app(text: &str) -> Option<App> {
             "linux" => app.linux = v == "yes",
             "category" => app.category = v.to_lowercase(),
             "comment" => app.comment = String::from(v),
+            // Anything but the five is ignored: no app brings its own hue.
+            "accent" => app.accent = Stratum::parse(v),
             "icon" => {
                 app.icon = match v {
                     "folder" => Icon::Folder,
@@ -103,6 +110,8 @@ pub fn parse_app(text: &str) -> Option<App> {
                     "search" => Icon::Search,
                     "sliders" => Icon::Sliders,
                     "calculator" => Icon::Calculator,
+                    "cards" => Icon::Cards,
+                    "flag" => Icon::Flag,
                     "clock" => Icon::Clock,
                     "info" => Icon::Info,
                     "picture" => Icon::Picture,
@@ -163,6 +172,7 @@ pub fn parse_desktop_entry(text: &str) -> Option<App> {
         linux: true,
         category: String::from(category),
         comment,
+        accent: None,
     })
 }
 
@@ -559,6 +569,16 @@ mod tests {
         .iter()
         .filter_map(|t| parse_app(t))
         .collect()
+    }
+
+    #[test]
+    fn accents() {
+        let with = |v: &str| parse_app(&alloc::format!("name=X\nexec=/bin/x\naccent={v}")).unwrap().accent;
+        assert_eq!(with("sage"), Some(Stratum::Sage));
+        assert_eq!(with(" Slate "), Some(Stratum::Slate));
+        // A hue of its own is ignored.
+        assert_eq!(with("#ff00ff"), None);
+        assert_eq!(apps()[0].accent, None);
     }
 
     #[test]

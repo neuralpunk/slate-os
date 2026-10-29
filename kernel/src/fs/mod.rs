@@ -1008,6 +1008,8 @@ pub fn devfs_root() -> Arc<dyn vfs::Inode> {
     if let Ok(net) = dev.mkdir("net", 0o755) {
         let _ = net.create("tun", S_IFCHR | 0o666, makedev(MISC_MAJOR, TUN_MINOR));
     }
+    // HID devices from user space (ADR 0176): root's.
+    let _ = dev.create("slate-hid", S_IFCHR | 0o600, makedev(MISC_MAJOR, crate::drivers::input::user::USER_HID_MINOR));
     for (name, target) in [
         ("fd", "/proc/self/fd"),
         ("stdin", "/proc/self/fd/0"),

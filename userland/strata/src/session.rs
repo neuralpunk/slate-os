@@ -440,6 +440,15 @@ pub fn load_italics() -> Vec<Vec<u8>> {
     ITALIC_FILES.iter().map_while(|n| fs::read_file(alloc::format!("{FONT_DIR}/{n}").as_bytes()).ok()).collect()
 }
 
+/// The themes' serifs from [`FONT_DIR`] (ADR 0175): all three, or none.
+pub fn load_serifs() -> Vec<Vec<u8>> {
+    let all: Vec<Vec<u8>> = crate::fonts::SERIF_FILES
+        .iter()
+        .map_while(|n| fs::read_file(alloc::format!("{FONT_DIR}/{n}").as_bytes()).ok())
+        .collect();
+    if all.len() == crate::fonts::SERIF_FILES.len() { all } else { Vec::new() }
+}
+
 /// Load Strata's fonts from [`FONT_DIR`] (apps use them too).
 pub fn load_fonts() -> Result<Vec<Vec<u8>>, String> {
     FILES
@@ -463,10 +472,15 @@ pub fn main() -> i32 {
         }
     };
     let refs: [&[u8]; 5] = core::array::from_fn(|i| files[i].as_slice());
-    let Some(fonts) = Fonts::new(refs) else {
+    let Some(mut fonts) = Fonts::new(refs) else {
         slate_rt::eprintln!("strata: the fonts in {FONT_DIR} are damaged");
         return 1;
     };
+    // The themes' serifs, when they are installed (ADR 0175).
+    let serifs = load_serifs();
+    if let Ok(s) = <&[Vec<u8>; 3]>::try_from(serifs.as_slice()) {
+        fonts = fonts.with_serifs([s[0].as_slice(), s[1].as_slice(), s[2].as_slice()]);
+    }
     // Root opens the card itself; anyone else asks seatd for it.
     let card = slate_display::kms::card();
     let (fd, seat) = match fs::open(&card, fs::O_RDWR | fs::O_CLOEXEC, 0) {
@@ -506,7 +520,7 @@ pub fn main() -> i32 {
         }
     };
     let mut apps = load_apps();
-    server.icons = apps.iter().filter(|a| !a.linux).map(|a| (a.exec.clone(), a.icon)).collect();
+    server.icons = apps.iter().filter(|a| !a.linux).map(|a| (a.exec.clone(), a.icon, a.accent)).collect();
     // The app entries are read again as the launcher or the menu opens:
     // an app just installed (App Center, ADR 0125) is there at once.
     let fresh_apps = |apps: &mut Vec<App>| *apps = load_apps();

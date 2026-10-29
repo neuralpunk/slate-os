@@ -38,6 +38,7 @@ const GET_DESCRIPTOR: u8 = 6;
 const DESC_HUB: u16 = 0x29;
 
 // Port features (table 11-17).
+const PORT_ENABLE: u16 = 1;
 const PORT_RESET: u16 = 4;
 const PORT_POWER: u16 = 8;
 const C_PORT_CONNECTION: u16 = 16;
@@ -69,6 +70,9 @@ pub struct Hub {
     pending: AtomicU32,
     /// Changes come through the status-change endpoint.
     endpoint: AtomicBool,
+    /// Ports whose device was removed on request (disabled): left alone
+    /// until it is unplugged.
+    parked: Mutex<alloc::collections::BTreeSet<u8>>,
 }
 
 impl Hub {
@@ -123,6 +127,20 @@ impl Hub {
     /// found behind this one.
     pub fn poll(&self, hc: &Arc<Xhci>) -> Vec<Arc<Hub>> {
         let mut found = Vec::new();
+        // Devices whose removal was asked for: forgotten, and their port
+        // disabled (USB 2.0 §11.24.2.2: ClearPortFeature(PORT_ENABLE)).
+        let asked: Vec<(u8, Arc<UsbDevice>)> = {
+            let mut ch = self.children.lock();
+            let ports: Vec<u8> =
+                ch.iter().filter(|(_, d)| d.removal.load(Ordering::Acquire)).map(|(p, _)| *p).collect();
+            ports.into_iter().filter_map(|p| ch.remove(&p).map(|d| (p, d))).collect()
+        };
+        for (port, d) in asked {
+            xhci::detach(&d);
+            self.port_feature(false, PORT_ENABLE, port);
+            self.parked.lock().insert(port);
+            log_info!("USB port {}.{port}: disabled; unplug the device to use the port again", self.dev.port);
+        }
         let all = ((1u32 << (u32::from(self.ports) + 1)) - 1) & !1;
         let changed = if self.reports_changes() { self.pending.swap(0, Ordering::AcqRel) } else { all | 1 };
         if changed & 1 != 0 {
@@ -145,6 +163,11 @@ impl Hub {
             }
             let connected = status & STATUS_CONNECTION != 0;
             let known = self.children.lock().contains_key(&port);
+            if !connected {
+                self.parked.lock().remove(&port);
+            } else if self.parked.lock().contains(&port) {
+                continue;
+            }
             if connected && !known {
                 // Debounce (§7.1.7.3), then reset.
                 delay_ms(100);
@@ -230,6 +253,7 @@ pub fn start(dev: &Arc<UsbDevice>, protocol: u8, iface: &InterfaceDesc) -> Optio
         dev: dev.clone(),
         ports,
         children: Mutex::new(BTreeMap::new()),
+        parked: Mutex::new(alloc::collections::BTreeSet::new()),
         sub_hubs: Mutex::new(Vec::new()),
         // Every port, at first.
         pending: AtomicU32::new(((1u32 << (u32::from(ports) + 1)) - 1) & !1),

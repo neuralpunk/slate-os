@@ -37,7 +37,13 @@ fn source() -> PathBuf {
 
 /// The decompressed file `name`, from the cache or the source.
 fn file(name: &str) -> Option<Vec<u8>> {
-    let cached = target_dir().join("gpu/firmware").join(name);
+    linux_firmware(name, "gpu/firmware")
+}
+
+/// linux-firmware's file `name`, decompressed (it may be xz'd) and kept in
+/// target/`cache`.
+pub fn linux_firmware(name: &str, cache: &str) -> Option<Vec<u8>> {
+    let cached = target_dir().join(cache).join(name);
     if let Ok(b) = std::fs::read(&cached) {
         return Some(b);
     }

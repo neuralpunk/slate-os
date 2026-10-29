@@ -15,7 +15,16 @@
 
 extern crate alloc;
 
+pub mod att;
+pub mod hogp;
+pub mod l2cap;
+pub mod le;
+pub mod mtk;
 pub mod sim;
+#[cfg(feature = "smp")]
+pub mod sim_le;
+#[cfg(feature = "smp")]
+pub mod smp;
 
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -179,9 +188,9 @@ pub mod cmd {
     pub fn read_buffer_size() -> Vec<u8> {
         command(OP_READ_BUFFER_SIZE, &[])
     }
-    /// Every event up to bit 60 (§7.3.1; the rest are reserved).
+    /// Every event up to bit 61, LE Meta (§7.3.1; the rest are reserved).
     pub fn set_event_mask() -> Vec<u8> {
-        command(OP_SET_EVENT_MASK, &0x1FFF_FFFF_FFFF_FFFFu64.to_le_bytes())
+        command(OP_SET_EVENT_MASK, &0x3FFF_FFFF_FFFF_FFFFu64.to_le_bytes())
     }
     pub fn write_simple_pairing_mode(on: bool) -> Vec<u8> {
         command(OP_WRITE_SIMPLE_PAIRING_MODE, &[u8::from(on)])
@@ -348,10 +357,21 @@ pub enum Event {
         addr: BdAddr,
     },
     HardwareError(u8),
+    /// Encryption Change (§7.7.8), or a key refresh (on: true).
+    EncryptionChange {
+        status: u8,
+        handle: u16,
+        on: bool,
+    },
+    /// Number Of Completed Packets: (handle, packets) the controller has
+    /// sent and freed (§7.7.19).
+    Completed(Vec<(u16, u16)>),
+    /// An LE Meta event (§7.7.65).
+    Le(le::LeEvent),
     Other(u8),
 }
 
-fn u16_at(b: &[u8], at: usize) -> Option<u16> {
+pub(crate) fn u16_at(b: &[u8], at: usize) -> Option<u16> {
     Some(u16::from_le_bytes(b.get(at..at + 2)?.try_into().ok()?))
 }
 
@@ -450,6 +470,19 @@ pub fn parse_event(p: &[u8]) -> Option<Event> {
         EV_USER_PASSKEY_NOTIFICATION => Event::PasskeyNotification { addr: addr(0)?, passkey: u32_at(b, 6)? },
         EV_SIMPLE_PAIRING_COMPLETE => Event::SimplePairingComplete { status: b[0], addr: addr(1)? },
         EV_HARDWARE_ERROR => Event::HardwareError(*b.first()?),
+        le::EV_ENCRYPTION_CHANGE => {
+            Event::EncryptionChange { status: b[0], handle: u16_at(b, 1)? & 0x0FFF, on: *b.get(3)? != 0 }
+        }
+        le::EV_ENCRYPTION_KEY_REFRESH => {
+            Event::EncryptionChange { status: b[0], handle: u16_at(b, 1)? & 0x0FFF, on: true }
+        }
+        le::EV_NUMBER_OF_COMPLETED_PACKETS => {
+            let n = usize::from(*b.first()?);
+            Event::Completed(
+                (0..n).map(|i| Some((u16_at(b, 1 + 4 * i)? & 0x0FFF, u16_at(b, 3 + 4 * i)?))).collect::<Option<_>>()?,
+            )
+        }
+        le::EV_LE_META => Event::Le(le::parse_meta(b)?),
         c => Event::Other(c),
     })
 }

@@ -168,6 +168,19 @@ pub fn apps_scenario(o: &Opts) -> Result {
         con.wait_for("calculator: base 16: 0x10", 10)?;
         monitor(&mon, &["sendkey meta_l-q"])?;
         pause(800);
+        // Solitaire (ADR 0177): dealt (it says so before its window
+        // comes), the stock turned by key.
+        launch(&mon, &mut con, "solit", "solitaire")?;
+        type_keys(&mon, "d")?;
+        con.wait_for("solitaire: turned the stock (23 left)", 10)?;
+        monitor(&mon, &["sendkey meta_l-q"])?;
+        pause(600);
+        // Mines: the first square opened by key is never a mine.
+        launch(&mon, &mut con, "mines", "mines")?;
+        monitor(&mon, &["sendkey ret"])?;
+        con.wait_for("mines: opened, ", 10)?;
+        monitor(&mon, &["sendkey meta_l-q"])?;
+        pause(600);
         // The Clock: a timer, a place, and an alarm for the next minute.
         launch(&mon, &mut con, "clock", "clock")?;
         type_keys(&mon, "\t\t3\n")?;

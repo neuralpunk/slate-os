@@ -10,8 +10,8 @@ approval-error 7e3a4507a8bec574
 desktop-linux-focused f5c652abea4b0153
 desktop-linux-sandbox fcca3293f7df594f
 desktop-high-contrast 54d6b9b4fc0fb6fb
-desktop-copper-noir 5b2bbcb1af493c1c
-desktop-sediment 10438453f461c940
+desktop-copper-noir 738f91569e00ed50
+desktop-sediment 12d4e632d4fc111b
 empty-workspace f44e80c73a885738
 bar-updates dd01cef74c3cc99a
 floating 4314cf21b3557d77
@@ -24,10 +24,10 @@ snap-and-list f6215e59f6270557
 snap-quarters 0d5b6fd316c9f56c
 workspace-slide d1b7b4274e655b43
 motion dc50dfd2c37baa7b
-applications-menu a3f281d80743a492
-applications-menu-accessories 4dc826362392ffbd
-applications-menu-search 4b8bf404a796a634
-applications-menu-light 490aecaae666aa8d
+applications-menu ffdaad910d83b606
+applications-menu-accessories 8e7237d5fccaa07d
+applications-menu-search 801638aedca1f965
+applications-menu-light d2ceefa531443bc7
 desktop-live b7deeaff595dfe41
 power-dialog 5ea11b22b5344f10
 power-dialog-keys-light be59a28e29534e8d

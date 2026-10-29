@@ -182,6 +182,8 @@ pub const PROGRAMS: &[Program] = &[
     Program { package: "slate-terminal", binary: "terminal", links: Some(&[]), mode: 0o755, dir: "bin", system: true },
     // Slate's apps (M28, ADR 0104).
     Program { package: "slate-apps", binary: "calculator", links: Some(&[]), mode: 0o755, dir: "bin", system: true },
+    Program { package: "slate-apps", binary: "solitaire", links: Some(&[]), mode: 0o755, dir: "bin", system: true },
+    Program { package: "slate-apps", binary: "mines", links: Some(&[]), mode: 0o755, dir: "bin", system: true },
     Program { package: "slate-apps", binary: "clock", links: Some(&[]), mode: 0o755, dir: "bin", system: true },
     Program { package: "slate-apps", binary: "slate-help", links: Some(&[]), mode: 0o755, dir: "bin", system: true },
     Program { package: "slate-apps", binary: "image-viewer", links: Some(&[]), mode: 0o755, dir: "bin", system: true },

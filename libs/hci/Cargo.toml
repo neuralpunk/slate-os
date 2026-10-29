@@ -1,6 +1,6 @@
 [package]
 name = "slate-hci"
-description = "Bluetooth HCI (Core Specification 5.4, Vol 4): packets, commands, events, addresses, and a simulated BR/EDR controller with nearby devices for tests (ADR 0113)"
+description = "Bluetooth HCI (Core Specification 5.4, Vol 4): packets, commands, events, addresses, LE links (L2CAP, ATT, SMP, HID over GATT) and a simulated controller with nearby devices for tests (ADR 0113, ADR 0176)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -8,3 +8,15 @@ publish.workspace = true
 
 [lints]
 workspace = true
+
+[features]
+# LE pairing (SMP), its cryptography, and the simulated LE devices that
+# pair: the daemon and xtask's stand-in adapter want it, Strata doesn't.
+smp = ["dep:aes", "dep:p256"]
+
+[dependencies]
+# Vetted cryptography (ADR 0012's exception; already in DEPENDENCIES.md for
+# disk encryption and TLS): AES-128 for SMP's functions and AES-CMAC,
+# P-256 ECDH for LE Secure Connections (ADR 0176).
+aes = { version = "=0.8.4", default-features = false, optional = true }
+p256 = { version = "=0.13.2", default-features = false, features = ["ecdh"], optional = true }

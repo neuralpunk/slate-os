@@ -130,8 +130,10 @@ impl Hci {
     }
 }
 
-/// Start the Bluetooth controller on interface `iface` of `dev`.
-pub fn start(dev: &Arc<UsbDevice>, iface: &InterfaceDesc) {
+/// Start the Bluetooth controller on interface `iface` of `dev` (its
+/// vendor and product IDs `ids`): MediaTek's get their firmware first
+/// (`btmtk`).
+pub fn start(dev: &Arc<UsbDevice>, iface: &InterfaceDesc, ids: (u16, u16)) {
     let find = |kind: u8, input: bool| iface.endpoints.iter().find(|e| e.kind == kind && e.is_in() == input).copied();
     let (Some(intr), Some(bin), Some(bout)) = (find(EP_INTERRUPT, true), find(EP_BULK, true), find(EP_BULK, false))
     else {
@@ -215,8 +217,27 @@ pub fn start(dev: &Arc<UsbDevice>, iface: &InterfaceDesc) {
     }
     dev.bound(iface.number, "btusb");
     CONTROLLERS.lock().push(hci.clone());
-    log_info!("USB port {}: Bluetooth controller hci{index}", dev.port);
-    crate::fs::char_added(node(index));
+    if ids.0 == super::btmtk::VENDOR {
+        // The daemon gets it once its firmware is down (or failed: then
+        // it reports it not starting).
+        let d = dev.clone();
+        crate::sched::spawn("btmtk", move || {
+            super::btmtk::setup(&d, move |_| publish(&hci));
+        });
+        return;
+    }
+    publish(&hci);
+}
+
+/// Hand controller `h` to the daemon: /dev/hciN. What came during setup
+/// (events about the vendor commands) isn't the daemon's.
+fn publish(h: &Arc<Hci>) {
+    if h.gone() {
+        return;
+    }
+    h.rx.lock().queue.clear();
+    log_info!("USB port {}: Bluetooth controller hci{}", h.dev.port, h.index);
+    crate::fs::char_added(node(h.index));
 }
 
 fn node(index: u32) -> CharNode {

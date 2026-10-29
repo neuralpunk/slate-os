@@ -62,6 +62,23 @@ pub struct Shape {
     pub title_size: f32,
     pub title_semibold: bool,
     pub title_tracking: f32,
+    /// The theme's display serif for the window's name, and its size,
+    /// used when the face is installed (else the above; ADR 0175).
+    pub title_serif: Option<(Serif, f32)>,
+    /// The serif for the top bar's date, and its size (ADR 0175).
+    pub date_serif: Option<(Serif, f32)>,
+}
+
+/// The display serifs the themes in colour set a few strings in
+/// (ADR 0167, ADR 0175).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Serif {
+    /// Instrument Serif Italic: Copper Noir's date.
+    InstrumentItalic,
+    /// Fraunces 600: Sediment's window titles.
+    Fraunces,
+    /// Fraunces Italic 400: Sediment's date.
+    FrauncesItalic,
 }
 
 impl Shape {
@@ -86,6 +103,8 @@ impl Shape {
         title_size: 12.5,
         title_semibold: false,
         title_tracking: -0.005,
+        title_serif: None,
+        date_serif: None,
     };
 
     /// The light variant's: graphite's, with lighter shadows.

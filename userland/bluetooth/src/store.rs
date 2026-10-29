@@ -3,37 +3,95 @@
 //! What slate-btd keeps (ADR 0113), in /var/lib/slate/bluetooth (root's
 //! alone, mode 0700): `settings` (whether Bluetooth is on) and a file per
 //! paired device under `devices/`, named by its address, holding its
-//! name, kind, link key and key type. /var survives system rollbacks
-//! (ADR 0027), so pairings do too.
+//! name, kind, link key and key type; an LE device's (ADR 0176) its
+//! address type, long-term key, EDIV, Rand, whether Secure Connections
+//! made it, its identity key and address, and whether it paired by itself.
+//! /var survives system rollbacks (ADR 0027), so pairings do too; the
+//! installers carry the live system's to the installed one.
 
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 use slate_hci::{BdAddr, Kind};
 
-use crate::host::Device;
+use crate::host::{Device, LeInfo};
 
 pub const DIR: &str = "/var/lib/slate/bluetooth";
 
+fn hex(b: &[u8]) -> String {
+    b.iter().map(|b| alloc::format!("{b:02x}")).collect()
+}
+
+fn unhex<const N: usize>(s: &str) -> Option<[u8; N]> {
+    if s.len() != 2 * N {
+        return None;
+    }
+    let mut out = [0u8; N];
+    for (i, b) in out.iter_mut().enumerate() {
+        *b = u8::from_str_radix(s.get(2 * i..2 * i + 2)?, 16).ok()?;
+    }
+    Some(out)
+}
+
 /// A paired device's file.
 pub fn device_text(d: &Device) -> Option<String> {
+    let head = alloc::format!("name={}\nkind={}\n", d.name.replace('\n', " "), d.kind.word());
+    if let Some(LeInfo { addr_type, keys: Some(k), auto }) = &d.le {
+        let mut t = head;
+        t += &alloc::format!(
+            "le={}\nltk={}\nediv={}\nrand={}\nsecure={}\nauto={}\n",
+            if *addr_type == 1 { "random" } else { "public" },
+            hex(&k.ltk),
+            k.ediv,
+            k.rand,
+            u8::from(k.secure),
+            u8::from(*auto)
+        );
+        if let Some(irk) = k.irk {
+            t += &alloc::format!("irk={}\n", hex(&irk));
+        }
+        if let Some((kind, a)) = k.identity {
+            t += &alloc::format!("identity={kind} {a}\n");
+        }
+        return Some(t);
+    }
     let (key, kind) = d.key?;
-    let hex: String = key.iter().map(|b| alloc::format!("{b:02x}")).collect();
-    Some(alloc::format!("name={}\nkind={}\nkey={hex}\ntype={kind}\n", d.name.replace('\n', " "), d.kind.word()))
+    Some(alloc::format!("{head}key={}\ntype={kind}\n", hex(&key)))
 }
 
 /// A device from its file (`addr` is the file's name).
 pub fn parse_device(addr: &str, text: &str) -> Option<Device> {
     let addr = BdAddr::parse(addr)?;
     let field = |k: &str| text.lines().find_map(|l| l.strip_prefix(k)?.strip_prefix('=')).map(str::to_string);
-    let hex = field("key")?;
-    if hex.len() != 32 {
-        return None;
+    if let Some(le) = field("le") {
+        let keys = slate_hci::smp::Keys {
+            ltk: unhex(&field("ltk")?)?,
+            ediv: field("ediv")?.parse().ok()?,
+            rand: field("rand")?.parse().ok()?,
+            secure: field("secure").as_deref() == Some("1"),
+            irk: field("irk").and_then(|h| unhex(&h)),
+            identity: field("identity").and_then(|v| {
+                let (k, a) = v.split_once(' ')?;
+                Some((k.parse().ok()?, BdAddr::parse(a)?))
+            }),
+        };
+        return Some(Device {
+            addr,
+            name: field("name").unwrap_or_default(),
+            kind: Kind::from_word(&field("kind").unwrap_or_default()),
+            page_scan_mode: 0,
+            clock_offset: 0,
+            nearby: false,
+            key: None,
+            connected: None,
+            le: Some(LeInfo {
+                addr_type: u8::from(le == "random"),
+                keys: Some(keys),
+                auto: field("auto").as_deref() == Some("1"),
+            }),
+        });
     }
-    let mut key = [0u8; 16];
-    for (i, b) in key.iter_mut().enumerate() {
-        *b = u8::from_str_radix(&hex[2 * i..2 * i + 2], 16).ok()?;
-    }
+    let key = unhex::<16>(&field("key")?)?;
     Some(Device {
         addr,
         name: field("name").unwrap_or_default(),
@@ -43,6 +101,7 @@ pub fn parse_device(addr: &str, text: &str) -> Option<Device> {
         nearby: false,
         key: Some((key, field("type").and_then(|t| t.parse().ok()).unwrap_or(0))),
         connected: None,
+        le: None,
     })
 }
 
@@ -90,6 +149,23 @@ pub fn save(devices: &[Device]) -> Result<(), String> {
     Ok(())
 }
 
+/// The identity resolving key this computer hands out when it pairs an
+/// LE device: made once, kept.
+pub fn irk() -> [u8; 16] {
+    if let Ok(t) = slate_rt::fs::read_file(&path("irk"))
+        && let Some(k) = unhex::<16>(slate_rt::lossy(&t).trim())
+    {
+        return k;
+    }
+    let mut k = [0u8; 16];
+    let _ = slate_rt::process::random(&mut k);
+    for d in ["/var/lib/slate", DIR] {
+        let _ = slate_rt::fs::mkdir(d.as_bytes(), 0o700);
+    }
+    let _ = slate_rt::fs::write_file(&path("irk"), alloc::format!("{}\n", hex(&k)).as_bytes(), 0o600);
+    k
+}
+
 /// Whether Bluetooth was left on (it is, unless turned off).
 pub fn powered() -> bool {
     !slate_rt::fs::read_file(&path("settings"))
@@ -119,6 +195,7 @@ mod tests {
             nearby: true,
             key: Some(([0xAB; 16], 8)),
             connected: Some(11),
+            le: None,
         };
         let text = device_text(&d).unwrap();
         assert_eq!(text, "name=Ada's Phone\nkind=phone\nkey=abababababababababababababababab\ntype=8\n");
@@ -127,6 +204,27 @@ mod tests {
         assert!(!back.nearby && back.connected.is_none());
         assert!(parse_device("nonsense", &text).is_none());
         assert!(parse_device("5C:F3:70:11:22:33", "name=x\nkey=12\n").is_none());
-        assert!(device_text(&Device { key: None, ..d }).is_none());
+        assert!(device_text(&Device { key: None, ..d.clone() }).is_none());
+        // An LE device: its keys and identity, and that it paired by itself.
+        let keys = slate_hci::smp::Keys {
+            ltk: [0x11; 16],
+            ediv: 513,
+            rand: 77,
+            secure: true,
+            irk: Some([0x22; 16]),
+            identity: Some((1, BdAddr([0xDA, 0xDB, 0, 0x8C, 0xD8, 0xE5]))),
+        };
+        let m = Device {
+            addr: BdAddr([0xDA, 0xDB, 0, 0x8C, 0xD8, 0xE5]),
+            name: "Logi M650 L B".into(),
+            kind: Kind::Mouse,
+            key: None,
+            le: Some(LeInfo { addr_type: 1, keys: Some(keys), auto: true }),
+            ..d
+        };
+        let text = device_text(&m).unwrap();
+        let back = parse_device("DA:DB:00:8C:D8:E5", &text).unwrap();
+        assert_eq!((&back.le, back.kind, back.name.as_str()), (&m.le, Kind::Mouse, "Logi M650 L B"));
+        assert!(back.paired());
     }
 }

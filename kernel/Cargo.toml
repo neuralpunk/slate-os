@@ -21,6 +21,7 @@ slate-acpi = { path = "../libs/acpi" }
 slate-aml = { path = "../libs/aml" }
 slate-rtc = { path = "../libs/rtc" }
 slate-usb = { path = "../libs/usb" }
+slate-hci = { path = "../libs/hci" }
 slate-abi = { path = "../libs/abi" }
 slate-elf = { path = "../libs/elf" }
 slate-gpt = { path = "../libs/gpt" }

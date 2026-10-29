@@ -655,6 +655,14 @@ pub fn try_install(o: &Opts) -> Result {
     let mut c = machine(o)?;
     screen_size(&mut c)?;
     c.args(["-device", "qemu-xhci,id=xhci", "-device", "usb-kbd,bus=xhci.0", "-device", "virtio-tablet-pci"]);
+    // A host USB device handed to the guest, `VENDOR:PRODUCT` in hex (a
+    // Bluetooth controller, ADR 0176): the host loses it meanwhile, and
+    // QEMU needs read and write on its /dev/bus/usb node.
+    if let Ok(id) = std::env::var("SLATE_USB_HOST")
+        && let Some((v, p)) = id.split_once(':')
+    {
+        c.args(["-device", &format!("usb-host,bus=xhci.0,vendorid=0x{v},productid=0x{p}")]);
+    }
     if !o.disk_only {
         let stick = crate::iso::usb(o, false)?;
         // A copy: the image is rebuilt by other commands.
@@ -2972,6 +2980,10 @@ fn usb_scenario(o: &Opts) -> Result {
     data[1 << 20..(1 << 20) + 21].copy_from_slice(b"hello from the stick\n");
     std::fs::write(&stick, data).map_err(|e| e.to_string())?;
 
+    // A second stick, powered off from Slate (ADR 0108's second addendum).
+    let stick2 = target_dir().join("usb-stick2.img");
+    std::fs::write(&stick2, vec![0u8; 8 << 20]).map_err(|e| e.to_string())?;
+
     let mon = target_dir().join("usb-monitor.sock");
     let _ = std::fs::remove_file(&mon);
     let mut c = base_command(o, &img)?;
@@ -2984,6 +2996,8 @@ fn usb_scenario(o: &Opts) -> Result {
     c.args(["-device", "usb-kbd,bus=xhci.0,port=3"]);
     c.arg("-drive").arg(format!("file={},format=raw,if=none,id=stick", stick.display()));
     c.args(["-device", "usb-storage,bus=xhci.0,port=2,drive=stick,id=stickdev"]);
+    c.arg("-drive").arg(format!("file={},format=raw,if=none,id=stick2", stick2.display()));
+    c.args(["-device", "usb-storage,bus=xhci.0,port=4,drive=stick2,id=stick2dev,removable=on"]);
     c.args(["-display", "none", "-serial", "stdio", "-monitor"]);
     c.arg(format!("unix:{},server,nowait", mon.display()));
     let started = Instant::now();
@@ -3049,6 +3063,17 @@ fn usb_scenario(o: &Opts) -> Result {
             "unplugged-1",
             15,
         )?;
+        // The second stick (8 MiB, 16384 sectors), powered off: it leaves
+        // /dev, its port is disabled, and it doesn't come back while it
+        // stays plugged in.
+        con.run(
+            "for i in $(seq 100); do s2=$(for d in /sys/block/sd*; do [ $(cat $d/size) = 16384 ] && echo ${d##*/}; \
+             done); [ -n \"$s2\" ] && break; sleep 0.1; done; /sbin/slate-disk poweroff $s2; \
+             for i in $(seq 50); do [ ! -e /dev/$s2 ] && break; sleep 0.1; done; sleep 1; \
+             echo off-$(ls /dev | grep -c \"^$s2\")-$(dmesg | grep -c 'disabled; unplug the device')",
+            "off-0-1",
+            20,
+        )?;
         // In sysfs and lsusb (M23 phase 7): two root hubs, the hub with
         // the keyboard behind it, the stick; the mouse gone again.
         con.run("lsusb; lsusb -t; ls /sys/bus/usb/devices; echo listed", "listed", 10)?;
@@ -3087,7 +3112,7 @@ fn usb_scenario(o: &Opts) -> Result {
     }
     println!(
         "xtask: USB scenario passed (xHCI, hub with its status-change endpoint, keyboard, a mouse plugged into \
-         the hub and out, mass storage, unplugged; {:.2}s)",
+         the hub and out, mass storage, a stick powered off, unplugged; {:.2}s)",
         started.elapsed().as_secs_f64()
     );
     Ok(())

@@ -16,7 +16,8 @@
 //!                                                 the installer in a QEMU window, on a virtual disk
 //!                                                 that is kept (target/try-install-disk.img);
 //!                                                 --disk boots the installed system instead,
-//!                                                 --new-disk starts from an empty disk
+//!                                                 --new-disk starts from an empty disk;
+//!                                                 SLATE_USB_HOST=VID:PID hands it a host USB device
 //! cargo xtask test   [--release] [--bios] [--timeout SECS] [--scenarios=NAME,...|none]
 //! cargo xtask bench  [--release] [--bios]         the budgets: boot, RAM, size, shell start (ADR 0047), the desktop (ADR 0062),
 //!                                                 at 4K too (ADR 0157); SLATE_BENCH=system|desktop|4k for one part
@@ -50,6 +51,7 @@ mod apps;
 mod basepkg;
 mod bench;
 mod bluetooth;
+mod btfw;
 mod btredir;
 mod busybox;
 mod cacerts;

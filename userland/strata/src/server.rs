@@ -149,9 +149,10 @@ pub struct Server {
     /// The modifiers held, sent with pointer and wheel events (the session
     /// keeps it up to date).
     pub mods: u8,
-    /// The apps' programs and glyphs (`exec`, `icon`): a window's title
-    /// bar shows its program's (ADR 0124).
-    pub icons: Vec<(String, Icon)>,
+    /// The apps' programs, glyphs and accents (`exec`, `icon`, `accent`):
+    /// a window's title bar shows its program's (ADR 0124, ADR 0167's
+    /// addendum).
+    pub icons: Vec<(String, Icon, Option<slate_ui::themes::Stratum>)>,
     /// Files an app is dragging out of its window (ADR 0156): the window
     /// and the paths, until the session sees the button come up.
     pub drag: Option<(WinId, Vec<String>)>,
@@ -262,13 +263,11 @@ impl Server {
                 // The glyph of the app whose program the client runs, as
                 // the kernel names it (never what the client says).
                 let exe = fs::readlink(format!("/proc/{}/exe", c.pid).as_bytes()).ok();
-                let icon =
-                    exe.as_ref().and_then(|e| self.icons.iter().find(|(x, _)| x.as_bytes() == *e).map(|(_, i)| *i));
-                let program = exe.map(|e| String::from(lossy(e.rsplit(|&b| b == b'/').next().unwrap_or(&e))));
+                let entry = exe.as_ref().and_then(|e| self.icons.iter().find(|(x, ..)| x.as_bytes() == *e));
                 if let Some(w) = wm.get_mut(id) {
                     w.sandboxed = c.sandboxed;
-                    w.icon = icon;
-                    w.program = program;
+                    w.icon = entry.map(|(_, i, _)| *i);
+                    w.accent = entry.and_then(|(.., a)| *a);
                 }
                 slate_rt::eprintln!(
                     "strata: window {id} \"{app}\" from pid {} ({})",

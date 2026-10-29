@@ -29,6 +29,8 @@ pub mod files;
 pub mod fsops;
 pub mod help;
 pub mod kit;
+pub mod mines;
+pub mod solitaire;
 pub mod syntax;
 pub mod sysmon;
 pub mod updater;

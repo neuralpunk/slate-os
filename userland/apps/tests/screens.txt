@@ -1,4 +1,4 @@
-icons a63fecb9e8d297ed
+icons 61de7a63ddfcc20c
 calculator-typing 3b17a16aa777e114
 calculator-scientific 7c4420e15fd85275
 calculator-light d2d91619e126f22b
@@ -39,6 +39,8 @@ files-grid b7d011b44c88c3c3
 files-grid-light 5bb0d3c82ea13366
 files-grid-documents bbb7ffdf957e0b9b
 files-grid-documents-light 45090e8c93bacb9c
+files-grid-text 8b20165e300f2d54
+files-grid-text-light 7ab9b1f784073103
 files-trash e69b3ef6f571dc60
 calendar-month 1263d47ec2ef3529
 calendar-day c934689b589fbeff
@@ -78,3 +80,12 @@ browser-setting-up 926fcb752e291882
 browser-failed-light a86a74a4618f8322
 browser-didnt-start 5657fc3a486f2f2e
 updater-apps-all 31e83c7446168772
+solitaire 9a3fea050986ca7a
+solitaire-light 702d27992b331073
+solitaire-dragging 45dacbf983d16f7f
+solitaire-draw-three f6caffea8ac9db9f
+solitaire-won c5b4eec131d810a7
+mines 7aeeb055bed6f2a1
+mines-playing 989870ec63feca76
+mines-lost-light cd3fc44171e1eac6
+mines-cleared 67faafe503b61d02

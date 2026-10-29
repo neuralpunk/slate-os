@@ -18,17 +18,21 @@
 //!   twice), and the menu empties it. Each disk has its own trash; the
 //!   Trash place shows them all.
 //! - Copies, and moves across disks, run in the background a mebibyte at
-//!   a time, the status line saying how far they are (Esc stops them).
+//!   a time, several at once, the status line saying how far they are
+//!   (Esc stops them). Searches and the properties' sizes are worked out
+//!   in the background too, so the window keeps answering.
 //!   Dragging chosen items onto a folder or a place moves them there
 //!   (onto the trash: trashes them).
 //! - Removable disks Slate can open show under "disks" before they are
 //!   mounted: a click mounts one (in `/run/media/USER`, through the
 //!   broker, without asking) and goes in; the right button on a mounted
-//!   one unmounts it, to remove it (ADR 0112's addendum).
+//!   one unmounts it, and Power off unmounts it and lets the disk go, to
+//!   unplug it (ADR 0112's addendum, ADR 0108's second addendum).
 //! - ctrl + d bookmarks the folder (the sidebar's bookmarks; the right
 //!   button removes one); alt + Enter shows a file's properties, its
 //!   permissions changed there; "Open with" picks another of Slate's apps;
 //!   Tab in the search field searches the files' text too.
+//! - The grid shows thumbnails of pictures and the first lines of text.
 //!
 //! What it does to files is [`crate::fsops`].
 
@@ -63,6 +67,9 @@ const TILE_H: f32 = 124.0;
 const THUMB: (u32, u32) = (96, 72);
 /// Pictures larger than this get no thumbnail (bytes).
 const THUMB_MAX: i64 = 32 << 20;
+/// A text file's thumbnail: its first lines, read from this much of it.
+const TEXT_THUMB_READ: usize = 2048;
+const TEXT_THUMB_LINES: usize = 9;
 /// How often the folder is looked at for changes (ms).
 const REFRESH_MS: i64 = 2000;
 /// A search stops after this many results.
@@ -123,6 +130,8 @@ pub enum Action {
     Unbookmark,
     /// Unmount the disk the menu was opened on.
     Unmount,
+    /// Unmount the disk the menu was opened on and let it go, to unplug.
+    PowerOff,
     /// Make the picture the desktop's wallpaper (ADR 0110's second
     /// addendum).
     SetWallpaper,
@@ -137,6 +146,15 @@ pub const OPEN_WITH: [(&str, &str); 5] = [
     ("Contacts", "/bin/contacts"),
 ];
 
+/// What is asked of the broker for a disk.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DiskAsk {
+    Mount,
+    Unmount,
+    /// Unmount what is mounted of it, then let it go to be unplugged.
+    PowerOff,
+}
+
 /// Copies, and moves across disks, under way (in a [`kit::Job`]).
 #[derive(Debug)]
 pub struct Transfer {
@@ -150,6 +168,8 @@ pub struct Transfer {
     /// then removes the original).
     pub at: usize,
     pub removing: bool,
+    /// Whether `total` is known (the background work counts it first).
+    pub counted: bool,
     pub(crate) job: Option<kit::Job>,
 }
 
@@ -171,6 +191,8 @@ pub struct Props {
     pub mine: bool,
     /// Which of the nine permission boxes the keys are on.
     pub focus: usize,
+    /// The size is still being counted (in the background).
+    pub counting: bool,
     hits: Vec<Area>,
 }
 
@@ -240,8 +262,15 @@ pub struct Files {
     /// The running app (not a test or a scene): copies go to the
     /// background and bookmarks are saved.
     pub live: bool,
-    pub transfer: Option<Transfer>,
+    /// Copies under way, the oldest first.
+    pub transfers: Vec<Transfer>,
     pub props: Option<Props>,
+    /// The properties' size being counted.
+    props_job: Option<kit::Job>,
+    /// A search under way in the background, and what it has found (None
+    /// before it starts).
+    searching: Option<kit::Job>,
+    found: Option<Vec<String>>,
     pub dragging: Option<Dragging>,
     /// The first row as last said (traced, for the scenarios' pointer).
     traced_row: Option<Area>,
@@ -258,9 +287,9 @@ pub struct Files {
     /// Removable disks' partitions not mounted that Slate can open:
     /// (device, what to call it).
     pub unmounted: Vec<(String, String)>,
-    /// A mount or unmount asked of the broker: its job, the device, and
-    /// whether mounting.
-    disk_job: Option<(kit::Job, String, bool)>,
+    /// A mount, unmount or power off asked of the broker: its job, the
+    /// device, and which.
+    disk_job: Option<(kit::Job, String, DiskAsk)>,
     /// The mounted disk the menu was opened on (its device).
     menu_disk: Option<String>,
     /// (label, path, icon) in the sidebar, and the disks.
@@ -270,6 +299,8 @@ pub struct Files {
     /// scenes, which must look the same on every machine).
     pub show_free: bool,
     thumbs: BTreeMap<(String, i64), Option<Image>>,
+    /// Text files' first lines, for their thumbnails.
+    text_thumbs: BTreeMap<(String, i64), Vec<String>>,
     /// The folder's modification time when read, and when last looked at.
     stamp: Option<(i64, i64)>,
     checked: i64,
@@ -331,8 +362,11 @@ impl Files {
             trash: Trash::home(),
             bookmarks: Vec::new(),
             live: false,
-            transfer: None,
+            transfers: Vec::new(),
             props: None,
+            props_job: None,
+            searching: None,
+            found: None,
             dragging: None,
             traced_row: None,
             search_contents: false,
@@ -346,6 +380,7 @@ impl Files {
             disks,
             show_free: true,
             thumbs: BTreeMap::new(),
+            text_thumbs: BTreeMap::new(),
             stamp: None,
             checked: 0,
             rows: Vec::new(),
@@ -406,13 +441,23 @@ impl Files {
                 all.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.path.cmp(&b.1.path)));
                 all.into_iter().map(|(_, i)| i).collect()
             }
-            Place::Search { root, query, contents } => search(root, query, self.hidden, *contents)
-                .into_iter()
-                .map(|p| {
-                    let entry = item_entry(&p, fsops::base(&p));
-                    Item { note: Some(self.pretty(&fsops::parent(&p))), path: p, entry }
-                })
-                .collect(),
+            Place::Search { root, query, contents } => {
+                let found = if self.live {
+                    if self.found.is_none() {
+                        self.start_search();
+                    }
+                    self.found.clone().unwrap_or_default()
+                } else {
+                    search(root, query, self.hidden, *contents, &mut |_| {})
+                };
+                found
+                    .into_iter()
+                    .map(|p| {
+                        let entry = item_entry(&p, fsops::base(&p));
+                        Item { note: Some(self.pretty(&fsops::parent(&p))), path: p, entry }
+                    })
+                    .collect()
+            }
         };
         if !self.filter.is_empty() {
             let f = self.filter.to_lowercase();
@@ -437,9 +482,10 @@ impl Files {
         let mut out: Vec<Trash> = self.trash.iter().cloned().collect();
         let uid = slate_rt::process::getuid();
         for d in &self.disks {
-            let t = Trash::on_disk(&d.at, uid);
-            if !out.contains(&t) && slate_rt::fs::stat(t.dir.as_bytes()).is_ok() {
-                out.push(t);
+            for t in Trash::all_on_disk(&d.at, uid) {
+                if !out.contains(&t) && slate_rt::fs::stat(t.dir.as_bytes()).is_ok() {
+                    out.push(t);
+                }
             }
         }
         out
@@ -475,19 +521,86 @@ impl Files {
         out
     }
 
-    /// Ask the broker to mount (or unmount) `dev`, in the background.
-    fn ask_disk(&mut self, dev: &str, mount: bool) {
+    /// Ask the broker to mount, unmount or power off `dev`, in the
+    /// background. Powering off unmounts what is mounted of its disk
+    /// first.
+    fn ask_disk(&mut self, dev: &str, ask: DiskAsk) {
         if self.disk_job.is_some() {
             return;
         }
-        let words = alloc::format!("disk={} {dev}", if mount { "mount" } else { "unmount" });
-        crate::trace!("files: asking for {words}");
-        match kit::Job::start(move || kit::broker(&words).map(|()| String::new())) {
+        let mut words: Vec<String> = Vec::new();
+        match ask {
+            DiskAsk::Mount => words.push(alloc::format!("disk=mount {dev}")),
+            DiskAsk::Unmount => words.push(alloc::format!("disk=unmount {dev}")),
+            DiskAsk::PowerOff => {
+                let (all, _) = slate_sysinfo::block::read(&slate_sysinfo::block::RealSys);
+                if let Some(disk) = slate_diskutil::disk_of(&all, dev) {
+                    for p in core::iter::once(&disk.name).chain(disk.parts.iter().map(|p| &p.name)) {
+                        if self.disks.iter().any(|m| m.device == alloc::format!("/dev/{p}")) {
+                            words.push(alloc::format!("disk=unmount {p}"));
+                        }
+                    }
+                }
+                words.push(alloc::format!("disk=poweroff {dev}"));
+            }
+        }
+        crate::trace!("files: asking for {}", words.join(", "));
+        match kit::Job::start(move || {
+            for w in &words {
+                kit::broker(w)?;
+            }
+            Ok(String::new())
+        }) {
             Ok(j) => {
-                self.status = String::from(if mount { "Opening the disk…" } else { "Unmounting…" });
-                self.disk_job = Some((j, dev.to_string(), mount));
+                self.status = String::from(match ask {
+                    DiskAsk::Mount => "Opening the disk…",
+                    DiskAsk::Unmount => "Unmounting…",
+                    DiskAsk::PowerOff => "Powering off…",
+                });
+                self.disk_job = Some((j, dev.to_string(), ask));
             }
             Err(e) => self.status = alloc::format!("Couldn't ask: {e}"),
+        }
+    }
+
+    /// Search under the place shown, in the background: the results come
+    /// in as they are found ([`Files::tick`]).
+    fn start_search(&mut self) {
+        if let Some(j) = self.searching.take() {
+            j.cancel();
+        }
+        let Place::Search { root, query, contents } = self.place.clone() else { return };
+        let hidden = self.hidden;
+        self.found = Some(Vec::new());
+        match kit::Job::listing(move |r| {
+            let mut n = 0usize;
+            search(&root, &query, hidden, contents, &mut |p| {
+                n += 1;
+                r.say(p);
+            });
+            Ok(alloc::format!("{n}"))
+        }) {
+            Ok(j) => {
+                crate::trace!("files: searching in the background");
+                self.searching = Some(j);
+            }
+            Err(e) => self.status = alloc::format!("Couldn't search: {e}"),
+        }
+    }
+
+    /// Say what the search found (for the scenarios).
+    fn trace_found(&self) {
+        if let Place::Search { query, contents, .. } = &self.place {
+            let what = if *contents { " in names and text" } else { "" };
+            crate::trace!("files: found {} for {query}{what}", self.items.len());
+        }
+    }
+
+    /// Stop the search under way: what it found stays.
+    fn stop_search(&mut self) {
+        if let Some(j) = self.searching.take() {
+            j.cancel();
+            self.status = alloc::format!("Stopped: {} found.", self.found.as_ref().map_or(0, Vec::len));
         }
     }
 
@@ -498,20 +611,27 @@ impl Files {
         self.unmounted = Files::read_unmounted();
     }
 
-    /// Move `path` to its disk's trash (else home's): where it went.
+    /// Move `path` to its disk's trash (the shared one, else the
+    /// person's own there, else home's): where it went.
     fn put_in_trash(&self, path: &str) -> Result<String, String> {
         let home = self.trash.clone().ok_or_else(|| String::from("there is no trash"))?;
-        let t = fsops::trash_for(path, &home, &self.home, &self.disks, slate_rt::process::getuid());
-        let (t, name) = match t.put(path, now_s()) {
-            Ok(n) => (t, n),
-            // A disk's trash that can't be made (no rights there): home's.
-            Err(_) if t != home => {
-                let n = home.put(path, now_s())?;
-                (home, n)
+        let uid = slate_rt::process::getuid();
+        let t = fsops::trash_for(path, &home, &self.home, &self.disks, uid);
+        let mut tries = alloc::vec![t.clone()];
+        if let Some(top) = t.top.as_deref() {
+            tries.push(Trash::own(top, uid));
+        }
+        tries.push(home.clone());
+        tries.dedup();
+        let mut why = String::new();
+        for t in tries {
+            // A trash that can't be made (no rights there): the next.
+            match t.put(path, now_s()) {
+                Ok(name) => return Ok(t.path_of(&name)),
+                Err(e) => why = e,
             }
-            Err(e) => return Err(e),
-        };
-        Ok(t.path_of(&name))
+        }
+        Err(why)
     }
 
     pub fn go(&mut self, place: Place) {
@@ -533,6 +653,10 @@ impl Files {
         self.anchor = None;
         self.rename = None;
         self.confirm_delete = false;
+        if let Some(j) = self.searching.take() {
+            j.cancel();
+        }
+        self.found = None;
         self.load();
         crate::trace!("files: in {}", self.title_path());
     }
@@ -652,18 +776,16 @@ impl Files {
     /// the rest in the background when the app is live. Whether anything
     /// was started.
     pub fn transfer_into(&mut self, paths: &[String], dir: &str, cut: bool) -> bool {
-        if self.transfer.is_some() {
-            self.status = String::from("Wait for the copy under way, or stop it with Esc.");
-            return false;
-        }
         let mut list: Vec<(String, String)> = Vec::new();
         for p in paths {
             if cut && fsops::parent(p) == dir {
                 continue;
             }
             let mut name = fsops::free_name(dir, fsops::base(p), "copy");
-            // Two from different folders with one name: apart here too.
-            while list.iter().any(|(_, t)| fsops::base(t) == name) {
+            // Two from different folders with one name, or a name a copy
+            // under way will take: apart here too.
+            let pending = |to: &str| self.transfers.iter().any(|t| t.list.iter().any(|(_, x)| x == to));
+            while list.iter().any(|(_, t)| fsops::base(t) == name) || pending(&fsops::join(dir, &name)) {
                 name = alloc::format!("{name} (2)");
             }
             list.push((p.clone(), fsops::join(dir, &name)));
@@ -686,8 +808,7 @@ impl Files {
             self.finish_transfer(&list, done.len(), true, None);
             return true;
         }
-        let total = list.iter().map(|(f, _)| fsops::size_of(f, 200_000).0).sum();
-        let mut t = Transfer { list, cut, total, done: 0, at: 0, removing: false, job: None };
+        let mut t = Transfer { list, cut, total: 0, done: 0, at: 0, removing: false, counted: false, job: None };
         if !self.live {
             let (n, e) = transfer_work(&t.list, cut, &mut |_, _, _| {});
             let list = core::mem::take(&mut t.list);
@@ -696,12 +817,15 @@ impl Files {
         }
         let work = t.list.clone();
         match kit::Job::reporting(move |r| {
+            // How much there is, counted here so the window goes on at once.
+            let total: u64 = work.iter().map(|(f, _)| fsops::size_of(f, 200_000).0).sum();
+            r.say(&alloc::format!("0\t0\t0\t{total}"));
             let mut last = 0i64;
             let (n, e) = transfer_work(&work, cut, &mut |done, at, removing| {
                 let now = Now::read().mono;
                 if now - last >= 100 || removing {
                     last = now;
-                    r.say(&alloc::format!("{done}\t{at}\t{}", u8::from(removing)));
+                    r.say(&alloc::format!("{done}\t{at}\t{}\t{total}", u8::from(removing)));
                 }
             });
             Ok(alloc::format!("{n}\n{}", e.unwrap_or_default()))
@@ -709,7 +833,7 @@ impl Files {
             Ok(j) => {
                 t.job = Some(j);
                 crate::trace!("files: {} {} in the background", if cut { "moving" } else { "copying" }, t.list.len());
-                self.transfer = Some(t);
+                self.transfers.push(t);
             }
             Err(e) => self.status = alloc::format!("Couldn't start copying: {e}"),
         }
@@ -737,10 +861,21 @@ impl Files {
         self.selected = self.items.iter().map(|i| names.contains(&i.path)).collect();
     }
 
-    /// Stop the copy under way: what was finished stays (and can be
+    /// Stop the copies under way: what was finished stays (and can be
     /// undone); a half-made copy goes, the original untouched.
-    fn stop_transfer(&mut self) {
-        let Some(mut t) = self.transfer.take() else { return };
+    fn stop_transfers(&mut self) {
+        let all = core::mem::take(&mut self.transfers);
+        let (mut done, mut of) = (0, 0);
+        for t in all {
+            done += t.at;
+            of += t.list.len();
+            self.stop_transfer(t);
+        }
+        self.status = alloc::format!("Stopped: {done} of {of} done.");
+        self.load();
+    }
+
+    fn stop_transfer(&mut self, mut t: Transfer) {
         if let Some(j) = t.job.take() {
             j.cancel();
         }
@@ -753,24 +888,33 @@ impl Files {
         let n = t.at;
         let list = core::mem::take(&mut t.list);
         self.finish_transfer(&list, n, t.cut, None);
-        self.status = alloc::format!("Stopped: {} of {} done.", n, list.len());
         crate::trace!("files: stopped after {n}");
-        self.load();
     }
 
-    /// How far the copy is, for the status line.
+    /// How far the copies are (the oldest's figures, and how many more
+    /// run beside it), for the status line.
     pub fn transfer_text(&self) -> Option<(String, f32)> {
-        let t = self.transfer.as_ref()?;
+        let t = self.transfers.first()?;
         let frac = if t.total == 0 { 0.0 } else { (t.done as f32 / t.total as f32).min(1.0) };
         let what = if t.cut { "Moving" } else { "Copying" };
-        let text = alloc::format!(
-            "{what} {} of {} · {} of {} · esc stops",
-            (t.at + 1).min(t.list.len()),
-            t.list.len(),
-            crate::help::size(t.done),
-            crate::help::size(t.total)
-        );
+        let sizes = if t.counted {
+            alloc::format!("{} of {}", crate::help::size(t.done), crate::help::size(t.total))
+        } else {
+            String::from("counting")
+        };
+        let more = match self.transfers.len() {
+            1 => String::from(" · esc stops"),
+            n => alloc::format!(" · {} more under way · esc stops all", n - 1),
+        };
+        let text = alloc::format!("{what} {} of {} · {sizes}{more}", (t.at + 1).min(t.list.len()), t.list.len());
         Some((text, frac))
+    }
+
+    /// The search under way, for the status line.
+    pub fn search_text(&self) -> Option<String> {
+        self.searching.as_ref()?;
+        let n = self.found.as_ref().map_or(0, Vec::len);
+        Some(alloc::format!("Searching… {} · esc stops", count(n, "result")))
     }
 
     fn trash_chosen(&mut self) {
@@ -970,7 +1114,26 @@ impl Files {
                 self.hidden = !self.hidden;
                 self.load();
             }
-            Action::Properties if !paths.is_empty() => self.props = Some(Props::of(&paths, &self.home)),
+            Action::Properties if !paths.is_empty() => {
+                if self.live {
+                    let mut pr = Props::of_uncounted(&paths, &self.home);
+                    pr.counting = true;
+                    let work = paths.clone();
+                    if let Some(j) = self.props_job.take() {
+                        j.cancel();
+                    }
+                    match kit::Job::start(move || {
+                        let (b, n, short) = count_sizes(&work);
+                        Ok(alloc::format!("{b}\t{n}\t{}", u8::from(short)))
+                    }) {
+                        Ok(j) => self.props_job = Some(j),
+                        Err(_) => pr = Props::of(&paths, &self.home),
+                    }
+                    self.props = Some(pr);
+                } else {
+                    self.props = Some(Props::of(&paths, &self.home));
+                }
+            }
             Action::OpenWith if !paths.is_empty() => {
                 let first = self.items.iter().find(|i| i.path == paths[0]).map(|i| i.entry.name.clone());
                 let default = first.map(|n| fsops::opener(&n, &fsops::head(&paths[0])).program());
@@ -1006,7 +1169,19 @@ impl Files {
                     {
                         self.go(Place::Folder(self.home.clone()));
                     }
-                    self.ask_disk(&dev, false);
+                    self.ask_disk(&dev, DiskAsk::Unmount);
+                }
+            }
+            Action::PowerOff => {
+                if let Some(dev) = self.menu_disk.take() {
+                    let dev = dev.trim_start_matches("/dev/").to_string();
+                    // Not from inside it.
+                    if let Some(at) = self.disks.iter().find(|d| d.device.ends_with(&dev)).map(|d| d.at.clone())
+                        && self.folder().is_some_and(|f| f == at || f.starts_with(&alloc::format!("{at}/")))
+                    {
+                        self.go(Place::Folder(self.home.clone()));
+                    }
+                    self.ask_disk(&dev, DiskAsk::PowerOff);
                 }
             }
             Action::SetWallpaper => {
@@ -1167,13 +1342,49 @@ impl Files {
             .take(self.shown + self.per_row)
             .filter(|i| {
                 i.entry.kind == Kind::File
-                    && crate::viewer::is_image(&i.entry.name)
+                    && (crate::viewer::is_image(&i.entry.name) || looks_like_text(&i.entry.name))
                     && (i.entry.size as i64) <= THUMB_MAX
             })
             .map(|i| (i.path.clone(), i.entry.mtime))
             .filter(|k| !self.thumbs.contains_key(k))
             .collect()
     }
+}
+
+/// Whether a file's name says it is text worth a thumbnail of its first
+/// lines (its name only: the grid doesn't read every file to ask).
+fn looks_like_text(name: &str) -> bool {
+    const TEXT: [&str; 24] = [
+        "txt", "md", "markdown", "rs", "c", "h", "cpp", "hpp", "py", "sh", "toml", "json", "conf", "cfg", "ini", "log",
+        "csv", "tsv", "html", "css", "js", "xml", "yaml", "yml",
+    ];
+    name.rsplit_once('.')
+        .is_some_and(|(stem, ext)| !stem.is_empty() && TEXT.contains(&ext.to_ascii_lowercase().as_str()))
+}
+
+/// A text file's first lines for its thumbnail: empty when it isn't text
+/// after all (NUL bytes, not UTF-8).
+fn text_thumb(path: &str) -> Vec<String> {
+    let mut buf = alloc::vec![0u8; TEXT_THUMB_READ];
+    let n = match slate_rt::fs::open(path.as_bytes(), slate_rt::fs::O_RDONLY | slate_rt::fs::O_CLOEXEC, 0) {
+        Ok(fd) => {
+            let n = slate_rt::io::read(fd, &mut buf).unwrap_or(0);
+            let _ = slate_rt::io::close(fd);
+            n
+        }
+        Err(_) => 0,
+    };
+    let head = &buf[..n];
+    if head.contains(&0) {
+        return Vec::new();
+    }
+    // A character cut at the end of what was read is dropped.
+    let text = match core::str::from_utf8(head) {
+        Ok(t) => t,
+        Err(e) if e.error_len().is_none() => core::str::from_utf8(&head[..e.valid_up_to()]).unwrap_or(""),
+        Err(_) => return Vec::new(),
+    };
+    text.lines().take(TEXT_THUMB_LINES).map(|l| l.replace('\t', "    ").chars().take(40).collect()).collect()
 }
 
 /// An entry for a path found elsewhere (search, the trash).
@@ -1199,8 +1410,9 @@ fn item_entry(path: &str, name: &str) -> Entry {
 
 /// Paths under `root` whose names hold `query` (case ignored), or with
 /// `contents` whose text does (files up to [`SEARCH_FILE_MAX`] that look
-/// like text); folders walked breadth first, links not followed.
-pub fn search(root: &str, query: &str, hidden: bool, contents: bool) -> Vec<String> {
+/// like text); folders walked breadth first, links not followed. Each is
+/// given to `found` as it is found.
+pub fn search(root: &str, query: &str, hidden: bool, contents: bool, found: &mut dyn FnMut(&str)) -> Vec<String> {
     let q = query.to_lowercase();
     let mut out = Vec::new();
     let mut queue = alloc::collections::VecDeque::from([String::from(root)]);
@@ -1219,13 +1431,14 @@ pub fn search(root: &str, query: &str, hidden: bool, contents: bool) -> Vec<Stri
                 continue;
             }
             let p = fsops::join(&dir, &e.name);
-            let found = e.name.to_lowercase().contains(&q)
+            let hit = e.name.to_lowercase().contains(&q)
                 || (contents
                     && e.kind == Kind::File
                     && (e.size as i64) <= SEARCH_FILE_MAX
                     && read < SEARCH_READ_MAX
                     && text_holds(&p, &q, &mut read));
-            if found {
+            if hit {
+                found(&p);
                 out.push(p.clone());
             }
             if e.kind == Kind::Folder {
@@ -1294,13 +1507,26 @@ pub fn transfer_work(
     (list.len(), None)
 }
 
+/// The bytes and things in `paths` together, and whether the count
+/// stopped short (100 000 things each).
+fn count_sizes(paths: &[String]) -> (u64, usize, bool) {
+    paths.iter().fold((0, 0, false), |acc, p| {
+        let s = fsops::size_of(p, 100_000);
+        (acc.0 + s.0, acc.1 + s.1, acc.2 || s.2)
+    })
+}
+
 impl Props {
     /// The properties of `paths` (one, or several together).
     pub fn of(paths: &[String], home: &str) -> Props {
-        let size = paths.iter().fold((0, 0, false), |acc, p| {
-            let s = fsops::size_of(p, 100_000);
-            (acc.0 + s.0, acc.1 + s.1, acc.2 || s.2)
-        });
+        let mut p = Props::of_uncounted(paths, home);
+        p.size = count_sizes(paths);
+        p
+    }
+
+    /// [`Props::of`] without the size counted (it is zero).
+    pub fn of_uncounted(paths: &[String], home: &str) -> Props {
+        let size = (0, 0, false);
         let one = paths.len() == 1;
         let st = slate_rt::fs::lstat(paths[0].as_bytes()).ok();
         let mode = st.as_ref().map_or(0, |s| s.mode);
@@ -1342,6 +1568,7 @@ impl Props {
             mode: (one && !is_link && st.is_some()).then_some(mode & 0o777),
             mine: st.as_ref().is_some_and(|s| s.uid == me || me == 0),
             focus: 0,
+            counting: false,
             hits: Vec::new(),
         }
     }
@@ -1432,7 +1659,9 @@ fn draw_props(p: &mut Painter<'_>, pal: &Palette, f: &Fonts<'_>, a: Area, pr: &m
         ("kind", pr.kind.clone()),
         (
             "size",
-            if pr.kind == "folder" || pr.paths.len() > 1 {
+            if pr.counting {
+                String::from("counting…")
+            } else if pr.kind == "folder" || pr.paths.len() > 1 {
                 let more = if pr.size.2 { "+" } else { "" };
                 alloc::format!(
                     "{}{more} · {} inside",
@@ -1833,6 +2062,11 @@ impl App for Files {
                             ));
                             p.canvas.draw_image(dr.x, dr.y, img.width as i32, img.height as i32, &img.pixels);
                         }
+                        None if self.text_thumbs.contains_key(&(it.path.clone(), it.entry.mtime)) => {
+                            let lines = &self.text_thumbs[&(it.path.clone(), it.entry.mtime)];
+                            let x = r.x + (r.w - 54.0) / 2.0;
+                            slate_ui::fileicon::text_page(p, pal, Area::new(x, r.y + 8.0, 54.0, 70.0), &f.mono, lines);
+                        }
                         None => {
                             let kind = file_icon(&it.entry);
                             let badge = (kind != slate_ui::fileicon::Kind::Folder)
@@ -1887,6 +2121,7 @@ impl App for Files {
         }
         let msg = match self.transfer_text() {
             Some((t, _)) => t,
+            None if self.searching.is_some() => self.search_text().unwrap_or_default(),
             None if !self.filter.is_empty() => alloc::format!("filter: {}", self.filter),
             None => self.status.clone(),
         };
@@ -2011,8 +2246,10 @@ impl App for Files {
                     if !q.is_empty() {
                         let contents = self.search_contents;
                         self.go(Place::Search { root, query: q.clone(), contents });
-                        let what = if contents { " in names and text" } else { "" };
-                        crate::trace!("files: found {} for {q}{what}", self.items.len());
+                        // (In the background, said when it ends.)
+                        if self.searching.is_none() {
+                            self.trace_found();
+                        }
                     }
                 }
                 // Names, or names and the files' text.
@@ -2041,9 +2278,13 @@ impl App for Files {
             }
             return Effect::Redraw;
         }
-        // A copy under way: Esc stops it.
-        if code == KEY_ESC && self.transfer.is_some() {
-            self.stop_transfer();
+        // Copies under way: Esc stops them; else a search under way.
+        if code == KEY_ESC && !self.transfers.is_empty() {
+            self.stop_transfers();
+            return Effect::Redraw;
+        }
+        if code == KEY_ESC && self.searching.is_some() {
+            self.stop_search();
             return Effect::Redraw;
         }
         let n = self.items.len();
@@ -2073,7 +2314,13 @@ impl App for Files {
             (KEY_RIGHT, _) if alt => self.forward_(),
             (KEY_UP, _) if alt => self.up(),
             (KEY_F2, _) => return self.act(Action::Rename),
-            (KEY_F5, _) => self.load(),
+            (KEY_F5, _) => {
+                // A search runs again.
+                if matches!(self.place, Place::Search { .. }) {
+                    self.found = None;
+                }
+                self.load();
+            }
             (KEY_DELETE, _) => {
                 return self.act(if self.place == Place::Trash { Action::DeleteForGood } else { Action::Trash });
             }
@@ -2148,7 +2395,7 @@ impl App for Files {
         if let Some((_, place)) = self.side.iter().find(|(r, _)| r.contains(x, y)) {
             let place = place.clone();
             match place {
-                Place::Device(dev) => self.ask_disk(&dev, true),
+                Place::Device(dev) => self.ask_disk(&dev, DiskAsk::Mount),
                 place => self.go(place),
             }
             return Effect::Redraw;
@@ -2297,8 +2544,21 @@ impl App for Files {
         {
             self.menu_disk = Some(d.device.clone());
             self.last_menu = Some((x, y));
+            self.menu = Some(Menu {
+                x,
+                y,
+                items: alloc::vec![("Unmount", Action::Unmount), ("Power off", Action::PowerOff)],
+                selected: 0,
+                hits: Vec::new(),
+            });
+            return Effect::Redraw;
+        }
+        // A removable disk not mounted: power it off.
+        if let Some((_, Place::Device(dev))) = self.side.iter().find(|(r, _)| r.contains(x, y)) {
+            self.menu_disk = Some(dev.clone());
+            self.last_menu = Some((x, y));
             self.menu =
-                Some(Menu { x, y, items: alloc::vec![("Unmount", Action::Unmount)], selected: 0, hits: Vec::new() });
+                Some(Menu { x, y, items: alloc::vec![("Power off", Action::PowerOff)], selected: 0, hits: Vec::new() });
             return Effect::Redraw;
         }
         // A bookmark in the sidebar: remove it.
@@ -2359,11 +2619,11 @@ impl App for Files {
         if let Some((j, dev, mount)) = &mut self.disk_job
             && let Some(r) = j.poll()
         {
-            let (dev, mount) = (dev.clone(), *mount);
+            let (dev, ask) = (dev.clone(), *mount);
             self.disk_job = None;
             self.reread_disks();
             match r {
-                Ok(_) if mount => {
+                Ok(_) if ask == DiskAsk::Mount => {
                     let at = self.disks.iter().find(|d| d.device == alloc::format!("/dev/{dev}")).map(|d| d.at.clone());
                     if let Some(at) = at {
                         crate::trace!("files: mounted {dev} at {at}");
@@ -2371,46 +2631,95 @@ impl App for Files {
                         self.go(Place::Folder(at));
                     }
                 }
-                Ok(_) => {
+                Ok(_) if ask == DiskAsk::Unmount => {
                     crate::trace!("files: unmounted {dev}");
                     self.status = String::from("Unmounted: the disk can be removed.");
                 }
+                Ok(_) => {
+                    crate::trace!("files: powered off {dev}");
+                    self.status = String::from("Powered off: the disk can be unplugged.");
+                }
                 Err(e) => {
-                    self.status = alloc::format!("Couldn't {}: {e}", if mount { "open it" } else { "unmount it" })
+                    let what = match ask {
+                        DiskAsk::Mount => "open it",
+                        DiskAsk::Unmount => "unmount it",
+                        DiskAsk::PowerOff => "power it off",
+                    };
+                    self.status = alloc::format!("Couldn't {what}: {e}");
                 }
             }
             changed = true;
         }
-        // The copy under way.
-        let mut outcome = None;
-        if let Some(t) = &mut self.transfer
-            && let Some(j) = &mut t.job
-        {
-            outcome = j.poll();
+        // The copies under way.
+        let mut finished = Vec::new();
+        for (k, t) in self.transfers.iter_mut().enumerate() {
+            let Some(j) = &mut t.job else { continue };
+            let outcome = j.poll();
             if let Some(p) = j.progress.take() {
                 let mut w = p.split('\t');
                 t.done = w.next().and_then(|v| v.parse().ok()).unwrap_or(t.done);
                 t.at = w.next().and_then(|v| v.parse().ok()).unwrap_or(t.at);
                 t.removing = w.next() == Some("1");
+                if let Some(total) = w.next().and_then(|v| v.parse().ok()) {
+                    t.total = total;
+                    t.counted = true;
+                }
+                changed = true;
+            }
+            if let Some(r) = outcome {
+                finished.push((k, r));
+            }
+        }
+        for (k, r) in finished.into_iter().rev() {
+            let t = self.transfers.remove(k);
+            let (n, e) = match r {
+                Ok(text) => {
+                    let (n, e) = text.split_once('\n').unwrap_or((&text, ""));
+                    (n.parse().unwrap_or(0), Some(e.to_string()).filter(|e| !e.is_empty()))
+                }
+                Err(e) => (0, Some(e)),
+            };
+            self.finish_transfer(&t.list, n, t.cut, e);
+            changed = true;
+        }
+        // The search under way: its results as they come.
+        if let Some(j) = &mut self.searching {
+            let done = j.poll().is_some();
+            let new: Vec<String> = j.said.as_mut().map(core::mem::take).unwrap_or_default();
+            if done {
+                self.searching = None;
+            }
+            if !new.is_empty() || done {
+                self.found.get_or_insert_with(Vec::new).extend(new);
+                self.load();
+                if done {
+                    self.trace_found();
+                }
                 changed = true;
             }
         }
-        if let Some(r) = outcome
-            && let Some(t) = self.transfer.take()
+        // The properties' size, counted.
+        if let Some(j) = &mut self.props_job
+            && let Some(r) = j.poll()
         {
-            {
-                let (n, e) = match r {
-                    Ok(text) => {
-                        let (n, e) = text.split_once('\n').unwrap_or((&text, ""));
-                        (n.parse().unwrap_or(0), Some(e.to_string()).filter(|e| !e.is_empty()))
-                    }
-                    Err(e) => (0, Some(e)),
-                };
-                self.finish_transfer(&t.list, n, t.cut, e);
-                changed = true;
+            self.props_job = None;
+            if let (Some(pr), Ok(text)) = (&mut self.props, r) {
+                let mut w = text.split('\t');
+                pr.size.0 = w.next().and_then(|v| v.parse().ok()).unwrap_or(0);
+                pr.size.1 = w.next().and_then(|v| v.parse().ok()).unwrap_or(0);
+                pr.size.2 = w.next() == Some("1");
+                pr.counting = false;
             }
+            changed = true;
         }
         for key in self.wanted_thumbs().into_iter().take(2) {
+            if !crate::viewer::is_image(fsops::base(&key.0)) {
+                let lines = text_thumb(&key.0);
+                self.text_thumbs.insert(key.clone(), lines);
+                self.thumbs.insert(key, None);
+                changed = true;
+                continue;
+            }
             let thumb =
                 slate_rt::fs::read_file(key.0.as_bytes()).ok().and_then(|d| slate_image::decode(&d).ok()).map(|img| {
                     let s = (THUMB.0 as f32 / img.width as f32).min(THUMB.1 as f32 / img.height as f32).min(1.0);
@@ -2437,7 +2746,8 @@ impl App for Files {
         if !self.wanted_thumbs().is_empty() {
             return Some(0);
         }
-        if self.transfer.is_some() || self.disk_job.is_some() {
+        if !self.transfers.is_empty() || self.disk_job.is_some() || self.searching.is_some() || self.props_job.is_some()
+        {
             return Some(kit::JOB_MS);
         }
         Some((self.checked + REFRESH_MS - now.mono).max(0))
@@ -2749,6 +3059,47 @@ mod tests {
         f.key(KEY_TAB, None, 0);
         f.key(KEY_ENTER, None, 0);
         assert_eq!(names(&f), ["plan.txt"]);
+        std::fs::remove_dir_all(&h).unwrap();
+    }
+
+    #[test]
+    fn copies_side_by_side_searches_and_text_thumbnails() {
+        let h = scratch("side");
+        std::fs::create_dir_all(format!("{h}/box/deep")).unwrap();
+        std::fs::write(format!("{h}/a.txt"), b"first line\n\tsecond\nthird\n").unwrap();
+        std::fs::write(format!("{h}/box/deep/a-too.txt"), b"x").unwrap();
+        let mut f = files_at(&h);
+        // A copy under way will make box/a.txt: a second paste of a.txt
+        // takes another name rather than waiting.
+        f.transfers.push(Transfer {
+            list: std::vec![(format!("{h}/elsewhere/a.txt"), format!("{h}/box/a.txt"))],
+            cut: false,
+            total: 0,
+            done: 0,
+            at: 0,
+            removing: false,
+            counted: false,
+            job: None,
+        });
+        assert!(f.transfer_into(&[format!("{h}/a.txt")], &format!("{h}/box"), false));
+        assert!(std::fs::metadata(format!("{h}/box/a.txt (2)")).is_ok());
+        assert!(f.transfer_text().unwrap().0.contains("counting"), "{:?}", f.transfer_text());
+        f.transfers.clear();
+        // A search says each result as it finds it.
+        let mut said = Vec::new();
+        let all = search(&h, "a", false, false, &mut |p| said.push(String::from(p)));
+        assert_eq!(said, all);
+        assert!(all.iter().any(|p| p.ends_with("deep/a-too.txt")), "{all:?}");
+        // Text thumbnails: by the name, then the first lines, tabs opened.
+        assert!(looks_like_text("notes.MD") && !looks_like_text("photo.jpg") && !looks_like_text(".txt"));
+        assert_eq!(text_thumb(&format!("{h}/a.txt")), ["first line", "    second", "third"]);
+        std::fs::write(format!("{h}/bin.txt"), b"ab\0cd").unwrap();
+        assert!(text_thumb(&format!("{h}/bin.txt")).is_empty());
+        // Properties without the count, as the window first shows them.
+        let pr = Props::of_uncounted(&[format!("{h}/box")], &h);
+        assert_eq!((pr.size, pr.kind.as_str()), ((0, 0, false), "folder"));
+        // (box, deep, deep/a-too.txt and the copy.)
+        assert_eq!(count_sizes(&[format!("{h}/box")]).1, 4);
         std::fs::remove_dir_all(&h).unwrap();
     }
 

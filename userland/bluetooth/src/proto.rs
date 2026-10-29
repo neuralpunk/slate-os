@@ -201,6 +201,7 @@ mod tests {
             nearby: true,
             key: None,
             connected: None,
+            le: None,
         });
         h.prompt = Some(Prompt::Confirm(a, 4_913));
         h.said = Some(("Couldn't reach it.".into(), true));

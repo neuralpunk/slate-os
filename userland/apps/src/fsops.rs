@@ -407,11 +407,33 @@ impl Trash {
         Some(Trash { dir, top: None })
     }
 
-    /// The trash of the disk mounted at `top`, for user `uid`:
-    /// `$topdir/.Trash-UID` (the specification's second kind; the shared
-    /// `.Trash` with a sticky bit isn't used).
+    /// The trash of the disk mounted at `top` for user `uid`: the shared
+    /// one's `$topdir/.Trash/UID` when the disk has one, else
+    /// `$topdir/.Trash-UID` (the specification's two kinds, in its
+    /// order).
     pub fn on_disk(top: &str, uid: u32) -> Trash {
+        Trash::shared(top, uid).unwrap_or_else(|| Trash::own(top, uid))
+    }
+
+    /// `$topdir/.Trash/UID`, when `$topdir/.Trash` is a folder (not a
+    /// link) with the sticky bit, as the specification asks of a shared
+    /// trash an administrator made: everyone may make their folder in it,
+    /// and nobody remove anyone else's.
+    pub fn shared(top: &str, uid: u32) -> Option<Trash> {
+        let at = join(top, ".Trash");
+        let st = fs::lstat(at.as_bytes()).ok()?;
+        (st.mode & fs::S_IFMT == fs::S_IFDIR && st.mode & 0o1000 != 0)
+            .then(|| Trash { dir: join(&at, &alloc::format!("{uid}")), top: Some(String::from(top)) })
+    }
+
+    /// `$topdir/.Trash-UID`, the person's own on that disk.
+    pub fn own(top: &str, uid: u32) -> Trash {
         Trash { dir: join(top, &alloc::format!(".Trash-{uid}")), top: Some(String::from(top)) }
+    }
+
+    /// Both of the disk's trashes for `uid` that may hold something.
+    pub fn all_on_disk(top: &str, uid: u32) -> Vec<Trash> {
+        Trash::shared(top, uid).into_iter().chain([Trash::own(top, uid)]).collect()
     }
 
     /// Whether `path` is in this trash.
@@ -741,6 +763,24 @@ mod tests {
         std::fs::write(format!("{s}/disk/notes/a.txt"), b"abc").unwrap();
         let t = Trash::on_disk(&format!("{s}/disk"), 1000);
         assert_eq!(t.dir, format!("{s}/disk/.Trash-1000"));
+        // A shared .Trash counts only with its sticky bit, and never as a
+        // link.
+        std::fs::create_dir(format!("{s}/disk/.Trash")).unwrap();
+        assert_eq!(Trash::on_disk(&format!("{s}/disk"), 1000), t);
+        std::fs::set_permissions(format!("{s}/disk/.Trash"), std::os::unix::fs::PermissionsExt::from_mode(0o1777))
+            .unwrap();
+        let shared = Trash::on_disk(&format!("{s}/disk"), 1000);
+        assert_eq!(shared.dir, format!("{s}/disk/.Trash/1000"));
+        assert_eq!(Trash::all_on_disk(&format!("{s}/disk"), 1000), [shared.clone(), t.clone()]);
+        std::fs::create_dir(format!("{s}/elsewhere")).unwrap();
+        std::os::unix::fs::symlink(format!("{s}/disk/.Trash"), format!("{s}/elsewhere/.Trash")).unwrap();
+        assert!(Trash::shared(&format!("{s}/elsewhere"), 1000).is_none());
+        std::fs::write(format!("{s}/disk/notes/b.txt"), b"b").unwrap();
+        let b = shared.put(&format!("{s}/disk/notes/b.txt"), 1_792_879_170).unwrap();
+        assert!(std::fs::metadata(format!("{s}/disk/.Trash/1000/files/{b}")).is_ok());
+        assert_eq!(shared.list()[0].from, format!("{s}/disk/notes/b.txt"));
+        shared.delete(&b).unwrap();
+        std::fs::remove_dir_all(format!("{s}/disk/.Trash")).unwrap();
         let name = t.put(&format!("{s}/disk/notes/a.txt"), 1_792_879_170).unwrap();
         // Its path relative to the disk's top, as the specification says.
         let info = std::fs::read_to_string(format!("{s}/disk/.Trash-1000/info/a.txt.trashinfo")).unwrap();

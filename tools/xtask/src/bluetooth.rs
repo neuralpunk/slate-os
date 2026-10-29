@@ -9,6 +9,11 @@
 //!   the command line, by a passkey typed on it.
 //! - Settings' Bluetooth page finds the phone and pairs it by numeric
 //!   comparison, then forgets the keyboard.
+//! - Low Energy (ADR 0176): the stand-in's mouse, switched on in pairing
+//!   mode, pairs by itself though QEMU's PS/2 keyboard and mouse are
+//!   there, a pointer only; paired again from slate-bt it gets all it
+//!   has; it moves the pointer (its evdev device's events); out of range
+//!   and back, it reconnects with its key.
 //! - The phone connects again with the kept key, after the daemon
 //!   restarted; Bluetooth goes off and on.
 //! - Unplugging the adapter takes /dev/hci0 away.
@@ -33,7 +38,7 @@ pub fn bluetooth_scenario(o: &Opts) -> Result {
     c.arg(format!("unix:{},server,nowait", mon.display()));
     let mut con = Console::start(c)?;
     let pause = |ms: u64| std::thread::sleep(Duration::from_millis(ms));
-    let (phone, keyboard) = ("5C:F3:70:11:22:33", "00:1F:20:44:55:66");
+    let (phone, keyboard, mouse) = ("5C:F3:70:11:22:33", "00:1F:20:44:55:66", "DA:DB:00:8C:D8:E5");
     let result = (|| -> Result {
         con.login()?;
         // The daemon has started the controller.
@@ -44,6 +49,7 @@ pub fn bluetooth_scenario(o: &Opts) -> Result {
         )?;
         con.run("ls -l /dev/hci0 | cut -c1-10", "crw-------", 10)?;
         con.run("slate-bt scan", "Slate Keyboard", 40)?;
+        // (The LE mouse is switched off.)
         con.run("slate-bt | grep -c nearby", "2", 10)?;
         // The keyboard: a passkey shown here, typed there (the stand-in
         // types it at once, so the daemon's log has it).
@@ -83,8 +89,60 @@ pub fn bluetooth_scenario(o: &Opts) -> Result {
         con.run("ls /var/lib/slate/bluetooth/devices | tr '\\n' ,", &format!("{phone},"), 10)?;
         monitor(&mon, &["sendkey meta_l-q"])?;
         pause(800);
+        // Low Energy: the mouse, switched on in pairing mode, pairs by
+        // itself (whatever else is plugged in), a pointer only.
+        adapter.mouse_away(false);
+        con.run(
+            "for i in $(seq 40); do service slate-btd log \
+             | grep -q 'input device (pointer only)' && break; sleep 0.5; done; \
+             service slate-btd log | grep -c 'Slate Mouse: input device (pointer only)'",
+            "1",
+            40,
+        )?;
+        con.run(&format!("grep -c auto=1 /var/lib/slate/bluetooth/devices/{mouse}"), "1", 10)?;
+        // Paired again from slate-bt: all it has.
+        con.run(&format!("slate-bt pair {mouse}"), "Paired with Slate Mouse.", 30)?;
+        con.run(&format!("grep -c auto=0 /var/lib/slate/bluetooth/devices/{mouse}"), "1", 10)?;
+        // It points: X 5 on its evdev device (EV_REL 2, REL_X 0).
+        con.run(
+            "e=$(grep -l 'Slate Mouse' /sys/class/input/event*/device/name | tail -1); e=${e%/device/name}; \
+             cat /dev/input/${e##*/} > /tmp/btm & echo $! > /tmp/btm.pid; echo reading",
+            "reading",
+            10,
+        )?;
+        pause(800);
+        adapter.mouse(1, 5, -3);
+        pause(300);
+        adapter.mouse(0, 0, 0);
+        con.run(
+            "sleep 1; kill $(cat /tmp/btm.pid); od -An -v -tx1 /tmp/btm | tr -d ' \n' | grep -c 0200000005000000",
+            "1",
+            10,
+        )?;
+        // Out of range and back: reconnected with its key, its input
+        // device made again (a third time).
+        adapter.mouse_away(true);
+        con.run(
+            "for i in $(seq 20); do service slate-btd log | grep -q 'input device gone' && break; sleep 0.5; done; \
+             service slate-btd log | grep -c 'input device gone'",
+            "1",
+            15,
+        )?;
+        adapter.mouse_away(false);
+        con.run(
+            "for i in $(seq 30); do [ $(service slate-btd log | grep -c 'Slate Mouse: input device') -ge 3 ] && \
+             break; sleep 0.5; done; service slate-btd log | grep -c 'Slate Mouse: input device'",
+            "3",
+            20,
+        )?;
         // The phone again, with the kept key, after the daemon restarted.
-        con.run("service slate-btd restart; sleep 2; slate-bt | grep -c paired", "1", 20)?;
+        con.run(&format!("service slate-btd restart; sleep 2; slate-bt | grep {phone} | grep -c paired"), "1", 20)?;
+        // The mouse, connected again by itself after the restart.
+        con.run(
+            &format!("for i in $(seq 20); do slate-bt | grep -q '{mouse} connected' && break; sleep 0.5; done; slate-bt | grep -c '{mouse} connected'"),
+            "1",
+            20,
+        )?;
         con.run(&format!("slate-bt connect {phone}"), "Connected to Ada's Phone.", 20)?;
         // Off and on.
         con.run("slate-bt power off", "\"slate\": off", 10)?;
@@ -115,7 +173,12 @@ pub fn bluetooth_scenario(o: &Opts) -> Result {
         return Err(format!("Bluetooth scenario: {e} (transcript in target/bluetooth-scenario.log)"));
     }
     // The adapter's side: both pairings, and the kept key accepted.
-    for want in [format!("paired {keyboard}"), format!("paired {phone}"), format!("right key for {phone}")] {
+    for want in [
+        format!("paired {keyboard}"),
+        format!("paired {phone}"),
+        format!("right key for {phone}"),
+        format!("LE paired {mouse}"),
+    ] {
         if !log.contains(&want) {
             return Err(format!(
                 "Bluetooth scenario: the adapter never logged {want:?} (target/bluetooth-scenario.log)"
@@ -125,7 +188,8 @@ pub fn bluetooth_scenario(o: &Opts) -> Result {
     println!(
         "xtask: Bluetooth scenario passed (a USB controller found; a phone and a keyboard found by name, paired by \
          numeric comparison in Settings and by passkey from slate-bt, one forgotten, the other connected again with \
-         its key after a restart; off and on; unplugged; {:.2}s)",
+         its key after a restart; an LE mouse paired by itself and from slate-bt, pointing, back from out of range; \
+         off and on; unplugged; {:.2}s)",
         started.elapsed().as_secs_f64()
     );
     Ok(())

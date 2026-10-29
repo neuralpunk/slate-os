@@ -832,23 +832,23 @@ dependencies = [
 
 [[package]]
 name = "slate-abi"
-version = "0.1.0"
+version = "0.1.1"
 
 [[package]]
 name = "slate-acpi"
-version = "0.1.0"
+version = "0.1.1"
 
 [[package]]
 name = "slate-amdgpu"
-version = "0.1.0"
+version = "0.1.1"
 
 [[package]]
 name = "slate-aml"
-version = "0.1.0"
+version = "0.1.1"
 
 [[package]]
 name = "slate-apps"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "slate-appstream",
  "slate-cpio",
@@ -873,34 +873,35 @@ dependencies = [
 
 [[package]]
 name = "slate-appstream"
-version = "0.1.0"
+version = "0.1.1"
 
 [[package]]
 name = "slate-bluetooth"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "slate-hci",
+ "slate-hid",
  "slate-rt",
 ]
 
 [[package]]
 name = "slate-bpf"
-version = "0.1.0"
+version = "0.1.1"
 
 [[package]]
 name = "slate-buddy"
-version = "0.1.0"
+version = "0.1.1"
 
 [[package]]
 name = "slate-bzip2"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "slate-flate",
 ]
 
 [[package]]
 name = "slate-chalk"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "slate-coreutils",
  "slate-regex",
@@ -910,7 +911,7 @@ dependencies = [
 
 [[package]]
 name = "slate-coreutils"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "slate-bzip2",
  "slate-flate",
@@ -924,11 +925,11 @@ dependencies = [
 
 [[package]]
 name = "slate-cpio"
-version = "0.1.0"
+version = "0.1.1"
 
 [[package]]
 name = "slate-crypt"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "slate-rt",
  "slatecrypt",
@@ -936,14 +937,14 @@ dependencies = [
 
 [[package]]
 name = "slate-devd"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "slate-rt",
 ]
 
 [[package]]
 name = "slate-diskutil"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "slate-fat",
  "slate-gpt",
@@ -953,7 +954,7 @@ dependencies = [
 
 [[package]]
 name = "slate-display"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "slate-rt",
  "slate-term",
@@ -962,26 +963,26 @@ dependencies = [
 
 [[package]]
 name = "slate-dns"
-version = "0.1.0"
+version = "0.1.1"
 
 [[package]]
 name = "slate-dp"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "slate-edid",
 ]
 
 [[package]]
 name = "slate-edid"
-version = "0.1.0"
+version = "0.1.1"
 
 [[package]]
 name = "slate-elf"
-version = "0.1.0"
+version = "0.1.1"
 
 [[package]]
 name = "slate-elfsign"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "slate-hash",
  "slate-qpkg",
@@ -989,7 +990,7 @@ dependencies = [
 
 [[package]]
 name = "slate-esp"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "slate-abi",
  "slate-cpio",
@@ -999,7 +1000,7 @@ dependencies = [
 
 [[package]]
 name = "slate-etch"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "slate-regex",
  "slate-rt",
@@ -1008,14 +1009,14 @@ dependencies = [
 
 [[package]]
 name = "slate-etcmerge"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "slate-cpio",
 ]
 
 [[package]]
 name = "slate-etcsync"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "slate-etcmerge",
  "slate-rt",
@@ -1023,22 +1024,22 @@ dependencies = [
 
 [[package]]
 name = "slate-ext4"
-version = "0.1.0"
+version = "0.1.1"
 
 [[package]]
 name = "slate-fat"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "fatfs",
 ]
 
 [[package]]
 name = "slate-flate"
-version = "0.1.0"
+version = "0.1.1"
 
 [[package]]
 name = "slate-fsprobe"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "slate-fat",
  "slatefs",
@@ -1046,11 +1047,11 @@ dependencies = [
 
 [[package]]
 name = "slate-gpt"
-version = "0.1.0"
+version = "0.1.1"
 
 [[package]]
 name = "slate-graphics-trial"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "slate-display",
  "slate-rt",
@@ -1060,26 +1061,30 @@ dependencies = [
 
 [[package]]
 name = "slate-hash"
-version = "0.1.0"
+version = "0.1.1"
 
 [[package]]
 name = "slate-hci"
-version = "0.1.0"
+version = "0.1.1"
+dependencies = [
+ "aes",
+ "p256",
+]
 
 [[package]]
 name = "slate-hid"
-version = "0.1.0"
+version = "0.1.1"
 
 [[package]]
 name = "slate-hwtools"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "slate-rt",
 ]
 
 [[package]]
 name = "slate-image"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "slate-flate",
  "slate-math",
@@ -1087,7 +1092,7 @@ dependencies = [
 
 [[package]]
 name = "slate-install"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "fatfs",
  "slate-coreutils",
@@ -1110,7 +1115,7 @@ dependencies = [
 
 [[package]]
 name = "slate-kernel"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "limine",
  "slate-abi",
@@ -1126,6 +1131,7 @@ dependencies = [
  "slate-ext4",
  "slate-fsprobe",
  "slate-gpt",
+ "slate-hci",
  "slate-hid",
  "slate-mbr",
  "slate-net",
@@ -1140,7 +1146,7 @@ dependencies = [
 
 [[package]]
 name = "slate-less"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "slate-abi",
  "slate-regex",
@@ -1150,7 +1156,7 @@ dependencies = [
 
 [[package]]
 name = "slate-libc"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "slate-math",
  "slate-net",
@@ -1161,7 +1167,7 @@ dependencies = [
 
 [[package]]
 name = "slate-linux-app"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "slate-coreutils",
  "slate-flate",
@@ -1174,7 +1180,7 @@ dependencies = [
 
 [[package]]
 name = "slate-loader"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "slate-acpi",
  "slate-edid",
@@ -1185,7 +1191,7 @@ dependencies = [
 
 [[package]]
 name = "slate-loader-bios"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "slate-acpi",
  "slate-esp",
@@ -1199,7 +1205,7 @@ dependencies = [
 
 [[package]]
 name = "slate-loader-uefi"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "slate-esp",
  "slate-loader",
@@ -1208,14 +1214,14 @@ dependencies = [
 
 [[package]]
 name = "slate-logd"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "slate-rt",
 ]
 
 [[package]]
 name = "slate-login"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "slate-coreutils",
  "slate-crypt",
@@ -1226,15 +1232,15 @@ dependencies = [
 
 [[package]]
 name = "slate-math"
-version = "0.1.0"
+version = "0.1.1"
 
 [[package]]
 name = "slate-mbr"
-version = "0.1.0"
+version = "0.1.1"
 
 [[package]]
 name = "slate-net"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "slate-bpf",
  "slate-nft",
@@ -1242,14 +1248,14 @@ dependencies = [
 
 [[package]]
 name = "slate-netconf"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "slate-net",
 ]
 
 [[package]]
 name = "slate-netd"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "slate-dns",
  "slate-net",
@@ -1259,7 +1265,7 @@ dependencies = [
 
 [[package]]
 name = "slate-nettools"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "slate-dns",
  "slate-net",
@@ -1270,15 +1276,15 @@ dependencies = [
 
 [[package]]
 name = "slate-nft"
-version = "0.1.0"
+version = "0.1.1"
 
 [[package]]
 name = "slate-pim"
-version = "0.1.0"
+version = "0.1.1"
 
 [[package]]
 name = "slate-qpkg"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "ed25519-dalek",
  "sha2",
@@ -1288,7 +1294,7 @@ dependencies = [
 
 [[package]]
 name = "slate-quarry"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "slate-abi",
  "slate-elf",
@@ -1301,11 +1307,11 @@ dependencies = [
 
 [[package]]
 name = "slate-regex"
-version = "0.1.0"
+version = "0.1.1"
 
 [[package]]
 name = "slate-resolve"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "slate-dns",
  "slate-net",
@@ -1314,7 +1320,7 @@ dependencies = [
 
 [[package]]
 name = "slate-rt"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "slate-abi",
  "slate-sync",
@@ -1322,11 +1328,11 @@ dependencies = [
 
 [[package]]
 name = "slate-rtc"
-version = "0.1.0"
+version = "0.1.1"
 
 [[package]]
 name = "slate-seatd"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "slate-login",
  "slate-rt",
@@ -1334,11 +1340,11 @@ dependencies = [
 
 [[package]]
 name = "slate-slab"
-version = "0.1.0"
+version = "0.1.1"
 
 [[package]]
 name = "slate-slatefs"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "slate-esp",
  "slate-etcsync",
@@ -1352,14 +1358,14 @@ dependencies = [
 
 [[package]]
 name = "slate-slinit"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "slate-rt",
 ]
 
 [[package]]
 name = "slate-sshd"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "chacha20",
  "curve25519-dalek",
@@ -1375,7 +1381,7 @@ dependencies = [
 
 [[package]]
 name = "slate-strata"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "slate-abi",
  "slate-bluetooth",
@@ -1392,7 +1398,7 @@ dependencies = [
 
 [[package]]
 name = "slate-strata-client"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "slate-rt",
  "slate-ui",
@@ -1401,7 +1407,7 @@ dependencies = [
 
 [[package]]
 name = "slate-strata-wl"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "slate-display",
  "slate-rt",
@@ -1412,11 +1418,11 @@ dependencies = [
 
 [[package]]
 name = "slate-sync"
-version = "0.1.0"
+version = "0.1.1"
 
 [[package]]
 name = "slate-sysinfo"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "slate-edid",
  "slate-rt",
@@ -1424,18 +1430,18 @@ dependencies = [
 
 [[package]]
 name = "slate-tar"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "slate-flate",
 ]
 
 [[package]]
 name = "slate-term"
-version = "0.1.0"
+version = "0.1.1"
 
 [[package]]
 name = "slate-terminal"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "slate-rt",
  "slate-strata",
@@ -1446,7 +1452,7 @@ dependencies = [
 
 [[package]]
 name = "slate-tls"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "aes-gcm",
  "chacha20",
@@ -1462,7 +1468,7 @@ dependencies = [
 
 [[package]]
 name = "slate-tui"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "slate-rt",
  "slate-term",
@@ -1470,11 +1476,11 @@ dependencies = [
 
 [[package]]
 name = "slate-ui"
-version = "0.1.0"
+version = "0.1.1"
 
 [[package]]
 name = "slate-unlock"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "slate-display",
  "slate-rt",
@@ -1485,15 +1491,15 @@ dependencies = [
 
 [[package]]
 name = "slate-usb"
-version = "0.1.0"
+version = "0.1.1"
 
 [[package]]
 name = "slate-vdso"
-version = "0.1.0"
+version = "0.1.1"
 
 [[package]]
 name = "slate-web"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "slate-net",
  "slate-resolve",
@@ -1503,7 +1509,7 @@ dependencies = [
 
 [[package]]
 name = "slate-xz"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "slate-flate",
  "slate-hash",
@@ -1511,21 +1517,21 @@ dependencies = [
 
 [[package]]
 name = "slate-zip"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "slate-flate",
 ]
 
 [[package]]
 name = "slate-zstd"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "slate-flate",
 ]
 
 [[package]]
 name = "slatecrypt"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "aes",
  "aes-kw",
@@ -1534,7 +1540,7 @@ dependencies = [
 
 [[package]]
 name = "slatefs"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "slate-hash",
 ]
@@ -1573,7 +1579,7 @@ dependencies = [
 
 [[package]]
 name = "strata-proto"
-version = "0.1.0"
+version = "0.1.1"
 
 [[package]]
 name = "subtle"
@@ -1632,7 +1638,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "xtask"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "fatfs",
  "slate-cpio",

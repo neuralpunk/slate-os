@@ -380,6 +380,7 @@ impl Disks {
                     Change::Name { part, name } => alloc::format!("{part} is named \"{name}\"."),
                     Change::Mount { part } => alloc::format!("{part} is mounted; Files shows it."),
                     Change::Unmount { part } => alloc::format!("{part} is unmounted: it can be removed."),
+                    Change::PowerOff { disk } => alloc::format!("{disk} is powered off: it can be unplugged."),
                 };
                 (said, false)
             }

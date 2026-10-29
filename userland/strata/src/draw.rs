@@ -17,7 +17,7 @@ use slate_ui::math::round;
 use slate_ui::paint::Painter;
 use slate_ui::shadow::BoxShadow;
 use slate_ui::text::{self, Face, Style};
-use slate_ui::themes::app_accent;
+use slate_ui::themes::{Stratum, app_accent};
 use slate_ui::ui::Area;
 
 use crate::fonts::Fonts;
@@ -279,16 +279,19 @@ pub fn bar(p: &mut Painter<'_>, pal: &Palette, f: &Fonts<'_>, b: &Bar<'_>) -> Pa
     let clock = p.style(&f.mono, 12.0, pal.topbar_clock);
     right -= p.measure(&clock, b.clock);
     p.line(&clock, right, 0.0, bar_h, b.clock);
-    // The themes in colour put the date before the clock (ADR 0167): Host
-    // Grotesk until their serifs come (13 px in Copper Noir, 12.5 in
-    // Sediment).
-    // Sediment, the light one, writes "Wednesday, 28 October".
+    // The themes in colour put the date before the clock (ADR 0167), in
+    // their serif (ADR 0175), else Host Grotesk (13 px in Copper Noir,
+    // 12.5 in Sediment). Sediment, the light one, writes "Wednesday,
+    // 28 October".
     if let Some(date) = b.date.filter(|_| pal.topbar_date.alpha() > 0) {
         let date = match date.split_once(' ') {
             Some((day, rest)) if pal.light() => alloc::format!("{day}, {rest}"),
             _ => String::from(date),
         };
-        let st = p.style(&f.regular, if pal.light() { 12.5 } else { 13.0 }, pal.topbar_date);
+        let st = match pal.shape.date_serif.and_then(|(s, size)| Some((f.serif(s)?, size))) {
+            Some((face, size)) => p.style(face, size, pal.topbar_date),
+            None => p.style(&f.regular, if pal.light() { 12.5 } else { 13.0 }, pal.topbar_date),
+        };
         right -= 12.0 + p.measure(&st, &date);
         p.line(&st, right, 0.0, bar_h, &date);
     }
@@ -418,9 +421,9 @@ pub struct Frame<'a> {
     /// The app's glyph (its entry's `icon`), before the name; the
     /// generic window when None.
     pub icon: Option<Icon>,
-    /// The name of the program the window runs, for its app's accent
-    /// (ADR 0167).
-    pub program: Option<&'a str>,
+    /// Its app's accent, as its entry declares it (ADR 0167 and its
+    /// addendum).
+    pub accent: Option<Stratum>,
     /// From unfocused (0) to focused (1), for the cross-fade.
     pub focus: f32,
     /// Maximised or snapped: square corners, no shadow.
@@ -754,12 +757,19 @@ pub fn frame(p: &mut Painter<'_>, pal: &Palette, f: &Fonts<'_>, a: Area, fr: &Fr
     // A window whose program is no app's (a Linux app's client is
     // slate-linux-app or Sway's bridge) gets the generic window. Its
     // colour is the app's own ink where the theme has them (Sediment).
-    let glyph = if pal.app_accents { app_accent(pal, fr.program).ink } else { pal.title_glyph };
+    let glyph = if pal.app_accents { app_accent(pal, fr.accent).ink } else { pal.title_glyph };
     p.icon(fr.icon.unwrap_or(Icon::Window), x, mid - 7.0, 14.0, fade(pal.title_button_unfocused, glyph));
     x += 14.0 + 10.0;
-    let face = if shape.title_semibold { &f.semibold } else { &f.medium };
-    let name =
-        p.style(face, shape.title_size, fade(pal.title_text_unfocused, pal.title_text)).tracking(shape.title_tracking);
+    // The theme's serif when it is installed (ADR 0175), else Host
+    // Grotesk as the handoff's fallback.
+    let ink = fade(pal.title_text_unfocused, pal.title_text);
+    let name = match shape.title_serif.and_then(|(s, size)| Some((f.serif(s)?, size))) {
+        Some((face, size)) => p.style(face, size, ink),
+        None => {
+            let face = if shape.title_semibold { &f.semibold } else { &f.medium };
+            p.style(face, shape.title_size, ink).tracking(shape.title_tracking)
+        }
+    };
     x += p.line(&name, x, a.y, bar_h, fr.app) + 10.0;
     // The path, cut to leave room for the domain tag after it.
     let tag = if fr.sandboxed {
@@ -810,11 +820,11 @@ pub fn frame(p: &mut Painter<'_>, pal: &Palette, f: &Fonts<'_>, a: Area, fr: &Fr
 /// cross-fade; the focused colour is the app's ink where the theme has
 /// app accents. Focused and floating, the theme's halo rings it
 /// (ADR 0167).
-pub fn frame_outline(p: &mut Painter<'_>, pal: &Palette, a: Area, focus: f32, flush: bool, program: Option<&str>) {
+pub fn frame_outline(p: &mut Painter<'_>, pal: &Palette, a: Area, focus: f32, flush: bool, accent: Option<Stratum>) {
     let shape = &pal.shape;
     let radius = if flush { 0.0 } else { shape.frame_r };
     let (focused, halo) = if pal.app_accents {
-        let ink = app_accent(pal, program).ink;
+        let ink = app_accent(pal, accent).ink;
         (ink, ink.with_alpha(pal.focus_halo.alpha()))
     } else {
         (pal.focus, pal.focus_halo)

@@ -271,7 +271,7 @@ pub fn desktop(
             linux: win.linux,
             sandboxed: win.sandboxed,
             icon: win.icon,
-            program: win.program.as_deref(),
+            accent: win.accent,
             focus: look.focus,
             flush,
             maximized: win.state == State::Maximized,
@@ -297,7 +297,7 @@ pub fn desktop(
             if let Some(cs) = &corners {
                 mask_corners(p.canvas, cs, dev.x);
             }
-            draw::frame_outline(p, pal, a, look.focus, flush, win.program.as_deref());
+            draw::frame_outline(p, pal, a, look.focus, flush, win.accent);
         };
         if look.opacity >= 1.0 && look.dy == 0.0 {
             draw_window(p);

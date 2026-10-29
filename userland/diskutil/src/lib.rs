@@ -14,6 +14,9 @@
 //!   programs or devices (SlateFS and ext2/3/4: the kernel has no FAT
 //!   driver);
 //! - `unmount PART`: one mounted there, unmounted;
+//! - `poweroff DISK`: a removable disk with nothing on it in use made
+//!   ready to unplug and let go, as if unplugged (ADR 0108's second
+//!   addendum; a partition's name stands for its disk);
 //!
 //! where FORMAT is `fat32` (for other systems and cameras), `slatefs`, or
 //! `empty` (none). The broker and Disks parse them here too, so all three
@@ -115,6 +118,7 @@ pub enum Change {
     Name { part: String, name: String },
     Mount { part: String },
     Unmount { part: String },
+    PowerOff { disk: String },
 }
 
 /// A device's name as /dev has it: `sdb`, `nvme1n1p2`.
@@ -185,9 +189,10 @@ pub fn parse(words: &str) -> Result<Change, String> {
         }
         "mount" => Change::Mount { part: device(w.next())? },
         "unmount" => Change::Unmount { part: device(w.next())? },
-        _ => return Err(format!("disk={words}: table, add, format, delete, name, mount or unmount")),
+        "poweroff" => Change::PowerOff { disk: device(w.next())? },
+        _ => return Err(format!("disk={words}: table, add, format, delete, name, mount, unmount or poweroff")),
     };
-    if matches!(op, "table" | "delete" | "mount" | "unmount") && w.next().is_some() {
+    if matches!(op, "table" | "delete" | "mount" | "unmount" | "poweroff") && w.next().is_some() {
         return Err(format!("disk={words}: too many words"));
     }
     Ok(c)
@@ -208,18 +213,20 @@ impl Change {
             Change::Name { part, name } => format!("name {part} {name}"),
             Change::Mount { part } => format!("mount {part}"),
             Change::Unmount { part } => format!("unmount {part}"),
+            Change::PowerOff { disk } => format!("poweroff {disk}"),
         }
     }
 
-    /// Whether it only mounts or unmounts (nothing on the disk changes).
+    /// Whether it only mounts, unmounts or powers off (nothing on the
+    /// disk changes).
     pub fn mounting(&self) -> bool {
-        matches!(self, Change::Mount { .. } | Change::Unmount { .. })
+        matches!(self, Change::Mount { .. } | Change::Unmount { .. } | Change::PowerOff { .. })
     }
 
     /// The device it changes.
     pub fn target(&self) -> &str {
         match self {
-            Change::Table { disk } | Change::Add { disk, .. } => disk,
+            Change::Table { disk } | Change::Add { disk, .. } | Change::PowerOff { disk } => disk,
             Change::Format { part, .. }
             | Change::Delete { part }
             | Change::Name { part, .. }
@@ -343,6 +350,9 @@ fn run(c: &Change, person: u32) -> Res<String> {
     if let Change::Unmount { part } = c {
         return unmount(part, &mounts);
     }
+    if let Change::PowerOff { disk } = c {
+        return power_off(disk, &disks, &mapped, &mounts);
+    }
     if let Some(why) = in_use(c.target(), &disks, &mapped, &mounts) {
         return Err(why);
     }
@@ -432,7 +442,7 @@ fn run(c: &Change, person: u32) -> Res<String> {
             Ok(format!("{part}: named \"{name}\""))
         }
         Change::Mount { part } => mount(part, &disk, person),
-        Change::Unmount { .. } => unreachable!(),
+        Change::Unmount { .. } | Change::PowerOff { .. } => unreachable!(),
         Change::Delete { part } => {
             let p = disk.parts.iter().find(|p| p.name == *part).ok_or_else(|| format!("{part} is not a partition"))?;
             let dev = Dev::open(&disk.name)?;
@@ -512,6 +522,44 @@ fn unmount(part: &str, mounts: &[Mount]) -> Res<String> {
     })?;
     let _ = slate_rt::fs::rmdir(m.path.as_bytes());
     Ok(format!("{part}: unmounted from {}", m.path))
+}
+
+/// Eject the medium and let the device go (ioctl_cdrom(2); for a USB
+/// disk the kernel disables its port too).
+const CDROMEJECT: u32 = 0x5309;
+
+/// Power off removable disk `name` (or the disk partition `name` is on):
+/// refused while anything on it is mounted or unlocked.
+fn power_off(name: &str, disks: &[Disk], mapped: &[Mapped], mounts: &[Mount]) -> Res<String> {
+    let disk = disk_of(disks, name).ok_or_else(|| format!("There is no disk {name}."))?;
+    if !disk.removable {
+        return Err(format!("{} isn't removable.", disk.name));
+    }
+    if let Some(why) = busy(disk, mapped, mounts) {
+        return Err(why);
+    }
+    let dev = Dev::open(&disk.name)?;
+    slate_rt::io::ioctl(dev.fd, CDROMEJECT, 0).map_err(|e| match e {
+        slate_rt::Errno::ENOTTY => format!("{} can't be powered off.", disk.name),
+        e => format!("{}: {e}", disk.name),
+    })?;
+    Ok(format!("{}: powered off; it can be removed", disk.name))
+}
+
+/// Why nothing on `disk` may be let go now: a partition of it (or the
+/// disk) mounted or unlocked.
+fn busy(disk: &Disk, mapped: &[Mapped], mounts: &[Mount]) -> Option<String> {
+    let devs: Vec<&str> =
+        core::iter::once(disk.name.as_str()).chain(disk.parts.iter().map(|p| p.name.as_str())).collect();
+    for d in devs {
+        if let Some(m) = mounts.iter().find(|m| m.source == format!("/dev/{d}")) {
+            return Some(format!("{d} is in use, at {}: unmount it first.", m.path));
+        }
+        if let Some(m) = mapped.iter().find(|m| m.under == d) {
+            return Some(format!("{d} is in use, unlocked as {}.", m.name));
+        }
+    }
+    None
 }
 
 fn part_name(disk: &str, n: u32) -> String {
@@ -761,6 +809,9 @@ mod tests {
         assert_eq!(parse("mount sdb1").unwrap().words(), "mount sdb1");
         assert!(parse("mount sdb1 /etc").is_err());
         assert!(parse("unmount sdb1").unwrap().mounting());
+        assert_eq!(parse("poweroff sdb").unwrap(), Change::PowerOff { disk: "sdb".into() });
+        assert!(parse("poweroff sdb").unwrap().mounting());
+        assert!(parse("poweroff sdb sdc").is_err());
         assert_eq!(mount_name("My Disk/2", "sdb1"), "My Disk2");
         assert_eq!(mount_name("..", "sdb1"), "sdb1");
         assert!(mountable("ext4") && !mountable("vfat"));
@@ -833,5 +884,13 @@ mod tests {
         assert_eq!(why("vdb2").as_deref(), Some("It is in use, unlocked as dm-1."));
         assert_eq!(why("vdc"), None);
         assert_eq!(why("vdz").as_deref(), Some("There is no disk vdz."));
+        // Powering off: anything on the disk mounted or unlocked.
+        assert_eq!(
+            busy(&disks[1], &mapped, &mounts).as_deref(),
+            Some("vdb1 is in use, at /run/media/ada/stick: unmount it first.")
+        );
+        assert_eq!(busy(&disks[2], &mapped, &mounts), None);
+        let only_unlocked = [mount("/dev/dm-0", "/")];
+        assert_eq!(busy(&disks[1], &mapped, &only_unlocked).as_deref(), Some("vdb2 is in use, unlocked as dm-1."));
     }
 }

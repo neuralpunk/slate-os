@@ -1,0 +1,9 @@
+# Bluetooth (slate-btd, ADR 0176).
+#
+# autopair: whether a mouse or tablet in pairing mode pairs by itself,
+# with a pointer only (no keys: paired from Settings, it gets all it
+# has), so nobody is left without a mouse:
+#   always  whenever one is in pairing mode (the default)
+#   auto    only while no other pointer is plugged in or connected
+#   never   only when paired from Settings or slate-bt
+autopair=always

@@ -396,6 +396,9 @@ pub struct UsbDevice {
     /// Bounce buffer for control transfers.
     ctrl_buf: Mutex<Dma>,
     pub gone: AtomicBool,
+    /// Its removal was asked for (a disk powered off, ADR 0108's second
+    /// addendum): the enumeration thread forgets it and disables its port.
+    pub removal: AtomicBool,
 }
 
 impl Drop for UsbDevice {
@@ -913,11 +916,29 @@ pub fn probe(pci: Arc<Device>) -> Option<()> {
 fn enumerate(hc: Arc<Xhci>) {
     let mut attached: BTreeMap<u8, Arc<UsbDevice>> = BTreeMap::new();
     let mut hubs: Vec<Arc<super::hub::Hub>> = Vec::new();
+    // Ports whose device was removed on request: left alone until it is
+    // unplugged.
+    let mut parked: alloc::collections::BTreeSet<u8> = alloc::collections::BTreeSet::new();
     // Give devices on ports powered just now time to connect (USB 2.0
     // §7.1.7.3: 100 ms debounce).
     delay_ms(100);
     loop {
         hc.port_change.store(false, Ordering::Release);
+        // Devices whose removal was asked for: forgotten, and their port
+        // disabled (xHCI 1.2 §4.19.1.2: writing 1 to PED disables a port;
+        // the device stays connected but gets no traffic).
+        let asked: Vec<u8> =
+            attached.iter().filter(|(_, d)| d.removal.load(Ordering::Acquire)).map(|(p, _)| *p).collect();
+        for p in asked {
+            if let Some(d) = attached.remove(&p) {
+                detach(&d);
+                let r = hc.portsc(p);
+                let v = hc.op.read32(r);
+                hc.op.write32(r, (v & PORT_PRESERVE_MASK) | PORT_PED);
+                parked.insert(p);
+                log_info!("USB port {p}: disabled; unplug the device to use the port again");
+            }
+        }
         for p in 1..=hc.max_ports {
             let r = hc.portsc(p);
             let v = hc.op.read32(r);
@@ -926,7 +947,11 @@ fn enumerate(hc: Arc<Xhci>) {
                 hc.op.write32(r, (v & PORT_PRESERVE_MASK) | (v & PORT_RW1C));
             }
             let connected = v & PORT_CCS != 0;
+            if !connected {
+                parked.remove(&p);
+            }
             match (connected, attached.contains_key(&p)) {
+                (true, false) if parked.contains(&p) => {}
                 (true, false) => {
                     delay_ms(100);
                     match attach(&hc, p) {
@@ -968,6 +993,15 @@ fn enumerate(hc: Arc<Xhci>) {
     }
 }
 
+/// Ask for `d` to be removed as if unplugged (its port disabled), and
+/// wait for it: whether it went within `timeout_ms`.
+pub fn request_removal(d: &Arc<UsbDevice>, timeout_ms: u64) -> bool {
+    d.removal.store(true, Ordering::Release);
+    d.hc.port_change.store(true, Ordering::Release);
+    d.hc.enum_waiters.wake_all();
+    wait_for(timeout_ms, || d.gone.load(Ordering::Acquire))
+}
+
 pub fn detach(d: &Arc<UsbDevice>) {
     log_info!("USB port {}: device removed", d.port);
     d.gone.store(true, Ordering::Release);
@@ -976,6 +1010,7 @@ pub fn detach(d: &Arc<UsbDevice>) {
     super::sys::removed(&d.hc.sys, &d.port);
     super::msc::detached(d);
     super::btusb::detached(d);
+    super::hid::detached(d);
     d.hc.drop_pipes(d.slot);
     let _ = d.hc.command([0, 0, 0, (TRB_DISABLE_SLOT << 10) | (u32::from(d.slot) << 24)]);
     d.hc.dcbaa.write::<u64>(usize::from(d.slot) * 8, 0);
@@ -1092,6 +1127,7 @@ pub fn setup(hc: &Arc<Xhci>, pos: Position, speed: u32, port: String) -> Option<
         ep0: Endpoint { dci: 1, ring: IrqSpinLock::new(ep0_ring), streams: Vec::new(), _stream_array: None },
         ctrl_buf: Mutex::new(Dma::new(4096)?),
         gone: AtomicBool::new(false),
+        removal: AtomicBool::new(false),
     });
 
     // The first 8 bytes of the device descriptor give endpoint 0's real
@@ -1190,7 +1226,7 @@ pub fn setup(hc: &Arc<Xhci>, pos: Position, speed: u32, port: String) -> Option<
                 }
             }
             // A Bluetooth primary controller (Core 5.4, Vol 4, Part B).
-            (0xE0, 1, 1) => super::btusb::start(&dev, iface),
+            (0xE0, 1, 1) => super::btusb::start(&dev, iface, ids(&desc)),
             // Mass storage, SCSI transparent command set, Bulk-Only.
             (8, 6, 0x50 | 0x62) => super::msc::start(&dev, iface, &config),
             // A hub (USB 2.0 §11.23.1).

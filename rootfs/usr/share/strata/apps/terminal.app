@@ -4,3 +4,4 @@ exec=/bin/terminal
 icon=terminal
 category=System
 comment=The command line
+accent=ochre

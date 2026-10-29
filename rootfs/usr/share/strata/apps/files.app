@@ -4,3 +4,4 @@ exec=/bin/files
 icon=folder
 category=Accessories
 comment=Browse and organise your files
+accent=terracotta

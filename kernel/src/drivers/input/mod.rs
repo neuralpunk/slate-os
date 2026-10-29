@@ -22,6 +22,9 @@ use crate::abi::linux::errno::*;
 use crate::arch::uaccess::{copy_to_user, read_user, write_user};
 use crate::fs::vfs::{self, Metadata, Result};
 use crate::fs::{CharNode, File, O_NONBLOCK, POLLERR, POLLHUP, POLLIN, SysEntry};
+
+pub mod hid;
+pub mod user;
 use crate::sched::wait::WaitQueue;
 use crate::sync::IrqSpinLock;
 
@@ -63,6 +66,7 @@ const LED_MAX: u16 = 0x0f;
 pub const INPUT_PROP_POINTER: u32 = 0x00;
 // Bus types (input.h).
 pub const BUS_USB: u16 = 0x03;
+pub const BUS_BLUETOOTH: u16 = 0x05;
 pub const BUS_I8042: u16 = 0x11;
 /// EV_VERSION (input.h).
 const EV_VERSION: i32 = 0x010001;
@@ -267,6 +271,62 @@ pub fn register(info: Info) -> Arc<Device> {
     DEVICES.lock().push(dev.clone());
     crate::fs::char_added(sysfs_node(&dev));
     dev
+}
+
+/// A device went (unplugged, or its Bluetooth link closed): its /dev node
+/// and sysfs entries go, uevent listeners hear `remove`, and its readers
+/// get ENODEV, as after EVIOCREVOKE.
+pub fn unregister(dev: &Arc<Device>) {
+    {
+        let mut all = DEVICES.lock();
+        let Some(i) = all.iter().position(|d| Arc::ptr_eq(d, dev)) else { return };
+        all.remove(i);
+    }
+    crate::log_info!("input: event{}: {} gone", dev.index, dev.info.name);
+    let clients: Vec<Arc<Client>> = dev.state.lock().clients.iter().filter_map(Weak::upgrade).collect();
+    for c in clients {
+        c.revoked.store(true, Ordering::Release);
+        c.wait.wake_all();
+    }
+    crate::fs::poll_notify();
+    crate::fs::char_removed(&format!("input/event{}", dev.index));
+}
+
+/// Whether event device `index` is still there.
+pub fn exists(index: usize) -> bool {
+    DEVICES.lock().iter().any(|d| d.index == index)
+}
+
+/// A reader of `dev` for the in-kernel tests: what it was sent, taken.
+pub struct TestClient(Arc<Client>);
+
+impl TestClient {
+    /// The events delivered so far as (type, code, value), emptied.
+    pub fn taken(&self) -> Vec<(u16, u16, i32)> {
+        let mut q = self.0.queue.lock();
+        q.drain(..)
+            .map(|e| {
+                let t = u16::from_le_bytes([e[16], e[17]]);
+                let c = u16::from_le_bytes([e[18], e[19]]);
+                (t, c, i32::from_le_bytes([e[20], e[21], e[22], e[23]]))
+            })
+            .collect()
+    }
+}
+
+pub fn test_client(dev: &Arc<Device>) -> TestClient {
+    let c = Arc::new(Client {
+        id: NEXT_CLIENT.fetch_add(1, Ordering::Relaxed),
+        dev: dev.clone(),
+        queue: IrqSpinLock::new(VecDeque::new()),
+        wait: WaitQueue::new(),
+        count: AtomicU64::new(0),
+        clock: AtomicU32::new(CLOCK_REALTIME),
+        flags: AtomicU32::new(0),
+        revoked: AtomicBool::new(false),
+    });
+    dev.state.lock().clients.push(Arc::downgrade(&c));
+    TestClient(c)
 }
 
 /// The device's /dev node and sysfs entries (sysfs-class-input in the

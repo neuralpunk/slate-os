@@ -92,6 +92,10 @@ pub enum Icon {
     Window,
     /// A display: a screen on a stand (Settings › Displays, ADR 0170).
     Display,
+    /// Games (ADR 0177): two cards, a diamond on the front one
+    /// (Solitaire); a flag on its pole (Mines).
+    Cards,
+    Flag,
 }
 
 /// Draw `icon` `size` device pixels square at (x, y).
@@ -223,6 +227,19 @@ pub fn draw(canvas: &mut Canvas, icon: Icon, x: f32, y: f32, size: f32, color: C
         }
         Icon::Activity => {
             p.extend(&polyline(&[(2.5, 12.5), (7.0, 12.5), (9.5, 6.0), (14.0, 19.0), (16.5, 12.5), (21.5, 12.5)], w));
+        }
+        Icon::Cards => {
+            // The card behind shows its top and left edges.
+            p.extend(&polyline(&[(5.0, 16.5), (5.0, 5.5), (6.5, 4.0), (14.0, 4.0)], w));
+            p.extend(&Path::rounded_ring(8.0, 7.0, 11.5, 14.0, 2.0, w));
+            let mut d = Path::new();
+            d.move_to(13.75, 10.5).line_to(16.0, 14.0).line_to(13.75, 17.5).line_to(11.5, 14.0).close();
+            p.extend(&d);
+        }
+        Icon::Flag => {
+            p.extend(&polyline(&[(7.0, 21.0), (7.0, 3.5)], w));
+            p.extend(&polyline(&[(7.0, 4.0), (18.5, 8.0), (7.0, 12.0)], w));
+            p.extend(&polyline(&[(4.0, 21.0), (12.0, 21.0)], w));
         }
         Icon::Download => {
             p.extend(&polyline(&[(12.0, 3.5), (12.0, 14.5)], w));

@@ -163,6 +163,9 @@ impl BlockDevice for Elevator {
     fn detach(&self) {
         self.inner.detach()
     }
+    fn power_off(&self) -> Option<core::result::Result<(), IoError>> {
+        self.inner.power_off()
+    }
 }
 
 pub const TESTS: &[crate::ktest::Test] = &[

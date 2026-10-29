@@ -105,7 +105,7 @@ fn add_tree(w: &mut dyn Sink, base: &Path, rel: &str, prefix: &str) -> Result {
 
 /// The fonts Strata loads from /usr/share/fonts/slate, with the OFL texts
 /// that must go with them.
-const STRATA_FONTS: [&str; 9] = [
+const STRATA_FONTS: [&str; 14] = [
     "HostGrotesk-400.ttf",
     "HostGrotesk-500.ttf",
     "HostGrotesk-600.ttf",
@@ -113,8 +113,14 @@ const STRATA_FONTS: [&str; 9] = [
     "DMMono-Medium.ttf",
     "DMMono-Italic.ttf",
     "DMMono-MediumItalic.ttf",
+    // The themes' serifs (ADR 0175).
+    "InstrumentSerif-Italic.ttf",
+    "Fraunces-600.ttf",
+    "Fraunces-Italic-400.ttf",
     "OFL-HostGrotesk.txt",
     "OFL-DMMono.txt",
+    "OFL-InstrumentSerif.txt",
+    "OFL-Fraunces.txt",
 ];
 
 /// Fill a root tree: Slate itself (ADR 0012: only our code), as the base
@@ -299,8 +305,14 @@ pub fn live_archive(extra: &[(&str, u32, Vec<u8>)]) -> Result<Vec<u8>> {
         let p = built.iter().find(|p| p.name == name).ok_or_else(|| format!("no {name}"))?;
         w.file(&format!("bin/{name}"), 0o755, &std::fs::read(&p.path).map_err(|e| e.to_string())?);
     }
+    // The live system has MediaTek's Bluetooth firmware, so a Bluetooth
+    // mouse works there (ADR 0176; installs take it only on machines
+    // with such a controller).
+    let bt: Vec<(String, u32, Vec<u8>)> =
+        crate::btfw::files().unwrap_or_default().into_iter().map(|(p, d)| (p, 0o644, d)).collect();
+    let bt: Vec<(&str, u32, Vec<u8>)> = bt.iter().map(|(p, m, d)| (p.as_str(), *m, d.clone())).collect();
     let mut made = std::collections::HashSet::new();
-    for (path, mode, data) in extra {
+    for (path, mode, data) in extra.iter().chain(bt.iter()) {
         if let Some((dir, _)) = path.rsplit_once('/') {
             let mut at = String::new();
             for part in dir.split('/') {

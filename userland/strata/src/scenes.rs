@@ -26,7 +26,7 @@ fn fonts() -> Fonts<'static> {
         let p = format!("{}/../../assets/fonts/{n}", env!("CARGO_MANIFEST_DIR"));
         std::boxed::Box::leak(std::fs::read(p).unwrap().into_boxed_slice())
     };
-    Fonts::new(FILES.map(read)).unwrap()
+    Fonts::new(FILES.map(read)).unwrap().with_serifs(crate::fonts::SERIF_FILES.map(read))
 }
 
 // --- sample contents (what apps would draw) -----------------------------
@@ -258,7 +258,7 @@ fn mockup_wm(w: f32, h: f32, focused: usize) -> (Wm, [WinId; 3]) {
         win.rect = r;
         win.icon = icon;
     }
-    wm.get_mut(ids[1]).unwrap().program = Some("terminal".into());
+    wm.get_mut(ids[1]).unwrap().accent = Some(slate_ui::themes::Stratum::Ochre);
     wm.focus(ids[focused]);
     (wm, ids)
 }

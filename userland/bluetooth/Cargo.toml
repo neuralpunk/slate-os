@@ -22,7 +22,8 @@ test = false
 bench = false
 
 [dependencies]
-slate-hci = { path = "../../libs/hci" }
+slate-hci = { path = "../../libs/hci", features = ["smp"] }
+slate-hid = { path = "../../libs/hid" }
 slate-rt = { path = "../rt" }
 
 [lints]

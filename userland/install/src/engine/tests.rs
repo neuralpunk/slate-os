@@ -455,6 +455,15 @@ fn full_graphics_install() {
 
     let sys = system_with_firmware([1; 32], [1; 32]);
     let payload = Payload { system: &sys, kernel: b"K", efi: b"E", bios: None };
+    // A machine wanting Bluetooth firmware, on a medium without it:
+    // installed without it (ADR 0176).
+    plan.bluetooth_firmware = true;
+    // The live system's Bluetooth pairings come along (ADR 0176).
+    plan.bluetooth = std::vec![
+        (String::from("irk"), b"00112233445566778899aabbccddeeff\n".to_vec()),
+        (String::from("devices/DA:DB:00:8C:D8:E5"), b"name=Mouse\nle=random\n".to_vec()),
+        (String::from("devices/../../etc/passwd"), b"no".to_vec()),
+    ];
     install(&mut dev, &plan, &payload, "!", b"", (0, 0), &mut |_| {}).unwrap();
     let base = plan.root.0 * 512;
     let len = (plan.root.1 + 1 - plan.root.0) * 512;
@@ -482,4 +491,13 @@ fn full_graphics_install() {
     );
     assert_eq!(read("system-1", "usr/lib/quarry/db/slate-firmware-gpu/reason"), b"explicit\n");
     assert_eq!(read("var", "lib/slate/graphics-trial"), b"full\n");
+    assert_eq!(read("var", "lib/slate/bluetooth/devices/DA:DB:00:8C:D8:E5"), b"name=Mouse\nle=random\n");
+    let var = fs.subvol_by_name("var").unwrap();
+    let mut ino = ROOT_INO;
+    for part in ["lib", "slate", "bluetooth"] {
+        ino = fs.lookup(var, ino, part.as_bytes()).unwrap();
+    }
+    assert_eq!(fs.stat(var, ino).unwrap().mode & 0o777, 0o700, "root's alone");
+    let devices = fs.lookup(var, ino, b"devices").unwrap();
+    assert_eq!(fs.stat(var, devices).unwrap().mode & 0o777, 0o700);
 }

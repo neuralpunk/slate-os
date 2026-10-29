@@ -120,8 +120,8 @@ pub(crate) const UTS_FIELD: usize = 65;
 /// The Linux release whose interface Slate offers, as Linux programs are
 /// told it (they parse it to decide which kernel features exist).
 pub(crate) const LINUX_RELEASE: &str = "6.12.0-slate";
-/// Slate's own release.
-pub(crate) const SLATE_RELEASE: &str = "0.1.0";
+/// Slate's own release: the workspace's version (Cargo.toml).
+pub(crate) const SLATE_RELEASE: &str = env!("CARGO_PKG_VERSION");
 
 /// What the calling process is told the system is (ADR 0153): Slate's
 /// own programs hear Slate; Linux programs hear a Linux-compatible kernel,
@@ -129,13 +129,18 @@ pub(crate) const SLATE_RELEASE: &str = "0.1.0";
 /// /proc/version line.)
 pub(crate) fn identity() -> (&'static str, &'static str, &'static str, &'static str) {
     if proc::current().is_some_and(|p| p.domain() == proc::domain::Domain::Slate) {
-        ("Slate", SLATE_RELEASE, "#1 SMP PREEMPT", "Slate version 0.1.0 (slate@slate) #1 SMP PREEMPT\n")
+        (
+            "Slate",
+            SLATE_RELEASE,
+            "#1 SMP PREEMPT",
+            concat!("Slate version ", env!("CARGO_PKG_VERSION"), " (slate@slate) #1 SMP PREEMPT\n"),
+        )
     } else {
         (
             "Linux",
             LINUX_RELEASE,
-            "#1 SMP PREEMPT Slate 0.1.0",
-            "Linux version 6.12.0-slate (slate@slate) #1 SMP PREEMPT Slate 0.1.0\n",
+            concat!("#1 SMP PREEMPT Slate ", env!("CARGO_PKG_VERSION")),
+            concat!("Linux version 6.12.0-slate (slate@slate) #1 SMP PREEMPT Slate ", env!("CARGO_PKG_VERSION"), "\n"),
         )
     }
 }

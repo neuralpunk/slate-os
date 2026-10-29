@@ -64,9 +64,9 @@ pub struct Window {
     pub sandboxed: bool,
     /// Its app's glyph, from the entry whose `exec` it runs (ADR 0124).
     pub icon: Option<Icon>,
-    /// The name of the program it runs, as the kernel says (its app's
-    /// accent in Sediment, ADR 0167).
-    pub program: Option<String>,
+    /// Its app's accent in Sediment, from the entry whose `exec` its
+    /// program is, as the kernel names it (ADR 0167 and its addendum).
+    pub accent: Option<slate_ui::themes::Stratum>,
     pub workspace: usize,
     /// The frame when normal.
     pub rect: Area,
@@ -381,7 +381,7 @@ impl Wm {
             linux,
             sandboxed: false,
             icon: None,
-            program: None,
+            accent: None,
             workspace: self.active,
             rect: Area::new(x, y, w, h),
             state: State::Normal,

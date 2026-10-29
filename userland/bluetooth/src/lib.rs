@@ -20,5 +20,6 @@ extern crate std;
 pub mod cli;
 pub mod daemon;
 pub mod host;
+pub mod le;
 pub mod proto;
 pub mod store;

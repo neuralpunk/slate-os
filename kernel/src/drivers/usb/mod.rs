@@ -8,6 +8,7 @@
 //! (keyboards often have one built in). Descriptors and standard requests
 //! follow the USB 2.0 specification, chapter 9; hubs chapter 11.
 
+pub mod btmtk;
 pub mod btusb;
 pub mod ecm;
 pub mod hid;

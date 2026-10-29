@@ -10,7 +10,7 @@ publish.workspace = true
 fatfs = { version = "=0.3.6", default-features = false, features = ["std", "alloc"] }
 slate-cpio = { path = "../../libs/cpio", features = ["alloc"] }
 slate-gpt = { path = "../../libs/gpt" }
-slate-hci = { path = "../../libs/hci" }
+slate-hci = { path = "../../libs/hci", features = ["smp"] }
 slate-fat = { path = "../../libs/fat" }
 slate-esp = { path = "../../libs/esp" }
 slate-qpkg = { path = "../../libs/qpkg" }

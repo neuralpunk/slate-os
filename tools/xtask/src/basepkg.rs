@@ -42,7 +42,7 @@ const DB: &str = "usr/lib/quarry/db";
 const MEDIA_REPO: &str = "var/lib/quarry/install";
 
 /// The apps' paths (ADR 0104): their programs, launcher entries and
-/// guides.
+/// guides; the games' too (ADR 0177).
 const APPS: &[&str] = &[
     "bin/calculator",
     "bin/clock",
@@ -58,7 +58,11 @@ const APPS: &[&str] = &[
     "bin/software-updater",
     "bin/web-browser",
     "bin/app-center",
+    "bin/solitaire",
+    "bin/mines",
     "usr/share/strata/apps/calculator.app",
+    "usr/share/strata/apps/solitaire.app",
+    "usr/share/strata/apps/mines.app",
     "usr/share/strata/apps/images.app",
     "usr/share/strata/apps/archives.app",
     "usr/share/strata/apps/editor.app",
@@ -231,6 +235,9 @@ pub struct System {
     /// AMD's firmware for full graphics (ADR 0173), in the media's
     /// repository only, when the build machine has it.
     pub firmware: Option<Built>,
+    /// MediaTek's Bluetooth firmware (ADR 0176), in the media's repository
+    /// (and on its live system), when the build machine has it.
+    pub firmware_bt: Option<Built>,
 }
 
 pub fn system() -> Result<&'static System> {
@@ -306,8 +313,25 @@ fn build() -> Result<System> {
         }
         None => None,
     };
+    let firmware_bt = match crate::btfw::files() {
+        Some(files) => {
+            let mut m = manifest("slate-firmware-bt", "MediaTek's firmware for their Bluetooth controllers (ADR 0176)");
+            m.license = "LicenseRef-mediatek".into();
+            m.depends = vec![Dep::parse(&format!("slate-base (>= {})", version())).map_err(|e| e.to_string())?];
+            let mut entries: Vec<Entry> = crate::btfw::DIRS
+                .iter()
+                .map(|d| Entry { path: (*d).into(), kind: Kind::Dir, mode: 0o755, data: Vec::new() })
+                .collect();
+            for (path, data) in files {
+                entries.push(Entry { path, kind: Kind::File, mode: 0o644, data });
+            }
+            Some(Built::new(m, entries)?)
+        }
+        None => None,
+    };
     Ok(System {
         firmware,
+        firmware_bt,
         tree: c.nodes,
         base: Built::new(base, base_entries)?,
         desktop: Built::new(desktop, desktop_entries)?,
@@ -350,7 +374,8 @@ impl System {
             w.dir(d, 0o755)?;
         }
         let mut listed = Vec::new();
-        for b in [&self.desktop, &self.apps].into_iter().chain(self.firmware.as_ref()) {
+        for b in [&self.desktop, &self.apps].into_iter().chain(self.firmware.as_ref()).chain(self.firmware_bt.as_ref())
+        {
             let file = b.manifest.file_name();
             w.file(&format!("{MEDIA_REPO}/pkgs/{file}"), 0o644, &b.qpk)?;
             listed.push((file, b));

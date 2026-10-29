@@ -54,7 +54,7 @@ impl Category {
                 "graphics" => Icon::Picture,
                 "sound & video" => Icon::Play,
                 "development" => Icon::Code,
-                "games" => Icon::Grid,
+                "games" => Icon::Cards,
                 "system" => Icon::Terminal,
                 "settings" => Icon::Sliders,
                 "help" => Icon::Info,

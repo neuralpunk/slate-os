@@ -1381,8 +1381,9 @@ fn action(f: &[&[u8]], pid: i32, uid: u32, agent: &mut Option<Agent>) -> Result<
         }
     }
     // Mounting and unmounting a removable disk (a USB stick) in the
-    // person's own /run/media folder: Slate's own programs (Files, Disks)
-    // may, without asking, as anyone at the machine could plug it in.
+    // person's own /run/media folder, and powering it off to unplug it:
+    // Slate's own programs (Files, Disks) may, without asking, as anyone
+    // at the machine could plug it in or pull it out.
     if let Some(words) = name.strip_prefix("disk=")
         && let Ok(c) = slate_diskutil::parse(words)
         && c.mounting()

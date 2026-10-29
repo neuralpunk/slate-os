@@ -109,6 +109,12 @@ pub trait BlockDevice: Send + Sync {
     }
     /// The device was unplugged: everything after this fails.
     fn detach(&self) {}
+    /// Get the device ready to be unplugged and let it go: its cache
+    /// written, its medium stopped, and (a USB disk) the device removed as
+    /// if unplugged, its port disabled. `None` when it can't be.
+    fn power_off(&self) -> Option<core::result::Result<(), IoError>> {
+        None
+    }
 }
 
 /// A GPT partition: a window onto its disk.
@@ -834,6 +840,10 @@ const BLKFLSBUF: u32 = 0x1261;
 const BLKSSZGET: u32 = 0x1268;
 const BLKBSZGET: u32 = 0x8008_1270;
 const BLKGETSIZE64: u32 = 0x8008_1272;
+/// Eject the medium (ioctl_cdrom(2), `linux/cdrom.h`); what eject(1)
+/// asks first. For a removable disk Slate also lets the device go, as
+/// "power off" does on other desktops (ADR 0108's second addendum).
+const CDROMEJECT: u32 = 0x5309;
 
 impl File for BlockFile {
     fn as_any(&self) -> Option<&dyn core::any::Any> {
@@ -899,6 +909,10 @@ impl File for BlockFile {
                 let dev = self.rdev;
                 rescan(dev)?
             }
+            CDROMEJECT => match self.dev.power_off() {
+                Some(r) => r.map_err(|_| EIO)?,
+                None => return Err(ENOTTY),
+            },
             _ => return Err(ENOTTY),
         }
         Ok(0)

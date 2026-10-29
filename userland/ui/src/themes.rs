@@ -8,7 +8,7 @@
 //! contrast falls back to graphite's or Light's (the handoff, §4).
 
 use crate::color::Color;
-use crate::graphite::{Accent, Accents, Palette, Shape, Workspaces};
+use crate::graphite::{Accent, Accents, Palette, Serif, Shape, Workspaces};
 use crate::shadow::BoxShadow;
 
 /// A theme, as a person chooses it in Settings.
@@ -108,6 +108,9 @@ impl Shape {
         title_size: 13.0,
         title_semibold: false,
         title_tracking: -0.005,
+        title_serif: None,
+        // Instrument Serif Italic 17 px (the handoff's §2.4).
+        date_serif: Some((Serif::InstrumentItalic, 17.0)),
     };
 
     /// Sediment's (the handoff, §3.3): a 40 px title bar with the name in
@@ -132,6 +135,9 @@ impl Shape {
         title_size: 13.5,
         title_semibold: true,
         title_tracking: -0.01,
+        // Fraunces 600 at 15 px, its date Fraunces Italic 14 px (§3.3, §3.4).
+        title_serif: Some((Serif::Fraunces, 15.0)),
+        date_serif: Some((Serif::FrauncesItalic, 14.0)),
     };
 }
 
@@ -143,17 +149,60 @@ pub struct AppAccent {
     pub ink: Color,
 }
 
-/// The app's accent, by the name of the program its window runs (the
-/// handoff's fixed map: the terminal ochre, Files terracotta, System
-/// Monitor olive); the palette's accent for every other app, and for
-/// palettes without app accents.
-pub fn app_accent(pal: &Palette, program: Option<&str>) -> AppAccent {
-    let own = |fill: u32, ink: u32| AppAccent { fill: Color::rgb(fill), ink: Color::rgb(ink) };
-    match program.filter(|_| pal.app_accents) {
-        Some("terminal") => own(0xD9A441, 0x9C6B16),
-        Some("files") => own(0xB5643C, 0xA5562F),
-        Some("system-monitor") => own(0x6E7A5A, 0x5E6A4A),
-        _ => AppAccent { fill: pal.accent, ink: pal.accent_ink },
+/// The five stratum colours an app may take as its accent in Sediment
+/// (the handoff's §1 and §6.1: chosen from the wallpaper's bands, so no
+/// app brings a hue of its own). An app's entry says which with
+/// `accent=` (ADR 0167's addendum).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Stratum {
+    Ochre,
+    Terracotta,
+    Sage,
+    Olive,
+    Slate,
+}
+
+impl Stratum {
+    pub const ALL: [Stratum; 5] = [Stratum::Ochre, Stratum::Terracotta, Stratum::Sage, Stratum::Olive, Stratum::Slate];
+
+    /// The word in an app's entry (`accent=ochre`).
+    pub fn parse(word: &str) -> Option<Stratum> {
+        Stratum::ALL.into_iter().find(|s| s.word().eq_ignore_ascii_case(word.trim()))
+    }
+
+    pub fn word(self) -> &'static str {
+        match self {
+            Stratum::Ochre => "ochre",
+            Stratum::Terracotta => "terracotta",
+            Stratum::Sage => "sage",
+            Stratum::Olive => "olive",
+            Stratum::Slate => "slate",
+        }
+    }
+
+    /// Its tones: the band's colour to fill, and an ink darkened to 3:1
+    /// on Sediment's title bar and desktop (the handoff's three, then
+    /// sage and slate solved the same way; slate's fill is the lighter
+    /// one the handoff solved for its workspace pill).
+    pub fn accent(self) -> AppAccent {
+        let (fill, ink) = match self {
+            Stratum::Ochre => (0xD9A441, 0x9C6B16),
+            Stratum::Terracotta => (0xB5643C, 0xA5562F),
+            Stratum::Sage => (0x8A9A6B, 0x6D7954),
+            Stratum::Olive => (0x6E7A5A, 0x5E6A4A),
+            Stratum::Slate => (0x7A8494, 0x4B5563),
+        };
+        AppAccent { fill: Color::rgb(fill), ink: Color::rgb(ink) }
+    }
+}
+
+/// An app's accent: the stratum its entry declares where the theme has
+/// app accents (Sediment); the palette's accent for apps that declare
+/// none, and in other themes.
+pub fn app_accent(pal: &Palette, stratum: Option<Stratum>) -> AppAccent {
+    match stratum.filter(|_| pal.app_accents) {
+        Some(s) => s.accent(),
+        None => AppAccent { fill: pal.accent, ink: pal.accent_ink },
     }
 }
 
@@ -491,12 +540,18 @@ mod tests {
             assert!(r >= 3.0, "pill {i} is {r:.2}:1");
         }
         // The apps' inks on the title bar and the desktop (UI, 3:1).
-        for app in ["terminal", "files", "system-monitor", "editor"] {
-            let ink = app_accent(&s, Some(app)).ink;
-            assert!(contrast(ink, s.titlebar) >= 3.0, "{app} on the title bar");
-            assert!(contrast(ink, s.desktop) >= 3.0, "{app} on the desktop");
+        for st in Stratum::ALL.map(Some).into_iter().chain([None]) {
+            let ink = app_accent(&s, st).ink;
+            assert!(contrast(ink, s.titlebar) >= 3.0, "{st:?} on the title bar");
+            assert!(contrast(ink, s.desktop) >= 3.0, "{st:?} on the desktop");
         }
-        assert_eq!(app_accent(&c, Some("terminal")).ink, c.accent_ink);
+        // The fills on the terminal's dark ground (its cursor).
+        for st in Stratum::ALL {
+            assert!(contrast(st.accent().fill, Palette::SEDIMENT_TERMINAL.window) >= 3.0, "{st:?} on the terminal");
+        }
+        assert_eq!(app_accent(&c, Some(Stratum::Ochre)).ink, c.accent_ink);
+        assert_eq!(Stratum::parse("Terracotta"), Some(Stratum::Terracotta));
+        assert_eq!(Stratum::parse("purple"), None);
         // Each semantic colour on Sediment's sidebar too.
         let a = s.accents;
         for x in [a.clay, a.ochre, a.sage, a.moss, a.steel] {

@@ -16,6 +16,18 @@ test = false
 bench = false
 
 [[bin]]
+name = "solitaire"
+path = "src/solitaire_main.rs"
+test = false
+bench = false
+
+[[bin]]
+name = "mines"
+path = "src/mines_main.rs"
+test = false
+bench = false
+
+[[bin]]
 name = "web-browser"
 path = "src/browser_main.rs"
 test = false

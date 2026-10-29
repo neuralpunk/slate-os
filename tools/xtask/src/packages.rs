@@ -88,9 +88,10 @@ pub fn packages_scenario(o: &Opts) -> Result {
     let r = (|| -> Result {
         c.login()?;
         c.run(&repos, "", 10)?;
-        // slate-desktop and slate-apps, and slate-firmware-gpu when the
-        // build had AMD's firmware (ADR 0173).
-        let media = 2 + usize::from(crate::gpufw::files().is_some());
+        // slate-desktop and slate-apps, and slate-firmware-gpu and
+        // slate-firmware-bt when the build had AMD's and MediaTek's
+        // firmware (ADR 0173, ADR 0176).
+        let media = 2 + usize::from(crate::gpufw::files().is_some()) + usize::from(crate::btfw::files().is_some());
         c.run("quarry update | sort | tr '\\n' ,", &format!("install: {media} packages,next: 1 packages,"), 30)?;
         c.run(
             "quarry list | cut -d' ' -f1,2 | tr '\\n' ,",

@@ -298,6 +298,10 @@ pub fn install_on(disk: &Disk, c: &Choices, progress: &mut dyn FnMut(Progress)) 
     plan.desktop = c.desktop;
     plan.full_graphics = c.full_graphics;
     plan.network = c.network.clone();
+    // A Bluetooth mouse paired in the live system goes on working.
+    plan.bluetooth = engine::live_pairings();
+    // A MediaTek Bluetooth controller's firmware comes along (ADR 0176).
+    plan.bluetooth_firmware = engine::needs_bluetooth_firmware();
     if let Some(a) = &c.account {
         plan.account = Some(engine::Account {
             username: a.username.clone(),

@@ -41,6 +41,8 @@ pub fn open(rdev: u64, flags: u32) -> Result<Arc<dyn File>> {
         (tty::PTMX_MAJOR, tty::PTMX_MINOR) => tty::open_master(flags)?,
         (tty::PTS_MAJOR, n) => tty::open_slave(n, flags)?,
         (MISC_MAJOR, TUN_MINOR) => crate::net::tun::open(flags)?,
+        // HID devices from user space (ADR 0176).
+        (MISC_MAJOR, crate::drivers::input::user::USER_HID_MINOR) => crate::drivers::input::user::open(flags)?,
         // Bluetooth controllers, /dev/hci0... (ADR 0113).
         (MISC_MAJOR, n) if n >= crate::drivers::usb::btusb::HCI_MINOR_BASE => {
             crate::drivers::usb::btusb::open(n, flags)?

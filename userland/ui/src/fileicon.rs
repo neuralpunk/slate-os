@@ -135,6 +135,37 @@ fn page(x0: f32, y0: f32, x1: f32, y1: f32, fold: f32, r: f32) -> Path {
     p
 }
 
+/// A text file's thumbnail: a page filling `a`, in the icons' tones, with
+/// `lines` (its first lines) in `mono` on it.
+pub fn text_page(p: &mut Painter<'_>, pal: &Palette, a: Area, mono: &Face<'_>, lines: &[String]) {
+    let tn = tones(pal);
+    let (x, y, w, h) = (a.x, a.y, a.w, a.h);
+    let (x1, y1) = (x + w, y + h);
+    let (fold, r) = (w * 0.2, 3.0);
+    let soft = BoxShadow { dx: 0.0, dy: 1.5, blur: 5.0, spread: 0.0, color: tn.shadow };
+    p.shadow(Area::new(x, y, w, h), r, &soft);
+    p.path(&page(x, y, x1, y1, fold, r), tn.edge);
+    p.path(&page(x + 1.0, y + 1.0, x1 - 1.0, y1 - 1.0, fold - 0.4, r - 1.0), tn.paper);
+    let st = p.style(mono, 5.5, tn.ink);
+    let clip = p.clip(Area::new(x + 4.0, y + 4.0, w - 8.0, h - 8.0));
+    for (k, l) in lines.iter().enumerate() {
+        p.line(&st, x + 5.0, y + 5.0 + k as f32 * 7.0, 7.0, l);
+    }
+    p.unclip(clip);
+    // The folded corner, over any text under it.
+    let mut corner = Path::new();
+    corner.move_to(x1 - fold, y).line_to(x1, y).line_to(x1, y + fold).close();
+    p.path(&corner, pal.window);
+    let mut flap = Path::new();
+    flap.move_to(x1 - fold, y)
+        .line_to(x1 - fold, y + fold - 1.5)
+        .quad_to(x1 - fold, y + fold, x1 - fold + 1.5, y + fold)
+        .line_to(x1, y + fold)
+        .close();
+    p.path(&flap, tn.fold);
+    p.polyline(&[(x1 - fold, y), (x1, y + fold)], 1.0, tn.edge);
+}
+
 /// Draw `kind`'s icon in the `size`-wide square at (x, y); `badge` (a
 /// typeface and the text) marks a file's type, when there is room.
 pub fn draw(
