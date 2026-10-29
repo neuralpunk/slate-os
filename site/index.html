@@ -1,0 +1,1996 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>SlateOS</title>
+<meta name="description" content="SlateOS: a new operating system written from scratch in Rust. No Linux code inside, and it runs your Linux software unmodified.">
+<meta name="theme-color" content="#121211">
+<link rel="canonical" href="https://neuralpunk.github.io/slate-os/">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="SlateOS">
+<meta property="og:title" content="SlateOS: a clean slate">
+<meta property="og:description" content="A new x86-64 operating system written from scratch in Rust. No Linux code inside, and it runs your Linux software unmodified.">
+<meta property="og:url" content="https://neuralpunk.github.io/slate-os/">
+<meta property="og:image" content="https://neuralpunk.github.io/slate-os/assets/og-image.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="The Strata desktop on SlateOS: a code editor, a terminal and htop side by side">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,300;1,400;1,500&family=DM+Mono:ital,wght@0,300;0,400;0,500;1,400&family=Host+Grotesk:ital,wght@0,300..800;1,300..800&display=swap">
+<style>
+/* Layout: one long survey of graphite bands. Content sits in a 1320px frame on a 12-column grid,
+   headlines set large and left-weighted, DM Mono data pinned to the edges like the legend of a geological map. */
+:root {
+  /* Strata's graphite neutrals */
+  --desktop: #121211; --well: #161615; --window: #1A1A19; --overlay: #1C1C1B;
+  --header: #222221; --divider: #262625; --raised: #262625; --active: #2A2A28;
+  --border: #333331; --border-strong: #3A3A38;
+  --chalk: #E3E1DC; --focus: #A9A7A2; --text-1: #C9C7C2; --text-2: #BEBCB7; --text-3: #A3A29F;
+  --text-4: #9B9994; --muted: #85837E; --inactive: #75736F; --decor: #5F5D59;
+  /* Semantic colour, meaning only */
+  --sage: #A4B38C; --sage-t: #2D2F29; --sage-b: #4A5041;
+  --moss: #8FB2A4; --moss-t: #2A2F2C; --moss-b: #434F4A;
+  --clay: #D0907E; --clay-t: #332B27; --clay-b: #5A433C;
+  --steel: #93A7BA; --ochre: #CFB07A;
+  /* The installer's light palette */
+  --l-window: #F3F2F2; --l-desktop: #DCDBDB; --l-side: #EEEDED; --l-hover: #E6E5E5;
+  --l-hair: #DEDDDD; --l-border: #CFCECE; --l-ink: #0B0B0B; --l-t2: #404040; --l-t3: #5E5E5E;
+  --l-moss: #3B5F52; --l-sage: #4E5D37;
+
+  --f-display: "Cormorant Garamond", Cormorant, Garamond, "Times New Roman", serif;
+  --f-sans: "Host Grotesk", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --f-mono: "DM Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+  --frame: 1320px;
+  --gutter-l: max(16px, env(safe-area-inset-left, 0px));
+  --gutter-r: max(16px, env(safe-area-inset-right, 0px));
+  --ease: cubic-bezier(.2, .7, .1, 1);
+  color-scheme: dark;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+html { background: var(--desktop); scroll-behavior: smooth; scroll-padding-top: 72px; }
+img { max-width: 100%; }
+[hidden]:not([hidden=until-found i]) { display: none !important; }
+body {
+  margin: 0; padding: 0;
+  background: var(--desktop); color: var(--text-2);
+  font: 400 17px/1.6 var(--f-sans);
+  -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
+  overflow-x: hidden;
+}
+::selection { background: var(--chalk); color: var(--desktop); }
+a { color: inherit; }
+button { font: inherit; color: inherit; }
+:focus-visible { outline: 1px solid var(--chalk); outline-offset: 3px; border-radius: 4px; }
+h1, h2, h3 { text-wrap: balance; font-weight: 400; margin: 0; color: var(--chalk); }
+p { margin: 0; text-wrap: pretty; }
+
+/* Grain: the faint tooth of slate under everything */
+body::after {
+  content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 100; opacity: .055;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='220' height='220'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 .9  0 0 0 0 .88  0 0 0 0 .85  0 0 0 1 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+}
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 60; background: var(--desktop); }
+
+.frame { max-width: calc(var(--frame) + 64px); margin-inline: auto; padding-left: var(--gutter-l); padding-right: var(--gutter-r); }
+@media (min-width: 900px) { .frame { padding-left: max(32px, env(safe-area-inset-left, 0px)); padding-right: max(32px, env(safe-area-inset-right, 0px)); } }
+
+.mono { font-family: var(--f-mono); }
+.serif { font-family: var(--f-display); font-style: italic; font-weight: 400; letter-spacing: -.005em; }
+
+/* Ruled label: lowercase mono, a rule, and a datum at the end */
+.ruled { display: flex; align-items: center; gap: 12px; font: 400 12px/1 var(--f-mono); letter-spacing: .06em; color: var(--muted); text-transform: lowercase; }
+.ruled::after { content: ""; flex: 1; height: 1px; background: var(--active); order: 1; }
+.ruled b { order: 2; font-weight: 400; color: var(--text-4); }
+
+/* ── Navigation ─────────────────────────────── */
+.nav {
+  position: fixed; top: env(safe-area-inset-top, 0px); left: 0; right: 0; z-index: 50;
+  transition: background .4s var(--ease), border-color .4s var(--ease);
+  border-bottom: 1px solid transparent;
+}
+.nav.scrolled { background: rgba(18, 18, 17, .78); backdrop-filter: blur(14px) saturate(1.1); -webkit-backdrop-filter: blur(14px); border-bottom-color: var(--divider); }
+.nav .frame { display: flex; align-items: center; gap: 28px; height: 64px; }
+.brand { display: flex; align-items: center; gap: 10px; text-decoration: none; color: var(--chalk); font: 500 15px/1 var(--f-sans); letter-spacing: -.01em; }
+.brand svg { width: 22px; height: 22px; }
+.nav-gh { display: inline-flex; align-items: center; gap: 8px; height: 31px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--border-strong); text-decoration: none; font: 400 11.5px/1 var(--f-mono); color: var(--text-1); white-space: nowrap; transition: border-color .2s, color .2s; margin-left: -16px; }
+.nav-gh svg { width: 13px; height: 13px; }
+.nav-gh:hover { border-color: var(--focus); color: var(--chalk); }
+@media (max-width: 480px) { .nav-gh span { display: none; } }
+.nav-links { display: flex; gap: 22px; margin-left: auto; list-style: none; padding: 0; margin-block: 0; }
+.nav-links a { text-decoration: none; font-size: 13.5px; color: var(--text-3); transition: color .2s; }
+.nav-links a:hover { color: var(--chalk); }
+.nav-status { font: 400 11.5px/1 var(--f-mono); color: var(--muted); border: 1px solid var(--border); border-radius: 999px; padding: 7px 12px; display: flex; gap: 8px; align-items: center; white-space: nowrap; }
+.nav-status i { width: 6px; height: 6px; border-radius: 50%; background: var(--ochre); display: block; box-shadow: 0 0 0 3px rgba(207,176,122,.12); }
+@media (max-width: 1120px) { .nav-links { display: none; } .nav-status { margin-left: auto; } }
+
+/* ── Hero ───────────────────────────────────── */
+.hero { position: relative; min-height: min(100svh, 1040px); display: grid; grid-template-rows: 1fr auto; overflow: hidden; isolation: isolate; background: var(--desktop) url("assets/wall-hero.webp") 62% 50% / cover no-repeat; }
+@media (max-width: 700px) { .hero { min-height: 720px; } }
+#waves { position: absolute; inset: 0; width: 100%; height: 100%; z-index: -2; display: block; opacity: 0; transition: opacity 1.2s var(--ease); }
+#waves.on { opacity: 1; }
+.hero::before { content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none;
+  background:
+    radial-gradient(ellipse 44% 40% at 50% 50%, rgba(18,18,17,.66) 0%, rgba(18,18,17,.3) 55%, rgba(18,18,17,0) 100%),
+    linear-gradient(0deg, var(--desktop) 0%, rgba(18,18,17,0) 24%),
+    linear-gradient(180deg, rgba(18,18,17,.75) 0%, rgba(18,18,17,0) 18%); }
+.hero-center { align-self: center; display: grid; justify-items: center; text-align: center; padding-block: 120px 40px; }
+.hero-mark { width: clamp(72px, 8vw, 112px); height: auto; overflow: visible; margin-bottom: clamp(22px, 3vw, 38px); filter: drop-shadow(0 18px 40px rgba(0,0,0,.65)); }
+.wordmark { font: 300 clamp(4.6rem, 15.5vw, 14rem)/.84 var(--f-sans); letter-spacing: -.07em; color: var(--chalk); padding-right: .07em; display: inline-flex; align-items: baseline; text-wrap: nowrap; }
+.wordmark .os { color: var(--text-4); }
+@supports ((-webkit-background-clip: text) or (background-clip: text)) {
+  .wordmark .slate { background: linear-gradient(100deg, var(--chalk) 0%, var(--chalk) 42%, #F8F6F1 50%, var(--chalk) 58%, var(--chalk) 100%); background-size: 260% 100%; background-position: 0% 0; -webkit-background-clip: text; background-clip: text; color: transparent; }
+}
+.hero-tag { margin-top: clamp(20px, 2.6vw, 30px); font: italic 400 clamp(1.8rem, 3.4vw, 2.8rem)/1.1 var(--f-display); color: var(--text-1); }
+.hero-rule { display: flex; align-items: center; gap: 14px; margin-top: 22px; font: 400 11.5px/1 var(--f-mono); letter-spacing: .08em; color: var(--muted); }
+.hero-rule::before, .hero-rule::after { content: ""; width: clamp(28px, 6vw, 72px); height: 1px; background: var(--decor); }
+.hero-lede { margin-top: 28px; font-size: clamp(16.5px, 1.4vw, 19px); line-height: 1.6; color: var(--text-3); max-width: 33em; }
+.hero-lede strong { color: var(--chalk); font-weight: 500; }
+.hero-cta { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 34px; justify-content: center; }
+.hero-base { display: flex; justify-content: space-between; align-items: end; gap: 16px; padding-block: 0 28px; font: 400 11.5px/1.8 var(--f-mono); color: var(--muted); }
+.hero-base b { color: var(--text-1); font-weight: 400; }
+.hero-base > :last-child { text-align: right; }
+.scroll-cue { display: grid; justify-items: center; gap: 8px; letter-spacing: .08em; }
+.scroll-cue i { width: 1px; height: 38px; background: linear-gradient(var(--focus), transparent); display: block; }
+@media (max-width: 760px) { .hero-base { display: none; } }
+
+.btn { display: inline-flex; align-items: center; gap: 10px; height: 46px; padding: 0 22px; border-radius: 999px; text-decoration: none; font: 500 14.5px/1 var(--f-sans); border: 1px solid var(--border-strong); transition: background .25s var(--ease), color .25s var(--ease), border-color .25s; cursor: pointer; background: transparent; }
+.btn svg { width: 14px; height: 14px; transition: transform .3s var(--ease); }
+.btn:hover svg { transform: translateX(3px); }
+.btn-primary { background: var(--chalk); color: var(--desktop); border-color: var(--chalk); }
+.btn-primary:hover { background: #F1EFEA; }
+.btn-ghost { color: var(--text-1); }
+.btn-ghost:hover { border-color: var(--focus); color: var(--chalk); }
+
+/* ── Ledger ticker ──────────────────────────── */
+.ledger { border-block: 1px solid var(--divider); overflow: hidden; background: var(--desktop); }
+.ledger-track { display: flex; width: max-content; animation: ticker 60s linear infinite; }
+.ledger:hover .ledger-track { animation-play-state: paused; }
+.ledger-item { display: flex; align-items: center; gap: 18px; padding: 18px 28px; font: 400 13px/1 var(--f-mono); color: var(--text-4); white-space: nowrap; }
+.ledger-item b { color: var(--chalk); font-weight: 400; }
+.ledger-item svg { width: 12px; height: 12px; color: var(--decor); }
+@keyframes ticker { to { transform: translateX(-50%); } }
+
+/* ── Sections ───────────────────────────────── */
+section { position: relative; }
+.band { padding-block: clamp(96px, 13vw, 180px); }
+.h2 { font: 300 clamp(2.5rem, 5.6vw, 5.2rem)/.98 var(--f-sans); letter-spacing: -.045em; }
+.h2 .serif { font-size: 1.14em; line-height: .9; }
+.lede { font-size: clamp(17px, 1.35vw, 19px); color: var(--text-4); max-width: 36em; }
+.lede strong { color: var(--text-1); font-weight: 500; }
+.sec-head { display: grid; gap: 28px; margin-bottom: clamp(48px, 7vw, 96px); }
+.split { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 32px; }
+.split > * { min-width: 0; }
+@media (max-width: 900px) { .split > * { grid-column: 1 / -1 !important; } .split { gap: 24px; } }
+
+/* ── Thesis ─────────────────────────────────── */
+.thesis p { font: 300 clamp(1.75rem, 3.6vw, 3.25rem)/1.18 var(--f-sans); letter-spacing: -.03em; color: var(--chalk); max-width: 22em; }
+.thesis p .w { transition: color .2s; }
+.thesis p em { font-family: var(--f-display); font-style: italic; letter-spacing: -.01em; }
+.thesis .sig { margin-top: 48px; display: flex; gap: 16px; align-items: center; font: 400 12px/1 var(--f-mono); color: var(--muted); }
+.thesis .sig::before { content: ""; width: 40px; height: 1px; background: var(--decor); }
+
+/* ── Layers (exploded stack) ────────────────── */
+.layers { background: linear-gradient(180deg, var(--desktop), var(--well) 30%, var(--well) 70%, var(--desktop)); }
+.layers-grid { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 48px; align-items: center; }
+.layers-copy { display: grid; gap: 28px; align-content: center; }
+.layers-art { position: relative; }
+.layers-art svg { width: 100%; height: auto; display: block; overflow: visible; }
+.plate .top { transition: fill .3s; }
+.plate text { font-family: var(--f-sans); }
+.plate .lbl { font: 500 19px var(--f-sans); fill: var(--chalk); letter-spacing: -.01em; }
+.plate .sub { font: 400 13px var(--f-mono); fill: var(--muted); }
+.plate .tag { font: 400 11px var(--f-mono); }
+.prov { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--divider); border: 1px solid var(--divider); border-radius: 14px; overflow: hidden; }
+.prov > div { background: var(--well); padding: 20px 22px; display: grid; gap: 10px; align-content: start; }
+.prov h4 { margin: 0; font: 400 11.5px/1 var(--f-mono); letter-spacing: .06em; display: flex; gap: 8px; align-items: center; }
+.prov h4 svg { width: 13px; height: 13px; }
+.prov .ok h4 { color: var(--sage); }
+.prov .no h4 { color: var(--clay); }
+.prov ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; font-size: 14px; color: var(--text-4); }
+.layers-list { display: none; margin: 0; padding: 0; list-style: none; gap: 0; border-top: 1px solid var(--divider); }
+.layers-list li { padding: 16px 0; border-bottom: 1px solid var(--divider); display: grid; gap: 4px; }
+.layers-list b { color: var(--chalk); font-weight: 500; }
+.layers-list span { font: 400 12.5px/1.5 var(--f-mono); color: var(--muted); }
+@media (max-width: 900px) {
+  .layers-grid { grid-template-columns: 1fr; }
+  .plate .lbl, .plate .sub, .plate .tag, .plate .leader { display: none; }
+  .layers-art svg { max-width: 460px; margin-inline: auto; }
+  .layers-list { display: grid; }
+}
+
+/* ── Domains ────────────────────────────────── */
+.domains-grid { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 56px; align-items: start; }
+.tenets { display: grid; gap: 0; margin-top: 40px; border-top: 1px solid var(--divider); }
+.tenet { display: grid; grid-template-columns: 28px 1fr; gap: 14px; padding: 18px 0; border-bottom: 1px solid var(--divider); }
+.tenet svg { width: 18px; height: 18px; color: var(--text-3); margin-top: 3px; }
+.tenet b { display: block; color: var(--chalk); font-weight: 500; font-size: 16px; }
+.tenet span { color: var(--text-4); font-size: 15px; }
+.console { background: var(--window); border: 1px solid var(--border); border-radius: 14px; box-shadow: 0 40px 100px -30px rgba(0,0,0,.85); overflow: hidden; }
+.console-bar { display: flex; align-items: center; gap: 14px; padding: 12px 16px; border-bottom: 1px solid var(--divider); flex-wrap: wrap; }
+.console-bar .t { font: 500 13px var(--f-sans); color: var(--chalk); }
+.console-bar .p { font: 400 12px var(--f-mono); color: var(--muted); }
+.seg { margin-left: auto; display: inline-flex; background: var(--well); border: 1px solid var(--border); border-radius: 9px; padding: 3px; gap: 2px; }
+.seg button { border: 0; background: transparent; padding: 7px 12px; border-radius: 6px; font: 400 12px/1 var(--f-mono); color: var(--text-4); cursor: pointer; transition: background .15s, color .15s; }
+.seg button[aria-pressed="true"] { background: var(--chalk); color: var(--desktop); }
+.ptable { width: 100%; border-collapse: collapse; font: 400 13px/1 var(--f-mono); font-variant-numeric: tabular-nums; }
+.ptable th { text-align: left; font-weight: 400; color: var(--muted); background: var(--header); padding: 11px 16px; font-size: 11.5px; letter-spacing: .04em; }
+.ptable td { padding: 12px 16px; border-top: 1px solid var(--divider); color: var(--text-2); white-space: nowrap; }
+.ptable td.num { color: var(--muted); width: 1%; }
+.ptable tr { transition: opacity .35s var(--ease); }
+.ptable tr.off { opacity: .32; }
+.dtag { display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px; border-radius: 4px; border: 1px solid var(--border-strong); color: var(--text-3); font: 400 11px/1 var(--f-mono); }
+.dtag svg { width: 11px; height: 11px; }
+.dtag.linux { background: var(--moss-t); border-color: var(--moss-b); color: var(--moss); }
+.console-foot { padding: 14px 16px; border-top: 1px solid var(--divider); font: 400 12.5px/1.6 var(--f-mono); color: var(--muted); display: flex; gap: 10px; align-items: flex-start; min-height: 64px; }
+.console-foot svg { width: 14px; height: 14px; flex: none; margin-top: 3px; }
+.console-foot.on { color: var(--text-4); }
+.console-wrap { overflow-x: auto; }
+@media (max-width: 900px) { .domains-grid { grid-template-columns: 1fr; } }
+
+/* ── Strata desktop showcase ────────────────── */
+.desk-band { padding-bottom: clamp(80px, 10vw, 140px); }
+.stage-fit { position: relative; width: 100%; aspect-ratio: 1200 / 740; max-width: 100%; }
+.stage { position: absolute; top: 0; left: 0; width: 1200px; height: 740px; transform-origin: 0 0; border-radius: 14px; overflow: hidden; background: var(--desktop); box-shadow: 0 0 0 1px var(--border), 0 60px 140px -40px rgba(0,0,0,.9); font-family: var(--f-sans); user-select: none; -webkit-user-select: none; }
+.stage .wall { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.stage-caption { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px 32px; margin-top: 22px; font: 400 12px/1.6 var(--f-mono); color: var(--muted); }
+.stage-caption kbd { font: inherit; color: var(--text-1); border: 1px solid var(--border-strong); border-radius: 4px; padding: 1px 6px; background: var(--raised); }
+
+.sbar { position: absolute; top: 0; left: 0; right: 0; height: 32px; display: flex; align-items: center; padding: 0 8px 0 16px; background: var(--desktop); font-size: 12.5px; color: var(--text-3); z-index: 5; }
+.sbar .apps { display: flex; align-items: center; gap: 8px; border: 0; background: transparent; padding: 4px 8px; margin-left: -8px; border-radius: 6px; color: var(--text-1); font-size: 12.5px; cursor: pointer; }
+.sbar .apps.open, .sbar .apps:hover { background: var(--active); }
+.sbar .apps svg { width: 14px; height: 14px; }
+.wsx { display: flex; gap: 2px; margin-left: 14px; }
+.wsx button { width: 26px; height: 22px; border: 0; background: transparent; border-radius: 6px; font: 400 12px/1 var(--f-mono); color: var(--decor); cursor: pointer; position: relative; padding: 0; }
+.wsx button::after { content: ""; position: absolute; left: 50%; bottom: 2px; height: 1px; width: 0; transform: translateX(-50%); background: var(--decor); }
+.wsx button.has { color: var(--muted); }
+.wsx button.has::after { width: 4px; }
+.wsx button.on { background: var(--active); color: var(--chalk); }
+.wsx button.on::after { width: 10px; background: var(--chalk); }
+.sbar .sep { width: 1px; height: 14px; background: var(--active); margin: 0 12px; }
+.wlist { display: flex; gap: 2px; }
+.wlist button { border: 0; background: transparent; height: 22px; padding: 0 10px 0 21px; border-radius: 6px; color: var(--text-4); font-size: 12px; position: relative; cursor: pointer; }
+.wlist button::before { content: ""; position: absolute; left: 9px; top: 9px; width: 4px; height: 4px; border-radius: 50%; background: var(--decor); }
+.wlist button.on { background: var(--active); color: var(--text-1); }
+.wlist button.on::before { background: var(--chalk); }
+.sbar .center { position: absolute; left: 50%; transform: translateX(-50%); color: var(--text-1); font-size: 12.5px; white-space: nowrap; pointer-events: none; }
+.sbar .center i { color: var(--decor); font-style: normal; }
+.sbar .right { margin-left: auto; display: flex; align-items: center; gap: 16px; }
+.sbar .right > span { display: flex; align-items: center; gap: 6px; }
+.sbar .right svg { width: 13px; height: 13px; }
+.sbar .clock { font: 400 12px var(--f-mono); color: var(--text-1); white-space: pre; }
+.sbar .pwr { width: 24px; height: 22px; display: grid; place-items: center; border-radius: 6px; }
+
+.ws { position: absolute; inset: 0; }
+.ws[hidden] { display: none !important; }
+.win { position: absolute; background: var(--window); border-radius: 10px; border: 1px solid var(--divider); overflow: hidden; display: flex; flex-direction: column; transition: border-color .12s, box-shadow .12s; cursor: default; }
+.win.focused { border-color: var(--focus); box-shadow: 0 24px 60px -24px rgba(0,0,0,.7); z-index: 2; }
+.tb { height: 34px; flex: none; display: flex; align-items: center; gap: 10px; padding: 0 12px 0 14px; border-bottom: 1px solid var(--divider); background: var(--window); transition: background .12s; }
+.win.focused .tb { background: #1D1D1C; }
+.tb .n { font: 500 12px var(--f-sans); color: var(--text-4); transition: color .12s; }
+.win.focused .tb .n { color: var(--chalk); }
+.tb .p { font: 400 11.5px var(--f-mono); color: var(--inactive); }
+.win.focused .tb .p { color: var(--muted); }
+.tb .ctl { margin-left: auto; display: flex; gap: 12px; color: var(--muted); }
+.tb .ctl svg { width: 11px; height: 11px; }
+.tb .dtag { padding: 3px 6px; font-size: 10.5px; }
+.wbody { flex: 1; min-height: 0; position: relative; overflow: hidden; }
+
+.term { padding: 14px 16px; font: 400 12.5px/21px var(--f-mono); color: var(--text-2); white-space: pre; }
+.term .u { color: #A9B89A; } .term .d { color: #93A6B8; } .term .m { color: var(--muted); } .term .c { color: var(--chalk); }
+.term .y { color: #CDB98C; } .term .g { color: #A9B89A; }
+.caret { display: inline-block; width: 7.5px; height: 15px; background: var(--chalk); vertical-align: -3px; animation: blink 1.05s steps(1) infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+
+.files { display: grid; grid-template-columns: 150px 1fr; height: 100%; }
+.files aside { background: var(--well); border-right: 1px solid var(--divider); padding: 12px 8px; display: grid; gap: 2px; align-content: start; font-size: 12.5px; color: var(--text-4); }
+.files aside div { padding: 6px 10px; border-radius: 8px; display: flex; gap: 8px; align-items: center; }
+.files aside div svg { width: 13px; height: 13px; }
+.files aside div.on { background: var(--chalk); color: var(--desktop); }
+.files .grid { padding: 18px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px 8px; align-content: start; }
+.fi { display: grid; justify-items: center; gap: 6px; font-size: 11.5px; color: var(--text-3); text-align: center; }
+.fi svg { width: 46px; height: 40px; }
+
+.ffx { display: flex; flex-direction: column; height: 100%; background: #1C1B22; }
+.ffx-bar { display: flex; align-items: center; gap: 8px; padding: 7px 10px; background: #2B2A33; }
+.ffx-bar .url { flex: 1; height: 26px; border-radius: 6px; background: #1C1B22; display: flex; align-items: center; gap: 8px; padding: 0 10px; font: 400 11.5px var(--f-sans); color: #FBFBFE; }
+.ffx-bar .url svg { width: 11px; height: 11px; color: #8F8F9D; }
+.ffx-bar .dots { display: flex; gap: 10px; color: #8F8F9D; }
+.ffx-bar .dots svg { width: 12px; height: 12px; }
+.ffx-page { flex: 1; position: relative; background: var(--desktop); overflow: hidden; padding: 24px 22px; display: flex; flex-direction: column; justify-content: flex-end; }
+.ffx-page .c { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.ffx-page .h { position: relative; font: 300 40px/.9 var(--f-sans); letter-spacing: -.05em; color: var(--chalk); }
+.ffx-page .h em { font-family: var(--f-display); font-style: italic; }
+.ffx-page .s { position: relative; margin-top: 10px; font: 400 10px var(--f-mono); color: var(--muted); }
+
+.settings { display: grid; grid-template-columns: 190px 1fr; height: 100%; }
+.settings aside { background: var(--well); border-right: 1px solid var(--divider); padding: 12px 8px; display: grid; gap: 2px; align-content: start; font-size: 12.5px; color: var(--text-4); }
+.settings aside div { padding: 7px 10px; border-radius: 8px; }
+.settings aside div.on { background: var(--raised); color: var(--chalk); }
+.settings main { padding: 26px 30px; display: grid; gap: 22px; align-content: start; }
+.settings h5 { margin: 0; font: 500 20px var(--f-sans); color: var(--chalk); letter-spacing: -.02em; }
+.settings .lab { font: 400 11px var(--f-mono); color: var(--muted); margin-bottom: 10px; }
+.themes { display: flex; gap: 10px; }
+.theme { width: 102px; border-radius: 9px; border: 1px solid var(--border-strong); overflow: hidden; cursor: pointer; }
+.theme.on { outline: 1px solid var(--chalk); outline-offset: 2px; }
+.theme .pv { height: 62px; position: relative; }
+.theme .pv i { position: absolute; border-radius: 4px; }
+.theme .nm { padding: 8px 10px; font-size: 12px; color: var(--text-3); border-top: 1px solid var(--divider); }
+.walls { display: flex; gap: 10px; }
+.walls div { width: 96px; height: 60px; border-radius: 7px; border: 1px solid var(--border); overflow: hidden; }
+.walls div.on { outline: 1px solid var(--chalk); outline-offset: 2px; }
+.walls img { width: 100%; height: 100%; display: block; object-fit: cover; }
+.rowx { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-top: 1px solid var(--divider); font-size: 13px; color: var(--text-2); }
+.rowx span:last-child { font: 400 12px var(--f-mono); color: var(--muted); }
+.toggle { width: 32px; height: 18px; border-radius: 999px; background: var(--chalk); position: relative; }
+.toggle::after { content: ""; position: absolute; right: 2px; top: 2px; width: 14px; height: 14px; border-radius: 50%; background: var(--desktop); }
+
+.mon { padding: 16px; display: grid; gap: 14px; align-content: start; height: 100%; }
+.mon .lab { font: 400 11px var(--f-mono); color: var(--muted); display: flex; justify-content: space-between; }
+.mon .lab b { color: var(--text-1); font-weight: 400; }
+.mon canvas { width: 100%; height: 110px; display: block; background: var(--well); border-radius: 8px; border: 1px solid var(--divider); }
+.mon table { width: 100%; border-collapse: collapse; font: 400 11.5px var(--f-mono); color: var(--text-2); font-variant-numeric: tabular-nums; }
+.mon th { text-align: left; font-weight: 400; color: var(--muted); padding: 7px 8px; background: var(--header); }
+.mon td { padding: 7px 8px; border-top: 1px solid var(--divider); }
+.mon td:last-child, .mon th:last-child { text-align: right; }
+
+.amenu { position: absolute; top: 34px; left: 8px; width: 580px; background: var(--overlay); border: 1px solid var(--border); border-radius: 14px; box-shadow: 0 12px 32px -8px rgba(0,0,0,.6), inset 0 1px 0 rgba(227,225,220,.05); z-index: 10; padding: 12px; display: grid; gap: 12px; transform-origin: 0 0; }
+.amenu[hidden] { display: none !important; }
+.amenu .search { height: 34px; background: var(--well); border-radius: 8px; border: 1px solid var(--divider); display: flex; align-items: center; gap: 8px; padding: 0 10px; }
+.amenu .search svg { width: 14px; height: 14px; color: var(--muted); }
+.amenu input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--chalk); font: 400 13.5px var(--f-sans); }
+.amenu input::placeholder { color: var(--muted); }
+.amenu .cols { display: grid; grid-template-columns: 200px 1fr; height: 330px; }
+.cats { border-right: 1px solid var(--active); padding-right: 10px; display: grid; gap: 2px; align-content: start; }
+.cats button { display: flex; align-items: center; gap: 10px; border: 0; background: transparent; text-align: left; padding: 8px 10px; border-radius: 8px; font-size: 13px; color: var(--text-3); cursor: pointer; }
+.cats button svg { width: 15px; height: 15px; }
+.cats button.on { background: var(--raised); color: var(--chalk); }
+.alist { padding-left: 10px; overflow: hidden; display: grid; align-content: start; gap: 2px; }
+.alist .ruled { height: 26px; font-size: 11px; }
+.arow { display: flex; align-items: center; gap: 12px; height: 50px; padding: 0 10px; border-radius: 9px; border: 0; background: transparent; text-align: left; cursor: pointer; width: 100%; }
+.arow .tile { width: 32px; height: 32px; border-radius: 8px; background: var(--raised); display: grid; place-items: center; color: var(--text-1); flex: none; }
+.arow .tile svg { width: 16px; height: 16px; }
+.arow b { display: block; font: 500 13.5px/1.25 var(--f-sans); color: var(--chalk); }
+.arow span { display: block; font: 400 11.5px/1.3 var(--f-sans); color: var(--muted); }
+.arow.sel { background: var(--chalk); }
+.arow.sel b, .arow.sel span { color: var(--desktop); }
+.arow.sel .tile { background: var(--desktop); color: var(--chalk); }
+.amenu .keys { display: flex; gap: 16px; font: 400 10.5px var(--f-mono); color: var(--muted); padding: 0 4px; }
+.amenu .keys b { color: var(--text-1); font-weight: 400; }
+
+/* ── SlateFS updates ────────────────────────── */
+.fs-grid { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); gap: 56px; align-items: center; }
+.timeline { background: var(--well); border: 1px solid var(--divider); border-radius: 14px; padding: 28px 24px 22px; }
+.timeline svg { width: 100%; height: auto; display: block; overflow: visible; }
+.timeline text { font-family: var(--f-mono); }
+.tl-status { display: flex; gap: 12px; align-items: center; margin-top: 18px; font: 400 12.5px var(--f-mono); color: var(--muted); min-height: 30px; flex-wrap: wrap; }
+.badge { display: inline-flex; gap: 6px; align-items: center; padding: 5px 9px; border-radius: 4px; border: 1px solid var(--border-strong); font: 400 11.5px/1 var(--f-mono); color: var(--text-3); }
+.badge.ok { background: var(--sage-t); border-color: var(--sage-b); color: var(--sage); }
+.badge.bad { background: var(--clay-t); border-color: var(--clay-b); color: var(--clay); }
+.badge svg { width: 12px; height: 12px; }
+.fs-points { display: grid; gap: 0; border-top: 1px solid var(--divider); margin-top: 36px; }
+.fs-points div { display: grid; grid-template-columns: 130px 1fr; gap: 16px; padding: 14px 0; border-bottom: 1px solid var(--divider); font-size: 15px; color: var(--text-4); }
+.fs-points b { font: 400 12px/1.9 var(--f-mono); color: var(--text-1); }
+@media (max-width: 900px) { .fs-grid { grid-template-columns: 1fr; } .fs-points div { grid-template-columns: 1fr; gap: 2px; } }
+
+/* ── Everything ours ────────────────────────── */
+.ours-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-top: 1px solid var(--divider); border-left: 1px solid var(--divider); }
+.part { border-right: 1px solid var(--divider); border-bottom: 1px solid var(--divider); padding: 26px 24px 28px; display: grid; gap: 14px; align-content: start; position: relative; transition: background .35s var(--ease); min-height: 220px; }
+.part::before { content: ""; position: absolute; inset: -1px; border: 1px solid var(--focus); opacity: 0; transition: opacity .3s; pointer-events: none; }
+.part:hover { background: var(--window); }
+.part:hover::before { opacity: 1; }
+.part .k { display: flex; justify-content: space-between; font: 400 11.5px/1 var(--f-mono); color: var(--muted); letter-spacing: .04em; }
+.part h3 { font: 400 clamp(1.5rem, 2.2vw, 2rem)/1 var(--f-sans); letter-spacing: -.035em; color: var(--chalk); margin-top: 18px; }
+.part h3.mono { font-family: var(--f-mono); font-weight: 300; letter-spacing: -.04em; }
+.part p { font-size: 14.5px; color: var(--text-4); line-height: 1.55; }
+@media (max-width: 1080px) { .ours-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .part { min-height: 0; } }
+@media (max-width: 760px) { .part { padding: 20px 16px; } }
+@media (max-width: 440px) { .ours-grid { grid-template-columns: 1fr; } }
+.ours-note { margin-top: 24px; font: 400 12.5px/1.6 var(--f-mono); color: var(--muted); max-width: 70ch; }
+
+/* ── Budgets ────────────────────────────────── */
+.budgets { background: var(--well); border-block: 1px solid var(--divider); }
+.bgrid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0; margin-top: 8px; }
+.bud { padding: 36px 28px 8px 0; display: grid; gap: 16px; align-content: start; border-top: 1px solid var(--border); }
+.bud + .bud { padding-left: 28px; border-left: 1px solid var(--divider); }
+.bud .v { font: 300 clamp(3.4rem, 6.6vw, 6.4rem)/.9 var(--f-sans); letter-spacing: -.06em; color: var(--chalk); font-variant-numeric: tabular-nums; display: flex; align-items: baseline; gap: .08em; white-space: nowrap; }
+.bud .v small { font: 400 .3em/1 var(--f-mono); letter-spacing: 0; color: var(--text-4); }
+.bud .v .lt { font-family: var(--f-display); font-style: italic; font-weight: 400; font-size: .62em; color: var(--muted); margin-right: .06em; }
+.bud b { font-weight: 500; color: var(--text-1); font-size: 15.5px; }
+.bud span { color: var(--muted); font-size: 14px; }
+.bud .meas { font: 400 12px/1.4 var(--f-mono); color: var(--sage); display: flex; gap: 8px; align-items: center; }
+.bud .meas::before { content: ""; width: 14px; height: 1px; background: var(--sage-b); }
+.bud-note { margin-top: 32px; font: 400 12.5px/1.6 var(--f-mono); color: var(--muted); max-width: 80ch; }
+@media (max-width: 900px) { .bgrid { grid-template-columns: 1fr 1fr; } .bud:nth-child(3) { padding-left: 0; border-left: 0; } }
+@media (max-width: 480px) { .bgrid { grid-template-columns: 1fr; } .bud, .bud + .bud { padding-left: 0; border-left: 0; } }
+
+/* ── Bring everything ───────────────────────── */
+.carry { display: flex; flex-wrap: wrap; gap: 6px 0; margin: 0; padding: 0; list-style: none; }
+.carry li { font: 300 clamp(2.1rem, 5.4vw, 4.8rem)/1.08 var(--f-sans); letter-spacing: -.045em; color: var(--decor); transition: color .3s var(--ease); display: inline-flex; align-items: flex-start; cursor: default; }
+.carry li sup { font: 400 11px/1 var(--f-mono); letter-spacing: .02em; color: var(--muted); margin: .7em .9em 0 .3em; transition: color .3s; }
+.carry li:hover, .carry li.lit { color: var(--chalk); }
+.carry li:hover sup, .carry li.lit sup { color: var(--moss); }
+.carry-note { display: flex; gap: 10px; align-items: center; margin-top: 40px; font: 400 12.5px var(--f-mono); color: var(--muted); flex-wrap: wrap; }
+
+/* ── Installer (limestone) ──────────────────── */
+.inst-grid { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 56px; align-items: center; }
+.inst-points { display: grid; gap: 0; margin-top: 36px; border-top: 1px solid var(--divider); }
+.inst-points div { padding: 15px 0; border-bottom: 1px solid var(--divider); color: var(--text-4); font-size: 15px; }
+.inst-points b { color: var(--chalk); font-weight: 500; }
+.installer { background: var(--l-window); color: var(--l-t2); border-radius: 14px; overflow: hidden; display: grid; grid-template-columns: 168px 1fr; box-shadow: 0 60px 120px -40px rgba(0,0,0,.9), 0 0 0 1px rgba(255,255,255,.04); }
+.installer aside { background: var(--l-side); border-right: 1px solid var(--l-hair); padding: 22px 14px; display: grid; gap: 4px; align-content: start; }
+.installer aside .mk { display: flex; gap: 8px; align-items: center; font: 600 13px var(--f-sans); color: var(--l-ink); margin: 0 6px 18px; }
+.installer aside .mk svg { width: 18px; height: 18px; }
+.installer .st { display: flex; gap: 10px; align-items: center; padding: 7px 8px; border-radius: 8px; font-size: 13px; color: var(--l-t3); }
+.installer .st i { font: 400 10.5px var(--f-mono); width: 18px; color: #A6A6A6; font-style: normal; }
+.installer .st.done { color: var(--l-t2); }
+.installer .st.done i { color: var(--l-sage); }
+.installer .st.on { background: var(--l-ink); color: var(--l-window); }
+.installer .st.on i { color: #A6A6A6; }
+.installer main { padding: 30px 32px 26px; display: grid; gap: 20px; min-width: 0; }
+.installer h4 { margin: 0; font: 500 24px/1.2 var(--f-sans); letter-spacing: -.025em; color: var(--l-ink); }
+.installer .q { font-size: 14px; color: var(--l-t3); margin-top: -12px; }
+.diskbar { display: flex; height: 44px; border-radius: 8px; overflow: hidden; border: 1px solid var(--l-border); background: var(--l-hover); }
+.diskbar div { height: 100%; display: flex; align-items: center; padding: 0 10px; font: 400 11px/1.2 var(--f-mono); white-space: nowrap; overflow: hidden; transition: flex-basis .7s var(--ease), background .4s, color .4s; flex: 0 0 auto; }
+.diskbar .esp { background: #D4D3D3; color: var(--l-t2); }
+.diskbar .oth { background: #C9C8C8; color: var(--l-t2); border-left: 1px solid var(--l-window); }
+.diskbar .free { background: repeating-linear-gradient(135deg, transparent 0 6px, rgba(0,0,0,.05) 6px 7px); color: var(--l-t3); border-left: 1px solid var(--l-window); }
+.diskbar .slate { background: var(--l-ink); color: var(--l-window); border-left: 1px solid var(--l-window); }
+.disklegend { display: flex; justify-content: space-between; font: 400 11px var(--f-mono); color: var(--l-t3); margin-top: -12px; }
+.opts { display: grid; gap: 8px; }
+.opt { display: grid; grid-template-columns: 18px 1fr; gap: 12px; text-align: left; padding: 13px 14px; border-radius: 9px; border: 1px solid var(--l-border); background: var(--l-window); cursor: pointer; color: var(--l-t2); transition: background .2s, border-color .2s; }
+.opt:hover { background: var(--l-hover); }
+.opt .r { width: 16px; height: 16px; border-radius: 50%; border: 1px solid #A6A6A6; margin-top: 2px; position: relative; }
+.opt b { display: block; font: 500 14px/1.3 var(--f-sans); color: var(--l-ink); }
+.opt span { display: block; font-size: 12.5px; color: var(--l-t3); margin-top: 2px; }
+.opt[aria-pressed="true"] { border-color: var(--l-ink); }
+.opt[aria-pressed="true"] .r { border-color: var(--l-ink); }
+.opt[aria-pressed="true"] .r::after { content: ""; position: absolute; inset: 3px; border-radius: 50%; background: var(--l-ink); }
+.inst-foot { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding-top: 4px; }
+.inst-foot .lock { display: flex; gap: 8px; align-items: center; font: 400 11.5px var(--f-mono); color: var(--l-moss); }
+.inst-foot .lock svg { width: 13px; height: 13px; }
+.inst-foot .next { height: 36px; padding: 0 18px; border-radius: 8px; background: var(--l-ink); color: var(--l-window); display: inline-flex; align-items: center; font: 500 13px var(--f-sans); }
+@media (max-width: 900px) { .inst-grid { grid-template-columns: 1fr; } }
+@media (max-width: 620px) { .installer { grid-template-columns: 1fr; } .installer aside { display: none; } .installer main { padding: 22px 18px; } }
+
+/* ── Screenshots ────────────────────────────── */
+.shot-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 22px; }
+.shot-tabs button { height: 34px; padding: 0 14px; border-radius: 999px; border: 1px solid var(--border); background: transparent; color: var(--text-4); font: 400 12.5px/1 var(--f-mono); cursor: pointer; transition: color .2s, border-color .2s, background .2s; }
+.shot-tabs button:hover { color: var(--chalk); border-color: var(--border-strong); }
+.shot-tabs button[aria-selected="true"] { background: var(--chalk); color: var(--desktop); border-color: var(--chalk); }
+.shot-stage { perspective: 1800px; }
+.shot-frame { position: relative; border-radius: 14px; overflow: hidden; background: var(--desktop); box-shadow: 0 0 0 1px var(--border), 0 80px 160px -50px rgba(0,0,0,.95); transform-origin: 50% 100%; }
+.shot-frame img { display: block; width: 100%; height: auto; transition: opacity .3s var(--ease); }
+.shot-frame img.swap { opacity: .25; }
+.shot-meta { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px 32px; margin-top: 22px; align-items: start; }
+.shot-meta p { color: var(--text-3); font-size: 15.5px; max-width: 62ch; }
+.shot-meta span { font: 400 12px/1.6 var(--f-mono); color: var(--muted); text-align: right; }
+@media (max-width: 760px) { .shot-meta { grid-template-columns: 1fr; } .shot-meta span { text-align: left; } }
+
+/* ── Down to the pixel ──────────────────────── */
+.macros { display: grid; gap: clamp(56px, 7vw, 104px); }
+.macro { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); gap: clamp(28px, 4vw, 56px); align-items: center; margin: 0; }
+.macro:nth-child(even) .macro-well { order: 2; }
+.macro-well { position: relative; min-width: 0; background: var(--well); border: 1px solid var(--divider); border-radius: 14px; padding: clamp(44px, 4vw, 56px) clamp(16px, 3vw, 36px) clamp(20px, 3vw, 36px); display: grid; place-items: center; overflow: hidden; }
+.macro-view { position: relative; image-rendering: pixelated; background-repeat: no-repeat; background-color: var(--desktop); box-shadow: 0 0 0 1px var(--border), 0 30px 60px -30px rgba(0,0,0,.8); }
+.macro-view.grid::after { content: ""; position: absolute; inset: 0; pointer-events: none; background-image: linear-gradient(90deg, rgba(10,10,9,.32) 1px, transparent 1px), linear-gradient(0deg, rgba(10,10,9,.32) 1px, transparent 1px); background-size: var(--z) var(--z); }
+.macro-zoom { position: absolute; top: 14px; left: 16px; font: 400 11px/1 var(--f-mono); color: var(--muted); display: flex; gap: 10px; align-items: center; }
+.macro-zoom b { color: var(--chalk); font-weight: 400; border: 1px solid var(--border-strong); border-radius: 4px; padding: 3px 6px; }
+.macro-copy { min-width: 0; }
+.macro-copy .k { font: 400 11.5px/1 var(--f-mono); color: var(--muted); letter-spacing: .06em; }
+.macro h3 { margin-top: 14px; font: 300 clamp(1.9rem, 3.2vw, 2.8rem)/1.02 var(--f-sans); letter-spacing: -.04em; }
+.macro h3 .serif { font-size: 1.12em; }
+.macro p { margin-top: 16px; color: var(--text-4); font-size: 15.5px; max-width: 34em; }
+.spec { margin: 26px 0 0; display: grid; grid-template-columns: auto minmax(0, 1fr); border-top: 1px solid var(--divider); font: 400 12.5px/1.3 var(--f-mono); }
+.spec dt, .spec dd { margin: 0; padding: 11px 0; border-bottom: 1px solid var(--divider); }
+.spec dt { color: var(--muted); padding-right: 28px; }
+.spec dd { color: var(--text-1); display: flex; align-items: center; gap: 9px; }
+.spec .sw { width: 12px; height: 12px; border-radius: 3px; box-shadow: 0 0 0 1px var(--border-strong); flex: none; }
+@media (max-width: 900px) { .macro { grid-template-columns: 1fr; } .macro:nth-child(even) .macro-well { order: 0; } }
+
+/* ── Apps collage ───────────────────────────── */
+.collage-fit { position: relative; width: 100%; aspect-ratio: 1320 / 820; max-width: 100%; }
+.collage { position: absolute; top: 0; left: 0; width: 1320px; height: 820px; transform-origin: 0 0; border-radius: 14px; overflow: hidden; background: var(--desktop) url("assets/wall-stage.webp") 40% 50% / cover no-repeat; box-shadow: 0 0 0 1px var(--border), 0 60px 140px -40px rgba(0,0,0,.9); }
+.cwin { position: absolute; border-radius: 10px; overflow: hidden; background: var(--window); border: 1px solid var(--divider); box-shadow: 0 30px 70px -24px rgba(0,0,0,.8); }
+.cwin .tb { height: 30px; }
+.cwin.top { border-color: var(--focus); box-shadow: 0 40px 90px -24px rgba(0,0,0,.9); }
+.cwin.top .tb { background: #1D1D1C; }
+.cwin.top .tb .n { color: var(--chalk); }
+.cwin.top .tb .p { color: var(--muted); }
+.cwin img { display: block; width: 100%; height: auto; }
+.collage-cap { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px 32px; margin-top: 22px; font: 400 12px/1.6 var(--f-mono); color: var(--muted); }
+
+/* ── Finale ─────────────────────────────────── */
+.finale { padding-block: clamp(120px, 16vw, 220px) clamp(80px, 10vw, 140px); text-align: left; overflow: hidden; }
+.finale-grid { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); gap: 48px; align-items: center; }
+.finale-grid > * { min-width: 0; }
+.finale h2 { font: 300 clamp(4rem, 11vw, 10rem)/.86 var(--f-sans); letter-spacing: -.06em; }
+.finale h2 .serif { display: block; font-size: 1.14em; }
+.finale p { margin-top: 36px; font-size: clamp(17px, 1.4vw, 19px); color: var(--text-4); max-width: 30em; }
+.finale p b { color: var(--chalk); font-weight: 500; font-family: var(--f-mono); font-size: .95em; letter-spacing: -.01em; }
+.repo-card { display: flex; align-items: center; gap: 14px; margin-top: 36px; padding: 10px 10px 10px 20px; border: 1px solid var(--border-strong); border-radius: 999px; font: 400 14.5px var(--f-mono); color: var(--chalk); max-width: 100%; width: fit-content; }
+.repo-card code { font: inherit; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.repo-card code span { color: var(--muted); }
+.repo-card button { flex: none; height: 36px; padding: 0 16px; border-radius: 999px; border: 0; background: var(--chalk); color: var(--desktop); font: 500 13px var(--f-sans); cursor: pointer; }
+.steps { margin: 28px 0 0; padding: 0; list-style: none; display: grid; gap: 0; border-top: 1px solid var(--divider); max-width: 34em; counter-reset: st; }
+.steps li { display: grid; grid-template-columns: 36px minmax(0, 1fr); gap: 8px; padding: 13px 0; border-bottom: 1px solid var(--divider); font-size: 15px; color: var(--text-4); counter-increment: st; }
+.steps li::before { content: "0" counter(st); font: 400 12px/1.9 var(--f-mono); color: var(--muted); }
+.steps code { font: 400 13.5px var(--f-mono); color: var(--chalk); background: var(--raised); border: 1px solid var(--border); border-radius: 4px; padding: 1px 6px; }
+.get-cta { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 32px; }
+.finale .get-note { margin-top: 22px; font: 400 12.5px/1.6 var(--f-mono); color: var(--muted); max-width: 60ch; }
+.monument { width: 100%; max-width: 440px; justify-self: center; }
+.monument svg { width: 100%; height: auto; display: block; overflow: visible; }
+@media (max-width: 860px) { .finale-grid { grid-template-columns: minmax(0, 1fr); } .repo-card { font-size: 12.5px; padding-left: 16px; } .monument { max-width: 260px; justify-self: start; } }
+
+/* ── Themes ─────────────────────────────────── */
+.theme-tabs { display: inline-flex; flex-wrap: wrap; gap: 4px; padding: 4px; border: 1px solid var(--border); border-radius: 999px; margin-bottom: 26px; background: var(--well); }
+.theme-tabs button { display: inline-flex; align-items: center; gap: 9px; height: 34px; padding: 0 14px 0 10px; border: 0; border-radius: 999px; background: transparent; color: var(--text-4); font: 400 12.5px/1 var(--f-mono); cursor: pointer; transition: background .2s, color .2s; }
+.theme-tabs button i { width: 16px; height: 16px; border-radius: 50%; display: block; box-shadow: 0 0 0 1px var(--border-strong); }
+.theme-tabs button:hover { color: var(--chalk); }
+.theme-tabs button[aria-selected="true"] { background: var(--chalk); color: var(--desktop); }
+.theme-show { display: grid; grid-template-columns: minmax(0, 8fr) minmax(0, 4fr); gap: 20px; align-items: start; }
+.theme-main, .theme-side figure { margin: 0; border-radius: 14px; overflow: hidden; background: var(--desktop); box-shadow: 0 0 0 1px var(--border), 0 50px 110px -40px rgba(0,0,0,.9); }
+.theme-main img, .theme-side img { display: block; width: 100%; height: auto; transition: opacity .25s var(--ease); }
+.theme-show.swap img { opacity: .2; }
+.theme-side { display: grid; gap: 20px; }
+.theme-side figure { border-radius: 10px; }
+.theme-meta { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px 32px; margin-top: 22px; align-items: start; }
+.theme-meta p { color: var(--text-3); font-size: 15.5px; max-width: 62ch; }
+.theme-meta span { font: 400 12px/1.6 var(--f-mono); color: var(--muted); text-align: right; }
+@media (max-width: 900px) { .theme-show { grid-template-columns: 1fr; } .theme-side { grid-template-columns: 1fr 1fr; gap: 12px; } }
+@media (max-width: 760px) { .theme-meta { grid-template-columns: 1fr; } .theme-meta span { text-align: left; } }
+
+/* ── Graphics ───────────────────────────────── */
+.gfx-grid { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 56px; align-items: start; }
+.gfx-modes { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--divider); border: 1px solid var(--divider); border-radius: 14px; overflow: hidden; margin-top: 36px; }
+.gfx-modes > div { background: var(--well); padding: 22px 22px 24px; display: grid; gap: 10px; align-content: start; }
+.gfx-modes h3 { font: 500 17px/1.25 var(--f-sans); letter-spacing: -.015em; color: var(--chalk); }
+.gfx-modes .k { font: 400 11.5px/1 var(--f-mono); color: var(--muted); letter-spacing: .06em; }
+.gfx-modes p { font-size: 14.5px; color: var(--text-4); line-height: 1.55; }
+.gfx-figs { display: grid; gap: 0; margin-top: 36px; border-top: 1px solid var(--divider); }
+.gfx-figs div { display: grid; grid-template-columns: 150px 1fr; gap: 16px; padding: 14px 0; border-bottom: 1px solid var(--divider); font-size: 15px; color: var(--text-4); }
+.gfx-figs b { font: 400 12px/1.9 var(--f-mono); color: var(--text-1); }
+.gfx-art { display: grid; gap: 20px; }
+.gfx-shot { margin: 0; border-radius: 14px; overflow: hidden; box-shadow: 0 0 0 1px var(--border), 0 50px 110px -40px rgba(0,0,0,.9); background: var(--desktop); }
+.gfx-shot img { display: block; width: 100%; height: auto; }
+.gfx-row { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); gap: 20px; align-items: center; }
+.gfx-cap { margin-top: 14px; font: 400 12px/1.6 var(--f-mono); color: var(--muted); }
+.keep { background: var(--overlay); border: 1px solid var(--border); border-radius: 14px; padding: 20px 20px 18px; display: grid; gap: 14px; box-shadow: 0 30px 70px -30px rgba(0,0,0,.85), inset 0 1px 0 rgba(227,225,220,.05); }
+.keep .t { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.keep b { font: 500 16px/1.25 var(--f-sans); color: var(--chalk); letter-spacing: -.015em; }
+.keep p { font-size: 13.5px; color: var(--text-4); line-height: 1.5; }
+.keep .ring { width: 44px; height: 44px; flex: none; position: relative; display: grid; place-items: center; font: 400 13px/1 var(--f-mono); color: var(--chalk); font-variant-numeric: tabular-nums; }
+.keep .ring svg { position: absolute; inset: 0; width: 100%; height: 100%; transform: rotate(-90deg); }
+.keep .btns { display: flex; justify-content: flex-end; gap: 8px; }
+.keep .btns span { height: 32px; padding: 0 14px; border-radius: 8px; display: inline-flex; align-items: center; font: 500 13px var(--f-sans); border: 1px solid var(--border-strong); color: var(--text-1); }
+.keep .btns span.pri { background: var(--chalk); color: var(--desktop); border-color: var(--chalk); }
+.keep .st { font: 400 11.5px/1.5 var(--f-mono); color: var(--muted); min-height: 1.5em; }
+@media (max-width: 1000px) { .gfx-grid { grid-template-columns: 1fr; } }
+@media (max-width: 620px) { .gfx-modes { grid-template-columns: 1fr; } .gfx-row { grid-template-columns: 1fr; } .gfx-figs div { grid-template-columns: 1fr; gap: 2px; } }
+
+/* ── Hardware ───────────────────────────────── */
+.hw { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); gap: 1px; background: var(--divider); border: 1px solid var(--divider); border-radius: 14px; overflow: hidden; }
+.hw > div { background: var(--well); padding: 24px 24px 22px; display: grid; gap: 14px; align-content: start; }
+.hw h3 { margin: 0; font: 400 11.5px/1 var(--f-mono); letter-spacing: .06em; display: flex; gap: 8px; align-items: center; }
+.hw h3 svg { width: 13px; height: 13px; }
+.hw .ok h3 { color: var(--sage); }
+.hw .no h3 { color: var(--ochre); }
+.hw dl { margin: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); font-size: 14.5px; }
+.hw dt, .hw dd { margin: 0; padding: 10px 0; border-top: 1px solid var(--divider); }
+.hw dt { font: 400 12px/1.9 var(--f-mono); color: var(--muted); padding-right: 22px; }
+.hw dd { color: var(--text-3); }
+.hw ul { margin: 0; padding: 0; list-style: none; display: grid; font-size: 14.5px; color: var(--text-3); }
+.hw li { padding: 10px 0; border-top: 1px solid var(--divider); }
+.hw li span { color: var(--muted); }
+.hw-note { margin-top: 22px; font: 400 12.5px/1.6 var(--f-mono); color: var(--muted); max-width: 80ch; }
+.hw-note a { color: var(--text-1); }
+@media (max-width: 900px) { .hw { grid-template-columns: 1fr; } }
+
+footer { border-top: 1px solid var(--divider); padding-block: 48px calc(40px + env(safe-area-inset-bottom, 0px)); }
+.foot { display: grid; grid-template-columns: minmax(0, 2fr) repeat(4, minmax(0, 1fr)); gap: 32px; }
+.foot h6 { margin: 0 0 14px; font: 400 11.5px var(--f-mono); color: var(--muted); letter-spacing: .06em; }
+.foot ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; font-size: 14px; color: var(--text-4); }
+.foot a { text-decoration: none; } .foot a:hover { color: var(--chalk); }
+.foot .about { display: grid; gap: 16px; font-size: 14px; color: var(--muted); max-width: 30em; }
+.legal { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 56px; font: 400 11.5px var(--f-mono); color: var(--decor); }
+@media (max-width: 1000px) { .foot { grid-template-columns: repeat(4, minmax(0, 1fr)); } .foot > :first-child { grid-column: 1 / -1; } }
+@media (max-width: 760px) { .foot { grid-template-columns: 1fr 1fr; } }
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .ledger-track, .caret { animation: none; }
+  * { transition-duration: 0s !important; }
+}
+</style>
+</head>
+<body>
+
+<!-- Shared SVG symbols -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="mark" viewBox="0 0 32 32">
+      <polygon points="16,3 29,9.5 16,16 3,9.5" fill="currentColor"/>
+      <polygon points="3,9.5 3,12.5 16,19 16,16" fill="currentColor" opacity=".6"/>
+      <polygon points="29,9.5 29,12.5 16,19 16,16" fill="currentColor" opacity=".35"/>
+      <polyline points="3,17.5 16,24 29,17.5" fill="none" stroke="currentColor" stroke-width="1.6" opacity=".45"/>
+      <polyline points="3,23.5 16,30 29,23.5" fill="none" stroke="currentColor" stroke-width="1.6" opacity=".2"/>
+    </symbol>
+    <symbol id="i-arrow" viewBox="0 0 16 16"><path d="M2 8h11M9 4l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 16 16"><path d="M8 1.6 13.4 3.6v4.2c0 3.1-2.3 5.6-5.4 6.6-3.1-1-5.4-3.5-5.4-6.6V3.6z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></symbol>
+    <symbol id="i-split" viewBox="0 0 16 16"><rect x="1.8" y="2.6" width="12.4" height="10.8" rx="1.8" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M8 2.6v10.8" stroke="currentColor" stroke-width="1.3"/></symbol>
+    <symbol id="i-net" viewBox="0 0 16 16"><path d="M1.8 6.2a9 9 0 0 1 12.4 0M4 8.6a5.8 5.8 0 0 1 8 0M6.2 11a2.6 2.6 0 0 1 3.6 0" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><circle cx="8" cy="13.2" r=".9" fill="currentColor"/></symbol>
+    <symbol id="i-bat" viewBox="0 0 16 16"><rect x="1.5" y="4.5" width="11.5" height="7" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.3"/><rect x="3.2" y="6.2" width="7.4" height="3.6" rx=".6" fill="currentColor"/><path d="M14.5 7v2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></symbol>
+    <symbol id="i-power" viewBox="0 0 16 16"><path d="M8 1.8v5.6M4.4 4a5.4 5.4 0 1 0 7.2 0" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></symbol>
+    <symbol id="i-min" viewBox="0 0 12 12"><path d="M2 6h8" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></symbol>
+    <symbol id="i-max" viewBox="0 0 12 12"><rect x="2" y="2" width="8" height="8" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.2"/></symbol>
+    <symbol id="i-x" viewBox="0 0 12 12"><path d="M2.5 2.5l7 7M9.5 2.5l-7 7" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></symbol>
+    <symbol id="i-check" viewBox="0 0 16 16"><path d="M3 8.4 6.4 11.6 13 4.6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-no" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M3.8 12.2 12.2 3.8" stroke="currentColor" stroke-width="1.4"/></symbol>
+    <symbol id="i-back" viewBox="0 0 16 16"><path d="M5.5 3 2 6.5 5.5 10M2 6.5h7.5a4.5 4.5 0 0 1 0 9H7" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 16 16"><rect x="3" y="7" width="10" height="7" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M5.2 7V5a2.8 2.8 0 0 1 5.6 0v2" fill="none" stroke="currentColor" stroke-width="1.3"/></symbol>
+    <symbol id="i-key" viewBox="0 0 16 16"><circle cx="5" cy="8" r="3" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M8 8h6.2M12 8v2.4M14 8v1.6" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></symbol>
+    <symbol id="i-sign" viewBox="0 0 16 16"><path d="M2.5 12.8c1.6-.2 2.4-2.4 3.1-4.6.6-2 1.4-4.2 2.6-4.2 1.6 0-.8 6.4 1 6.4 1 0 1.4-1.6 2.2-1.6.7 0 .6 1.2 2.1 1.2" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/><path d="M2.5 14.6h11" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></symbol>
+    <symbol id="i-grid" viewBox="0 0 16 16"><rect x="2" y="2" width="5" height="5" rx="1" fill="none" stroke="currentColor" stroke-width="1.3"/><rect x="9" y="2" width="5" height="5" rx="1" fill="none" stroke="currentColor" stroke-width="1.3"/><rect x="2" y="9" width="5" height="5" rx="1" fill="none" stroke="currentColor" stroke-width="1.3"/><rect x="9" y="9" width="5" height="5" rx="1" fill="none" stroke="currentColor" stroke-width="1.3"/></symbol>
+    <symbol id="i-search" viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.6" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="m10.4 10.4 3.6 3.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 16 16"><path d="M1.8 4.2c0-.7.5-1.2 1.2-1.2h3.2l1.5 1.6H13c.7 0 1.2.5 1.2 1.2v6.4c0 .7-.5 1.2-1.2 1.2H3c-.7 0-1.2-.5-1.2-1.2z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></symbol>
+    <symbol id="i-gh" viewBox="0 0 16 16"><circle cx="4.4" cy="3.6" r="1.6" fill="none" stroke="currentColor" stroke-width="1.3"/><circle cx="4.4" cy="12.4" r="1.6" fill="none" stroke="currentColor" stroke-width="1.3"/><circle cx="11.6" cy="5.2" r="1.6" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M4.4 5.2v5.6M11.6 6.8c0 2.6-3.6 2.4-6.4 4.2" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></symbol>
+    <symbol id="i-book" viewBox="0 0 16 16"><path d="M2.4 3.2c1.9-.8 3.8-.8 5.6.4v10c-1.8-1.2-3.7-1.2-5.6-.4zM13.6 3.2c-1.9-.8-3.8-.8-5.6.4v10c1.8-1.2 3.7-1.2 5.6-.4z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></symbol>
+    <symbol id="i-chip" viewBox="0 0 16 16"><rect x="4" y="4" width="8" height="8" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M6.4 1.6V4M9.6 1.6V4M6.4 12v2.4M9.6 12v2.4M1.6 6.4H4M1.6 9.6H4M12 6.4h2.4M12 9.6h2.4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></symbol>
+    <symbol id="i-dash" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M5 8h6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></symbol>
+    <symbol id="i-home" viewBox="0 0 16 16"><path d="M2.4 7.4 8 2.6l5.6 4.8V13a.9.9 0 0 1-.9.9H3.3a.9.9 0 0 1-.9-.9z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></symbol>
+  </defs>
+</svg>
+
+<nav class="nav" id="nav" aria-label="Main">
+  <div class="frame">
+    <a class="brand" href="#top" aria-label="SlateOS home"><svg><use href="#mark"/></svg>SlateOS</a>
+    <ul class="nav-links">
+      <li><a href="#screens">Screenshots</a></li>
+      <li><a href="#system">System</a></li>
+      <li><a href="#security">Security</a></li>
+      <li><a href="#desktop">Desktop</a></li>
+      <li><a href="#themes">Themes</a></li>
+      <li><a href="#graphics">Graphics</a></li>
+      <li><a href="#updates">Updates</a></li>
+      <li><a href="#install">Install</a></li>
+      <li><a href="#get">Get it</a></li>
+    </ul>
+    <span class="nav-status"><i></i>in development</span>
+    <a class="nav-gh" href="https://github.com/neuralpunk/slate-os" aria-label="SlateOS on GitHub"><svg><use href="#i-gh"/></svg><span>GitHub</span></a>
+  </div>
+</nav>
+
+<main id="top">
+
+<!-- ── Hero ── -->
+<section class="hero" aria-labelledby="hero-title">
+  <canvas id="waves" aria-hidden="true"></canvas>
+  <div class="frame hero-center">
+    <svg class="hero-mark" id="hero-mark" viewBox="-1 -1 34 34" aria-hidden="true">
+      <g stroke-linejoin="round" stroke-linecap="round">
+        <polygon class="hm" points="3,9.5 3,12.5 16,19 16,16" fill="#262625" stroke="#85837E" stroke-width=".4"/>
+        <polygon class="hm" points="29,9.5 29,12.5 16,19 16,16" fill="#181817" stroke="#85837E" stroke-width=".4"/>
+        <polygon class="hm" points="16,3 29,9.5 16,16 3,9.5" fill="#E3E1DC" stroke="#E3E1DC" stroke-width=".4"/>
+        <polyline class="hm" points="3,17.5 16,24 29,17.5" fill="none" stroke="#A9A7A2" stroke-width="1.05"/>
+        <polyline class="hm" points="3,23.5 16,30 29,23.5" fill="none" stroke="#5F5D59" stroke-width="1.05"/>
+      </g>
+    </svg>
+    <h1 class="wordmark" id="hero-title" aria-label="SlateOS"><span class="slate">Slate</span><span class="os">OS</span></h1>
+    <p class="hero-tag">A clean slate.</p>
+    <div class="hero-rule">written in rust · runs linux software</div>
+    <p class="hero-lede">A new operating system, built from its first line. <strong>There is no Linux code inside it, and it runs your Linux software as it is.</strong></p>
+    <div class="hero-cta">
+      <a class="btn btn-primary" href="#screens">See it up close<svg><use href="#i-arrow"/></svg></a>
+      <a class="btn btn-ghost" href="#get">Get the source</a>
+    </div>
+  </div>
+  <div class="frame hero-base">
+    <div>kernel <b>ours</b> · shell <b>chalk</b><br>filesystem <b>SlateFS</b> · desktop <b>Strata</b></div>
+    <div class="scroll-cue">scroll<i></i></div>
+    <div><b>github.com/neuralpunk/slate-os</b><br>open source · in development</div>
+  </div>
+</section>
+
+<!-- ── Ledger ── -->
+<div class="ledger" aria-label="SlateOS in figures">
+  <div class="ledger-track">
+    <div class="ledger-item"><b>0</b> lines of Linux, BSD or UNIX code<svg><use href="#mark"/></svg></div>
+    <div class="ledger-item"><b>300,000+</b> lines of Rust<svg><use href="#mark"/></svg></div>
+    <div class="ledger-item"><b>1,000+</b> cases checked against GNU's tools<svg><use href="#mark"/></svg></div>
+    <div class="ledger-item"><b>1,800+</b> checks on every test run<svg><use href="#mark"/></svg></div>
+    <div class="ledger-item"><b>4</b> themes, drawn by its own toolkit<svg><use href="#mark"/></svg></div>
+    <div class="ledger-item"><b>1</b> AMD display driver of its own<svg><use href="#mark"/></svg></div>
+    <div class="ledger-item"><b>16</b> keyboard layouts, with dead keys<svg><use href="#mark"/></svg></div>
+    <div class="ledger-item"><b>1</b> switch to Linux compatibility<svg><use href="#mark"/></svg></div>
+    <div class="ledger-item"><b>UEFI</b> and <b>BIOS</b>, its own bootloader<svg><use href="#mark"/></svg></div>
+    <div class="ledger-item" aria-hidden="true"><b>0</b> lines of Linux, BSD or UNIX code<svg><use href="#mark"/></svg></div>
+    <div class="ledger-item" aria-hidden="true"><b>300,000+</b> lines of Rust<svg><use href="#mark"/></svg></div>
+    <div class="ledger-item" aria-hidden="true"><b>1,000+</b> cases checked against GNU's tools<svg><use href="#mark"/></svg></div>
+    <div class="ledger-item" aria-hidden="true"><b>1,800+</b> checks on every test run<svg><use href="#mark"/></svg></div>
+    <div class="ledger-item" aria-hidden="true"><b>4</b> themes, drawn by its own toolkit<svg><use href="#mark"/></svg></div>
+    <div class="ledger-item" aria-hidden="true"><b>1</b> AMD display driver of its own<svg><use href="#mark"/></svg></div>
+    <div class="ledger-item" aria-hidden="true"><b>16</b> keyboard layouts, with dead keys<svg><use href="#mark"/></svg></div>
+    <div class="ledger-item" aria-hidden="true"><b>1</b> switch to Linux compatibility<svg><use href="#mark"/></svg></div>
+    <div class="ledger-item" aria-hidden="true"><b>UEFI</b> and <b>BIOS</b>, its own bootloader<svg><use href="#mark"/></svg></div>
+  </div>
+</div>
+
+<!-- ── Screenshots ── -->
+<section class="band" id="screens" aria-labelledby="shots-title" style="padding-bottom: clamp(48px, 6vw, 80px)">
+  <div class="frame">
+    <div class="sec-head">
+      <div class="ruled">screenshots<b>real renders</b></div>
+      <div class="split">
+        <h2 class="h2" id="shots-title" style="grid-column: span 7">Every pixel, <span class="serif">drawn here.</span></h2>
+        <p class="lede" style="grid-column: 8 / span 5; align-self: end">These frames come straight from SlateOS's own drawing code: slate-ui, the toolkit that paints the desktop, the apps, the installer and the boot menu.</p>
+      </div>
+    </div>
+    <div class="shot-tabs" role="tablist" aria-label="Screenshots" id="shot-tabs"></div>
+    <div class="shot-stage">
+      <div class="shot-frame" id="shot-frame">
+        <img id="shot-img" src="assets/shot-desktop.webp" width="1440" height="900" alt="The Strata desktop: a code editor and a terminal tiled side by side, htop below, under the top bar">
+      </div>
+    </div>
+    <div class="shot-meta"><p id="shot-cap">Two windows tiled side by side and a third below. Along the top: Applications, four workspaces, the window list, slate mode and the clock.</p><span id="shot-size">1440 × 900 · rendered by slate-ui</span></div>
+  </div>
+</section>
+
+<!-- ── Thesis ── -->
+<section class="band thesis" aria-label="Why SlateOS">
+  <div class="frame">
+    <div class="ruled" style="margin-bottom:56px">a fresh start<b>the idea</b></div>
+    <p id="thesis-text">The systems we rely on carry decades of code that nobody would write the same way today. SlateOS starts over: a kernel, a shell, a desktop and a filesystem made new, in a memory-safe language, with nothing preinstalled that hasn't earned its place. It speaks Linux fluently, so <em>everything you depend on</em> comes with you.</p>
+    <div class="sig">Every addition must justify itself.</div>
+  </div>
+</section>
+
+<!-- ── Layers ── -->
+<section class="band layers" id="system" aria-labelledby="layers-title">
+  <div class="frame">
+    <div class="layers-grid">
+      <div class="layers-copy">
+        <div class="ruled">the system<b>clean room</b></div>
+        <h2 class="h2" id="layers-title">Meets Linux at its interfaces. <span class="serif">Never at its code.</span></h2>
+        <p class="lede">The Slate kernel answers the same system calls Linux does, written from public documentation and checked against how real Linux behaves. <strong>Distro binaries, container images and desktop apps run unchanged</strong>, on a kernel that shares no lineage with the one they were built for.</p>
+        <div class="prov" role="group" aria-label="Where the knowledge comes from">
+          <div class="ok">
+            <h4><svg><use href="#i-check"/></svg>allowed</h4>
+            <ul><li>Manual pages</li><li>Public specifications</li><li>Hardware makers' documents</li><li>Observed behaviour, tested</li></ul>
+          </div>
+          <div class="no">
+            <h4><svg><use href="#i-no"/></svg>never</h4>
+            <ul><li>Linux code</li><li>BSD code</li><li>Any UNIX code</li><li>Translations of them</li></ul>
+          </div>
+        </div>
+        <ul class="layers-list" aria-label="The layers">
+          <li><b>Your software</b><span>Firefox, Podman, git, GCC, Python. Unmodified Linux binaries.</span></li>
+          <li><b>Linux personality</b><span>x86-64 system calls, /proc, ELF, namespaces, cgroup v2, seccomp.</span></li>
+          <li><b>Native interface</b><span>slate-rt and slate-libc, Slate's own calls.</span></li>
+          <li><b>Slate kernel</b><span>Rust, monolithic, multi-core. Its own memory, scheduler, VFS and TCP/IP.</span></li>
+          <li><b>Your hardware</b><span>x86-64 PCs. NVMe, SATA, USB, wired Ethernet, AMD graphics.</span></li>
+        </ul>
+      </div>
+      <div class="layers-art">
+        <svg id="stack" viewBox="0 0 1000 820" role="img" aria-label="The five layers of SlateOS, from your software down to the hardware">
+          <defs>
+            <linearGradient id="faceL" x1="0" x2="1"><stop offset="0" stop-color="#1F1F1E"/><stop offset="1" stop-color="#191918"/></linearGradient>
+            <linearGradient id="faceR" x1="0" x2="1"><stop offset="0" stop-color="#151514"/><stop offset="1" stop-color="#121211"/></linearGradient>
+          </defs>
+          <g id="plates"></g>
+        </svg>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── Domains ── -->
+<section class="band" id="security" aria-labelledby="dom-title">
+  <div class="frame">
+    <div class="domains-grid">
+      <div>
+        <div class="ruled" style="margin-bottom:28px">security<b>slate mode</b></div>
+        <h2 class="h2" id="dom-title">Two domains. <span class="serif">One quiet system.</span></h2>
+        <p class="lede" style="margin-top:28px">By default SlateOS runs in Slate mode, which goes further than Unix ever did. Linux programs run beside it in a domain of their own, with exactly the behaviour they expect, and they can't reach past its walls.</p>
+        <div class="tenets">
+          <div class="tenet"><svg><use href="#i-lock"/></svg><div><b>An image nobody can scribble on</b><span>The system is immutable and signed. Not even root can change it; only the updater can.</span></div></div>
+          <div class="tenet"><svg><use href="#i-key"/></svg><div><b>No all-powerful root</b><span>A privilege broker asks you, in a dialog no app can imitate. No set-user-ID programs.</span></div></div>
+          <div class="tenet"><svg><use href="#i-sign"/></svg><div><b>Signed code, strict W^X</b><span>A native program is trusted only if its signature checks out. Memory is writable or executable, never both.</span></div></div>
+          <div class="tenet"><svg><use href="#i-split"/></svg><div><b>Linux, one switch away</b><span>Turn on compatibility and Linux programs run in their own domain. They can't see or signal Slate's processes.</span></div></div>
+        </div>
+      </div>
+      <div class="console-wrap">
+        <div class="console" role="group" aria-label="Processes by domain">
+          <div class="console-bar">
+            <span class="t">System Monitor</span><span class="p">processes</span>
+            <div class="seg" role="group" aria-label="Linux compatibility">
+              <button type="button" id="compat-off" aria-pressed="false">compatibility off</button>
+              <button type="button" id="compat-on" aria-pressed="true">compatibility on</button>
+            </div>
+          </div>
+          <table class="ptable">
+            <thead><tr><th>pid</th><th>program</th><th>domain</th><th>user</th></tr></thead>
+            <tbody id="ptbody">
+              <tr><td class="num">1</td><td>slinit</td><td><span class="dtag"><svg><use href="#i-shield"/></svg>slate</span></td><td>root</td></tr>
+              <tr><td class="num">212</td><td>slate-brokerd</td><td><span class="dtag"><svg><use href="#i-shield"/></svg>slate</span></td><td>root</td></tr>
+              <tr><td class="num">304</td><td>strata</td><td><span class="dtag"><svg><use href="#i-shield"/></svg>slate</span></td><td>ada</td></tr>
+              <tr><td class="num">388</td><td>terminal</td><td><span class="dtag"><svg><use href="#i-shield"/></svg>slate</span></td><td>ada</td></tr>
+              <tr data-linux><td class="num">421</td><td>firefox</td><td><span class="dtag linux"><svg><use href="#i-split"/></svg>linux</span></td><td>ada</td></tr>
+              <tr data-linux><td class="num">436</td><td>podman</td><td><span class="dtag linux"><svg><use href="#i-split"/></svg>linux</span></td><td>ada</td></tr>
+              <tr data-linux><td class="num">440</td><td>python3</td><td><span class="dtag linux"><svg><use href="#i-split"/></svg>linux</span></td><td>ada</td></tr>
+            </tbody>
+          </table>
+          <div class="console-foot on" id="compat-note"><svg><use href="#i-split"/></svg><span>Linux programs are running in their own domain. They can't signal Slate processes or write to the system.</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── Strata desktop ── -->
+<section class="band desk-band" id="desktop" aria-labelledby="desk-title">
+  <div class="frame">
+    <div class="sec-head">
+      <div class="ruled">the desktop<b>strata</b></div>
+      <div class="split">
+        <h2 class="h2" id="desk-title" style="grid-column: span 7">Strata. A desktop that <span class="serif">gets out of the way.</span></h2>
+        <p class="lede" style="grid-column: 8 / span 5; align-self: end">Window manager and display server in one program, drawn by Slate's own toolkit. Warm graphite by default, chalk kept for what matters now, and colour only when it means something. <strong>Click around: it's live.</strong></p>
+      </div>
+    </div>
+    <div class="stage-fit" id="stage-fit">
+      <div class="stage" id="stage" role="group" aria-label="An interactive model of the Strata desktop">
+        <img class="wall" src="assets/wall-stage.webp" width="2400" height="1480" alt="">
+        <div class="sbar">
+          <button type="button" class="apps" id="apps-btn" aria-expanded="false"><svg style="color:var(--chalk)"><use href="#mark"/></svg>Applications</button>
+          <div class="wsx" id="wsx">
+            <button type="button" class="on" data-ws="1" aria-label="Workspace 1">1</button>
+            <button type="button" class="has" data-ws="2" aria-label="Workspace 2">2</button>
+            <button type="button" data-ws="3" aria-label="Workspace 3">3</button>
+            <button type="button" data-ws="4" aria-label="Workspace 4">4</button>
+          </div>
+          <span class="sep"></span>
+          <div class="wlist" id="wlist"></div>
+          <div class="center" id="sb-center">Terminal <i>—</i> ~/src</div>
+          <div class="right">
+            <span id="sb-domain"><svg><use href="#i-shield"/></svg><em style="font-style:normal">slate mode</em></span>
+            <span><svg><use href="#i-net"/></svg></span>
+            <span><svg><use href="#i-bat"/></svg>86%</span>
+            <span class="clock" id="sb-clock">Mon 26 Oct  14:32</span>
+            <span class="pwr"><svg><use href="#i-power"/></svg></span>
+          </div>
+        </div>
+
+        <!-- Workspace 1 -->
+        <div class="ws" data-ws="1">
+          <div class="win focused" data-id="term" data-name="Terminal" data-doc="~/src" data-domain="slate" style="left:10px;top:42px;width:690px;height:688px">
+            <div class="tb"><span class="n">Terminal</span><span class="p">~/src</span><span class="ctl"><svg><use href="#i-min"/></svg><svg><use href="#i-max"/></svg><svg><use href="#i-x"/></svg></span></div>
+            <div class="wbody"><div class="term" id="term"><span class="u">ada@slate</span> <span class="d">~/src</span> <span class="c">$ grep Domain /proc/self/status</span>
+Domain:	slate
+<span class="u">ada@slate</span> <span class="d">~/src</span> <span class="c">$ slate-update status</span>
+<span class="m">booted   </span> system-2   <span class="g">trial passed</span>
+<span class="m">fallback </span> system-1   kept for rollback
+<span class="u">ada@slate</span> <span class="d">~/src</span> <span class="c">$ quarry install etch</span>
+<span class="m">resolving</span>  etch
+<span class="m">verified </span>  <span class="g">signature ok</span> (ed25519)
+<span class="m">installed</span>  etch in 0.2 s
+<span class="u">ada@slate</span> <span class="d">~/src</span> <span class="c">$ ls</span>
+<span class="d">kernel</span>   <span class="d">libs</span>   <span class="d">userland</span>   notes.txt   README
+<span class="u">ada@slate</span> <span class="d">~/src</span> <span class="c">$ </span><span id="term-type"></span><span class="caret"></span></div></div>
+          </div>
+          <div class="win" data-id="files" data-name="Files" data-doc="Home" data-domain="slate" style="left:710px;top:42px;width:480px;height:339px">
+            <div class="tb"><span class="n">Files</span><span class="p">~</span><span class="ctl"><svg><use href="#i-min"/></svg><svg><use href="#i-max"/></svg><svg><use href="#i-x"/></svg></span></div>
+            <div class="wbody"><div class="files">
+              <aside><div class="on"><svg><use href="#i-home"/></svg>Home</div><div><svg><use href="#i-folder"/></svg>Desktop</div><div><svg><use href="#i-folder"/></svg>Documents</div><div><svg><use href="#i-folder"/></svg>Downloads</div><div><svg><use href="#i-folder"/></svg>Pictures</div><div><svg><use href="#i-folder"/></svg>Projects</div></aside>
+              <div class="grid" id="fgrid"></div>
+            </div></div>
+          </div>
+          <div class="win" data-id="ffx" data-name="Firefox" data-doc="neuralpunk.github.io/slate-os" data-domain="linux" style="left:710px;top:391px;width:480px;height:339px">
+            <div class="tb"><span class="n">Firefox</span><span class="dtag linux"><svg><use href="#i-split"/></svg>linux</span><span class="ctl"><svg><use href="#i-min"/></svg><svg><use href="#i-max"/></svg><svg><use href="#i-x"/></svg></span></div>
+            <div class="wbody"><div class="ffx">
+              <div class="ffx-bar"><span class="dots"><svg><use href="#i-back"/></svg></span><div class="url"><svg><use href="#i-lock"/></svg>neuralpunk.github.io/slate-os</div></div>
+              <div class="ffx-page"><img class="c" src="assets/wall-small.webp" width="960" height="540" alt=""><div class="h">Slate<span style="color:var(--text-4)">OS</span></div><div class="s">a clean slate · written in rust</div></div>
+            </div></div>
+          </div>
+        </div>
+
+        <!-- Workspace 2 -->
+        <div class="ws" data-ws="2" hidden>
+          <div class="win" data-id="set" data-name="Settings" data-doc="Appearance" data-domain="slate" style="left:10px;top:42px;width:700px;height:688px">
+            <div class="tb"><span class="n">Settings</span><span class="p">appearance</span><span class="ctl"><svg><use href="#i-min"/></svg><svg><use href="#i-max"/></svg><svg><use href="#i-x"/></svg></span></div>
+            <div class="wbody"><div class="settings">
+              <aside><div class="on">Appearance</div><div>Accessibility</div><div>Date and time</div><div>Network</div><div>Bluetooth</div><div>Users</div><div>Security</div><div>Session</div><div>Displays</div><div>About</div></aside>
+              <main>
+                <h5>Appearance</h5>
+                <div><div class="lab">theme</div>
+                  <div class="themes">
+                    <div class="theme on" data-theme-pick="graphite"><div class="pv" style="background:#121211"><i style="left:8px;top:8px;width:56px;height:46px;background:#1A1A19;border:1px solid #A9A7A2"></i><i style="left:68px;top:8px;width:26px;height:46px;background:#1A1A19;border:1px solid #333331"></i></div><div class="nm">Graphite</div></div>
+                    <div class="theme" data-theme-pick="light"><div class="pv" style="background:#DCDBDB"><i style="left:8px;top:8px;width:56px;height:46px;background:#F3F2F2;border:1px solid #0B0B0B"></i><i style="left:68px;top:8px;width:26px;height:46px;background:#F3F2F2;border:1px solid #CFCECE"></i></div><div class="nm">Light</div></div>
+                    <div class="theme" data-theme-pick="copper-noir"><div class="pv" style="background:#1A1612"><i style="left:8px;top:8px;width:56px;height:46px;background:#1A1918;border:1px solid #D39466"></i><i style="left:68px;top:8px;width:26px;height:46px;background:#1A1918;border:1px solid #34281E"></i></div><div class="nm">Copper Noir</div></div>
+                    <div class="theme" data-theme-pick="sediment"><div class="pv" style="background:linear-gradient(180deg,#E3D2BB 0%,#D39F3F 40%,#B0623A 70%,#6F7A5A 100%)"><i style="left:8px;top:8px;width:56px;height:46px;background:#FBF6EE;border:1px solid #2B2622"></i><i style="left:68px;top:8px;width:26px;height:46px;background:#2B2622;border:1px solid #2B2622"></i></div><div class="nm">Sediment</div></div>
+                  </div>
+                </div>
+                <div><div class="lab">wallpaper</div><div class="walls" id="walls"><div class="on"><img src="assets/wall-thumb-0.webp" width="480" height="300" alt=""></div><div><img src="assets/wall-thumb-1.webp" width="480" height="300" alt=""></div><div><img src="assets/wall-thumb-2.webp" width="480" height="300" alt=""></div><div><img src="assets/wall-thumb-3.webp" width="480" height="300" alt=""></div></div></div>
+                <div>
+                  <div class="rowx"><span>Reduce motion</span><span>off</span></div>
+                  <div class="rowx"><span>Text size</span><span>100%</span></div>
+                  <div class="rowx"><span>Lock after idle</span><span>5 min</span></div>
+                </div>
+              </main>
+            </div></div>
+          </div>
+          <div class="win" data-id="mon" data-name="System Monitor" data-doc="Overview" data-domain="slate" style="left:720px;top:42px;width:470px;height:688px">
+            <div class="tb"><span class="n">System Monitor</span><span class="p">overview</span><span class="ctl"><svg><use href="#i-min"/></svg><svg><use href="#i-max"/></svg><svg><use href="#i-x"/></svg></span></div>
+            <div class="wbody"><div class="mon">
+              <div class="lab">processor · 16 threads<b id="cpu-now">4%</b></div>
+              <canvas id="cpu" width="876" height="220"></canvas>
+              <div class="lab">memory<b>212 MiB of 32 GiB</b></div>
+              <table>
+                <thead><tr><th>program</th><th>domain</th><th>cpu</th></tr></thead>
+                <tbody>
+                  <tr><td>strata</td><td>slate</td><td>1.2%</td></tr>
+                  <tr><td>terminal</td><td>slate</td><td>0.4%</td></tr>
+                  <tr><td>firefox</td><td style="color:var(--moss)">linux</td><td>2.9%</td></tr>
+                  <tr><td>devd</td><td>slate</td><td>0.0%</td></tr>
+                  <tr><td>netd</td><td>slate</td><td>0.0%</td></tr>
+                  <tr><td>slinit</td><td>slate</td><td>0.0%</td></tr>
+                </tbody>
+              </table>
+            </div></div>
+          </div>
+        </div>
+        <div class="ws" data-ws="3" hidden></div>
+        <div class="ws" data-ws="4" hidden></div>
+
+        <!-- Applications menu -->
+        <div class="amenu" id="amenu" hidden>
+          <div class="search"><svg><use href="#i-search"/></svg><input id="amenu-q" type="text" placeholder="Search applications" autocomplete="off" aria-label="Search applications"></div>
+          <div class="cols"><div class="cats" id="cats"></div><div class="alist" id="alist"></div></div>
+          <div class="keys"><span><b>↑↓</b> choose</span><span><b>enter</b> open</span><span><b>esc</b> close</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="stage-caption"><span>Click a window to focus it: the top bar shows which domain it lives in.</span><span>Open <kbd>Applications</kbd> · switch workspaces on the top bar</span></div>
+  </div>
+</section>
+
+<!-- ── Themes ── -->
+<section class="band" id="themes" aria-labelledby="themes-title" style="padding-top: clamp(40px, 6vw, 80px)">
+  <div class="frame">
+    <div class="sec-head">
+      <div class="ruled">themes<b>four of them</b></div>
+      <div class="split">
+        <h2 class="h2" id="themes-title" style="grid-column: span 7">One desktop, <span class="serif">four moods.</span></h2>
+        <p class="lede" style="grid-column: 8 / span 5; align-self: end">Graphite, Light, Copper Noir and Sediment, chosen in Settings › Appearance. Every window, app and menu follows the theme, and each one comes with wallpapers drawn to match. <strong>These are real renders, not mock-ups.</strong></p>
+      </div>
+    </div>
+    <div class="theme-tabs" role="tablist" aria-label="Themes" id="theme-tabs">
+      <button type="button" role="tab" aria-selected="true" data-t="graphite"><i style="background:linear-gradient(135deg,#121211 50%,#E3E1DC 50%)"></i>Graphite</button>
+      <button type="button" role="tab" aria-selected="false" data-t="light"><i style="background:linear-gradient(135deg,#F3F2F2 50%,#0B0B0B 50%)"></i>Light</button>
+      <button type="button" role="tab" aria-selected="false" data-t="copper-noir"><i style="background:linear-gradient(135deg,#1A1918 50%,#D39466 50%)"></i>Copper Noir</button>
+      <button type="button" role="tab" aria-selected="false" data-t="sediment"><i style="background:linear-gradient(135deg,#FBF6EE 50%,#B0623A 50%)"></i>Sediment</button>
+    </div>
+    <div class="theme-show" id="theme-show">
+      <figure class="theme-main"><img id="theme-main" src="assets/shot-desktop.webp" width="1440" height="900" alt="The Strata desktop in the Graphite theme: an editor, a terminal and htop" loading="lazy"></figure>
+      <div class="theme-side">
+        <figure><img id="theme-files" src="assets/files-graphite.webp" width="900" height="600" alt="Files in the Graphite theme" loading="lazy"></figure>
+        <figure><img id="theme-mon" src="assets/app-monitor-resources.webp" width="900" height="620" alt="System Monitor in the Graphite theme" loading="lazy"></figure>
+      </div>
+    </div>
+    <div class="theme-meta"><p id="theme-cap">The default: warm graphite, chalk for whatever has your attention, and colour only where it means something.</p><span id="theme-note">dark · the default</span></div>
+  </div>
+</section>
+
+<!-- ── Graphics ── -->
+<section class="band layers" id="graphics" aria-labelledby="gfx-title">
+  <div class="frame">
+    <div class="gfx-grid">
+      <div>
+        <div class="ruled" style="margin-bottom:28px">graphics<b>its own driver</b></div>
+        <h2 class="h2" id="gfx-title">Its own pixels, <span class="serif">on your screen.</span></h2>
+        <p class="lede" style="margin-top:28px">SlateOS drives the display with its own code. Every graphics card works out of the box, and on supported AMD Radeon graphics there is more: <strong>SlateOS's own AMD display driver</strong>, with your monitor at its own resolution and windows composited on the GPU.</p>
+        <div class="gfx-modes">
+          <div>
+            <div class="k">the default</div>
+            <h3>SlateOS only</h3>
+            <p>Any card, on the framebuffer the firmware sets up, with the boot loader picking the display's native mode. Strata composites on the processor, and a 4K desktop stays smooth.</p>
+          </div>
+          <div>
+            <div class="k">amd radeon · opt-in</div>
+            <h3>Full graphics</h3>
+            <p>On supported integrated Radeon graphics (tested on Ryzen 7000-series "Raphael"): copies on the GPU's copy engine, blending on SlateOS's own shaders, and a hardware pointer.</p>
+          </div>
+        </div>
+        <div class="gfx-figs">
+          <div><b>off by default</b><span>Full graphics loads AMD's firmware, software from AMD that runs on the card itself. You choose it in the installer or in Settings › Displays.</span></div>
+          <div><b>always a way back</b><span>The first start asks "Keep full graphics?" and goes back by itself after 20 seconds. The boot menu keeps a "standard graphics" entry.</span></div>
+          <div><b>4k on the cpu</b><span>Without GPU help, the launcher, a window drag and a workspace switch all stay inside a 60 Hz frame at 3840 × 2160.</span></div>
+        </div>
+      </div>
+      <div class="gfx-art">
+        <figure class="gfx-shot"><img src="assets/gfx-installer.webp" width="926" height="630" alt="The installer's Desktop step: Full graphics for your AMD Radeon card, with SlateOS only and Full graphics to choose from" loading="lazy"></figure>
+        <div class="gfx-row">
+          <figure class="gfx-shot"><img src="assets/gfx-settings.webp" width="900" height="660" alt="Settings, Displays: each display's resolution and refresh rate, the scale, and the Graphics row" loading="lazy"></figure>
+          <div class="keep" id="keep" role="group" aria-label="A model of the Keep full graphics question">
+            <div class="t"><b>Keep full graphics?</b><span class="ring"><svg viewBox="0 0 44 44" aria-hidden="true"><circle cx="22" cy="22" r="19" fill="none" stroke="#333331" stroke-width="2"/><circle id="keep-arc" cx="22" cy="22" r="19" fill="none" stroke="#E3E1DC" stroke-width="2" stroke-linecap="round" stroke-dasharray="119.4" stroke-dashoffset="0"/></svg><span id="keep-n">20</span></span></div>
+            <p>If the screen looks right, keep it. Otherwise SlateOS goes back to standard graphics by itself.</p>
+            <div class="btns"><span>Revert</span><span class="pri">Keep</span></div>
+            <div class="st" id="keep-st">no answer needed to go back</div>
+          </div>
+        </div>
+        <p class="gfx-cap">The installer's Desktop step and Settings › Displays, rendered by SlateOS. The question on the right is a model of the first start.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── Down to the pixel ── -->
+<section class="band" id="pixels" aria-labelledby="px-title" style="padding-top: clamp(40px, 6vw, 80px)">
+  <div class="frame">
+    <div class="sec-head">
+      <div class="ruled">detail<b>1 px = 1 px</b></div>
+      <div class="split">
+        <h2 class="h2" id="px-title" style="grid-column: span 7">Down to <span class="serif">the pixel.</span></h2>
+        <p class="lede" style="grid-column: 8 / span 5; align-self: end">Strata's look is written down to the pixel and the hex value, and the code draws exactly that. These are crops of the screenshots above, enlarged with every pixel kept square.</p>
+      </div>
+    </div>
+    <div class="macros">
+      <figure class="macro">
+        <div class="macro-well"><div class="macro-zoom"><b>5×</b><span>window corner</span></div><div class="macro-view" data-src="assets/shot-desktop.webp" data-size="1440,900" data-rect="0,32,128,52" role="img" aria-label="The top-left corner of a focused window, enlarged"></div></div>
+        <figcaption class="macro-copy">
+          <div class="k">window frame</div>
+          <h3>A corner, <span class="serif">considered.</span></h3>
+          <p>Ten-pixel corners, a one-pixel outline that brightens when the window has focus, and the app's name beside the path it's working on.</p>
+          <dl class="spec">
+            <dt>radius</dt><dd>10 px</dd>
+            <dt>focus outline</dt><dd><i class="sw" style="background:#A9A7A2"></i>1 px · #A9A7A2</dd>
+            <dt>app name</dt><dd>Host Grotesk 12 / 500</dd>
+            <dt>path</dt><dd><i class="sw" style="background:#85837E"></i>DM Mono 11.5 · #85837E</dd>
+          </dl>
+        </figcaption>
+      </figure>
+      <figure class="macro">
+        <div class="macro-well"><div class="macro-zoom"><b>5×</b><span>launcher row</span></div><div class="macro-view" data-src="assets/shot-launcher-fuzzy.webp" data-size="1440,900" data-rect="382,264,140,68" role="img" aria-label="A selected launcher row, inverted in chalk, enlarged"></div></div>
+        <figcaption class="macro-copy">
+          <div class="k">selection</div>
+          <h3>Chosen means <span class="serif">inverted.</span></h3>
+          <p>A selected row becomes a chalk block with dark text. Never a colour, and only ever on small things, so it reads at a glance without glaring.</p>
+          <dl class="spec">
+            <dt>fill</dt><dd><i class="sw" style="background:#E3E1DC"></i>chalk · #E3E1DC</dd>
+            <dt>text</dt><dd><i class="sw" style="background:#121211"></i>#121211</dd>
+            <dt>row radius</dt><dd>8–9 px</dd>
+            <dt>chalk fills</dt><dd>48 px tall at most</dd>
+          </dl>
+        </figcaption>
+      </figure>
+      <figure class="macro">
+        <div class="macro-well"><div class="macro-zoom"><b>5×</b><span>system approval</span></div><div class="macro-view" data-src="assets/shot-approval.webp" data-size="1440,900" data-rect="828,556,134,70" role="img" aria-label="The Approve button of the system approval dialog, enlarged"></div></div>
+        <figcaption class="macro-copy">
+          <div class="k">security</div>
+          <h3>A dialog apps <span class="serif">can't fake.</span></h3>
+          <p>When something wants to change the system, Strata draws the question itself. Its header is reserved, so no app can paint a lookalike and catch your password.</p>
+          <dl class="spec">
+            <dt>dialog radius</dt><dd>14 px</dd>
+            <dt>button radius</dt><dd>8–9 px</dd>
+            <dt>label</dt><dd>Host Grotesk 14 / 500</dd>
+            <dt>dim layer</dt><dd>rgba(10, 10, 9, .72)</dd>
+          </dl>
+        </figcaption>
+      </figure>
+      <figure class="macro">
+        <div class="macro-well"><div class="macro-zoom"><b>7×</b><span>top bar</span></div><div class="macro-view" data-src="assets/shot-desktop.webp" data-size="1440,900" data-rect="1070,3,100,26" role="img" aria-label="The slate mode indicator in the top bar, enlarged"></div></div>
+        <figcaption class="macro-copy">
+          <div class="k">domain indicator</div>
+          <h3>Always know <span class="serif">where you are.</span></h3>
+          <p>The top bar follows the focused window. A shield and "slate mode" for SlateOS's own programs, a split pane and "linux" for software in the Linux domain.</p>
+          <dl class="spec">
+            <dt>icon</dt><dd>14 px outline stroke</dd>
+            <dt>text</dt><dd><i class="sw" style="background:#A3A29F"></i>Host Grotesk 12.5 · #A3A29F</dd>
+            <dt>bar</dt><dd><i class="sw" style="background:#121211"></i>32 px · #121211</dd>
+          </dl>
+        </figcaption>
+      </figure>
+    </div>
+  </div>
+</section>
+
+<!-- ── Apps ── -->
+<section class="band" id="apps" aria-labelledby="apps-title" style="padding-top: clamp(40px, 6vw, 80px)">
+  <div class="frame">
+    <div class="sec-head">
+      <div class="ruled">apps<b>slate-apps</b></div>
+      <div class="split">
+        <h2 class="h2" id="apps-title" style="grid-column: span 7">Apps, <span class="serif">made here too.</span></h2>
+        <p class="lede" style="grid-column: 8 / span 5; align-self: end">Files, Terminal, Text Editor, Calendar, Contacts, System Monitor, Disks, Software Updater, App Center, Calculator, Clock, Help and more. Each one is a small native program on a shared kit, and each one follows your theme.</p>
+      </div>
+    </div>
+    <div class="collage-fit" id="collage-fit">
+      <div class="collage" id="collage" role="img" aria-label="Five SlateOS apps open over the wallpaper: Calendar, System Monitor, Software Updater, Calculator and Clock">
+        <div class="cwin" data-depth="0.6" style="left:36px;top:40px;width:600px;z-index:1"><div class="tb"><span class="n">Calendar</span><span class="p">october 2026</span><span class="ctl"><svg><use href="#i-min"/></svg><svg><use href="#i-max"/></svg><svg><use href="#i-x"/></svg></span></div><img src="assets/app-calendar-month.webp" width="980" height="680" alt=""></div>
+        <div class="cwin" data-depth="0.9" style="left:690px;top:30px;width:560px;z-index:1"><div class="tb"><span class="n">System Monitor</span><span class="p">resources</span><span class="ctl"><svg><use href="#i-min"/></svg><svg><use href="#i-max"/></svg><svg><use href="#i-x"/></svg></span></div><img src="assets/app-monitor-resources.webp" width="900" height="620" alt=""></div>
+        <div class="cwin" data-depth="1.3" style="left:110px;top:404px;width:380px;z-index:2"><div class="tb"><span class="n">Software Updater</span><span class="p">updates</span><span class="ctl"><svg><use href="#i-min"/></svg><svg><use href="#i-max"/></svg><svg><use href="#i-x"/></svg></span></div><img src="assets/app-updater-updates.webp" width="680" height="640" alt=""></div>
+        <div class="cwin top" data-depth="1.7" style="left:560px;top:392px;width:400px;z-index:3"><div class="tb"><span class="n">Calculator</span><span class="p">scientific</span><span class="ctl"><svg><use href="#i-min"/></svg><svg><use href="#i-max"/></svg><svg><use href="#i-x"/></svg></span></div><img src="assets/app-calculator-scientific.webp" width="640" height="540" alt=""></div>
+        <div class="cwin" data-depth="1.1" style="left:1010px;top:350px;width:270px;z-index:2"><div class="tb"><span class="n">Clock</span><span class="p">world</span><span class="ctl"><svg><use href="#i-min"/></svg><svg><use href="#i-max"/></svg><svg><use href="#i-x"/></svg></span></div><img src="assets/app-clock-world.webp" width="420" height="560" alt=""></div>
+      </div>
+    </div>
+    <div class="collage-cap"><span>Each window's contents are that app's own render.</span><span>Software Updater: "Roll back to system-2" is one button.</span></div>
+  </div>
+</section>
+
+<!-- ── SlateFS ── -->
+<section class="band" id="updates" aria-labelledby="fs-title" style="padding-top: clamp(40px, 6vw, 80px)">
+  <div class="frame">
+    <div class="fs-grid">
+      <div class="timeline">
+        <svg id="tl" viewBox="0 0 1000 330" role="img" aria-label="An update is written beside the running system, tried at the next boot, then kept or rolled back">
+          <g fill="none" stroke-linecap="round">
+            <path id="tl-base" d="M80 165 H560" stroke="#333331" stroke-width="2"/>
+            <path id="tl-up-base" d="M560 165 C640 165 660 75 760 75 H900" stroke="#333331" stroke-width="2"/>
+            <path id="tl-dn-base" d="M560 165 C640 165 660 255 760 255 H900" stroke="#333331" stroke-width="2"/>
+            <path id="tl-main" d="M80 165 H560" stroke="#E3E1DC" stroke-width="2"/>
+            <path id="tl-up" d="M560 165 C640 165 660 75 760 75 H900" stroke="#A4B38C" stroke-width="2"/>
+            <path id="tl-dn" d="M560 165 C640 165 660 255 760 255 H900" stroke="#D0907E" stroke-width="2"/>
+          </g>
+          <g id="tl-nodes" font-size="14">
+            <g data-n="a"><circle cx="80" cy="165" r="9" fill="#121211" stroke="#E3E1DC" stroke-width="2"/><text x="80" y="128" text-anchor="middle" fill="#E3E1DC">system-1</text><text x="80" y="210" text-anchor="middle" fill="#85837E" font-size="12">running</text></g>
+            <g data-n="b"><circle cx="320" cy="165" r="9" fill="#121211" stroke="#E3E1DC" stroke-width="2"/><text x="320" y="128" text-anchor="middle" fill="#E3E1DC">system-2</text><text x="320" y="210" text-anchor="middle" fill="#85837E" font-size="12">written beside it</text></g>
+            <g data-n="c"><circle cx="560" cy="165" r="9" fill="#121211" stroke="#E3E1DC" stroke-width="2"/><text x="560" y="128" text-anchor="middle" fill="#E3E1DC">trial boot</text><text x="560" y="210" text-anchor="middle" fill="#85837E" font-size="12">next start</text></g>
+            <g data-n="d"><circle cx="900" cy="75" r="9" fill="#121211" stroke="#A4B38C" stroke-width="2"/><text x="884" y="44" text-anchor="end" fill="#A4B38C">boot-ok</text><text x="884" y="108" text-anchor="end" fill="#85837E" font-size="12">system-2 is home</text></g>
+            <g data-n="e"><circle cx="900" cy="255" r="9" fill="#121211" stroke="#D0907E" stroke-width="2"/><text x="884" y="224" text-anchor="end" fill="#D0907E">failed</text><text x="884" y="288" text-anchor="end" fill="#85837E" font-size="12">back to system-1</text></g>
+          </g>
+          <circle id="tl-dot" cx="80" cy="165" r="4.5" fill="#E3E1DC"/>
+        </svg>
+        <div class="tl-status" id="tl-status"><span class="badge ok"><svg><use href="#i-check"/></svg>Verified</span><span>A good update becomes the system. A bad one undoes itself.</span></div>
+      </div>
+      <div>
+        <div class="ruled" style="margin-bottom:28px">updates<b>slatefs</b></div>
+        <h2 class="h2" id="fs-title">Updates you can <span class="serif">take back.</span></h2>
+        <p class="lede" style="margin-top:28px">SlateFS is Slate's own copy-on-write filesystem. An update is written beside the running system, never over it. The next boot is a trial: if it fails, <strong>the kernel starts the last good system by itself</strong>, and every earlier one waits in the boot menu.</p>
+        <div class="fs-points">
+          <div><b>copy-on-write</b><span>Nothing is overwritten in place, so a power cut can't leave a half-written system.</span></div>
+          <div><b>checksums</b><span>Every block is checked when it's read.</span></div>
+          <div><b>encrypted</b><span>The root partition is encrypted by default and unlocked at boot.</span></div>
+          <div><b>ext4 too</b><span>Your existing Linux drives open, read and write.</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── Everything ours ── -->
+<section class="band" aria-labelledby="ours-title" style="padding-top: clamp(40px, 6vw, 80px)">
+  <div class="frame">
+    <div class="sec-head">
+      <div class="ruled">provenance<b>every layer</b></div>
+      <div class="split">
+        <h2 class="h2" id="ours-title" style="grid-column: span 7">Every layer, <span class="serif">ours.</span></h2>
+        <p class="lede" style="grid-column: 8 / span 5; align-self: end">The parts most systems borrow, SlateOS writes. Each tool is a clean-room clone of the behaviour you know, tested side by side against the originals.</p>
+      </div>
+    </div>
+    <div class="ours-grid">
+      <article class="part"><div class="k"><span>kernel</span><span>rust</span></div><h3>Slate</h3><p>Monolithic and multi-core, with its own memory manager, scheduler and virtual filesystem.</p></article>
+      <article class="part"><div class="k"><span>shell</span><span>/bin/sh</span></div><h3 class="mono">chalk</h3><p>POSIX sh with most of bash. Checked against bash, script by script.</p></article>
+      <article class="part"><div class="k"><span>init</span><span>pid 1</span></div><h3 class="mono">slinit</h3><p>SysV-style runlevels you already know, with supervision that restarts what crashes.</p></article>
+      <article class="part"><div class="k"><span>packages</span><span>ed25519</span></div><h3 class="mono">quarry</h3><p>Signed indexes, real dependency resolution and quick installs.</p></article>
+      <article class="part"><div class="k"><span>filesystem</span><span>cow</span></div><h3>SlateFS</h3><p>Copy-on-write, checksummed, with snapshots and atomic updates.</p></article>
+      <article class="part"><div class="k"><span>boot</span><span>uefi · bios</span></div><h3 class="mono">slate-loader</h3><p>Its own bootloader, with a graphical menu that starts other systems too.</p></article>
+      <article class="part"><div class="k"><span>desktop</span><span>kms</span></div><h3>Strata</h3><p>Window manager and display server in one, with its own apps.</p></article>
+      <article class="part"><div class="k"><span>toolkit</span><span>2d</span></div><h3 class="mono">slate-ui</h3><p>Anti-aliased drawing, soft shadows and its own TrueType text renderer.</p></article>
+      <article class="part"><div class="k"><span>c library</span><span>rust</span></div><h3 class="mono">slate-libc</h3><p>A C library written in Rust, for programs built for Slate.</p></article>
+      <article class="part"><div class="k"><span>network</span><span>tcp/ip</span></div><h3>The stack</h3><p>TCP/IP, DNS and TLS 1.3 written from the RFCs, tested by wiring stacks together.</p></article>
+      <article class="part"><div class="k"><span>remote</span><span>rfc 4251</span></div><h3 class="mono">sshd</h3><p>Its own SSH server, from the protocol documents up.</p></article>
+      <article class="part"><div class="k"><span>drives</span><span>e2fsck clean</span></div><h3>ext4</h3><p>Full read and write, with every write checked by the reference tools.</p></article>
+      <article class="part"><div class="k"><span>graphics</span><span>amd · kms</span></div><h3>The display</h3><p>Mode setting, a hardware pointer, and window compositing on AMD's copy engine and its own GPU shaders.</p></article>
+      <article class="part"><div class="k"><span>firewall</span><span>nf_tables</span></div><h3>Its firewall</h3><p>Rules through the nf_tables interface that Linux's tools speak. Inbound is closed but for SSH.</p></article>
+      <article class="part"><div class="k"><span>install</span><span>gui · text</span></div><h3 class="mono">slate-install</h3><p>Graphical and text installers on one engine, beside another system or on a whole disk.</p></article>
+      <article class="part"><div class="k"><span>apps</span><span>slate-apps</span></div><h3>The apps</h3><p>Files, Terminal, Calendar, Disks, App Center and more, written for Strata.</p></article>
+    </div>
+    <p class="ours-note">The exceptions are a few vetted cryptographic primitives and device firmware, such as AMD's, which full graphics loads only if you ask for it. Everything else that ships is SlateOS's own.</p>
+  </div>
+</section>
+
+<!-- ── Budgets ── -->
+<section class="band budgets" aria-labelledby="bud-title">
+  <div class="frame">
+    <div class="sec-head">
+      <div class="ruled">performance<b>budgets</b></div>
+      <div class="split">
+        <h2 class="h2" id="bud-title" style="grid-column: span 7">Speed is a feature. <span class="serif">Regressions are bugs.</span></h2>
+        <p class="lede" style="grid-column: 8 / span 5; align-self: end">These are budgets, and they're kept like tests. When one slips, it's treated as a failure, the same as a broken feature.</p>
+      </div>
+    </div>
+    <div class="bgrid">
+      <div class="bud"><div class="v"><span class="lt">&lt;</span><span data-count="1">1</span><small>s</small></div><b>Boot to login</b><span>after the bootloader hands over</span><i class="meas">measured 0.57 s</i></div>
+      <div class="bud"><div class="v"><span class="lt">&lt;</span><span data-count="64">64</span><small>MB</small></div><b>Memory at rest</b><span>the base system, idle at login</span><i class="meas">measured 10.7 MiB</i></div>
+      <div class="bud"><div class="v"><span class="lt">&lt;</span><span data-count="150">150</span><small>MB</small></div><b>Base install</b><span>the whole system, on disk</span><i class="meas">measured 34.8 MB</i></div>
+      <div class="bud"><div class="v"><span class="lt">&lt;</span><span data-count="5">5</span><small>ms</small></div><b>Shell start</b><span>from command to prompt</span><i class="meas">measured 0.40 ms</i></div>
+    </div>
+    <p class="bud-note">Measured in a virtual machine with 4 CPUs and 4 GiB, on every full test run. The desktop has frame budgets of its own, at 4K too.</p>
+  </div>
+</section>
+
+<!-- ── Bring everything ── -->
+<section class="band" aria-labelledby="carry-title">
+  <div class="frame">
+    <div class="sec-head">
+      <div class="ruled">compatibility<b>unmodified</b></div>
+      <h2 class="h2" id="carry-title" style="max-width: 14em">Bring <span class="serif">everything</span> with you.</h2>
+    </div>
+    <ul class="carry" id="carry">
+      <li>Firefox<sup>flathub</sup></li>
+      <li>Flatpak<sup>apps</sup></li>
+      <li>AppImage<sup>apps</sup></li>
+      <li>Podman<sup>containers</sup></li>
+      <li>Docker<sup>containers</sup></li>
+      <li>OpenSSH<sup>remote</sup></li>
+      <li>git<sup>code</sup></li>
+      <li>GCC<sup>compiler</sup></li>
+      <li>Clang<sup>compiler</sup></li>
+      <li>Rust<sup>toolchain</sup></li>
+      <li>Python<sup>runtime</sup></li>
+      <li>Sway<sup>wayland</sup></li>
+      <li>your ext4 drives<sup>read · write</sup></li>
+    </ul>
+    <div class="carry-note"><span class="dtag linux"><svg><use href="#i-split"/></svg>linux</span>Each runs as the same file you'd run on Linux, in the Linux domain.</div>
+  </div>
+</section>
+
+<!-- ── Install ── -->
+<section class="band" id="install" aria-labelledby="inst-title" style="padding-top: clamp(40px, 6vw, 80px)">
+  <div class="frame">
+    <div class="inst-grid">
+      <div>
+        <div class="ruled" style="margin-bottom:28px">install<b>the installer</b></div>
+        <h2 class="h2" id="inst-title">Moves in <span class="serif">beside you.</span></h2>
+        <p class="lede" style="margin-top:28px">Start it from a USB stick and try the desktop from memory before you change a thing. When you install, SlateOS can take the free space next to the system you have, and both will be in the boot menu.</p>
+        <div class="inst-points">
+          <div><b>Try it first.</b> The live desktop runs from RAM, as a guest.</div>
+          <div><b>Beside, erase, or your own partitions.</b> The table is written last, so a failed install changes nothing.</div>
+          <div><b>Encrypted by default.</b> Your root partition is locked with your password.</div>
+          <div><b>Your keyboard, your time.</b> Sixteen layouts with dead keys, and your time zone.</div>
+          <div><b>Full graphics, if you want it.</b> On supported AMD Radeon graphics, the Desktop step asks.</div>
+          <div><b>Larger text, high contrast.</b> One button away on the welcome screen. A text installer is in the boot menu.</div>
+        </div>
+      </div>
+      <div class="installer" role="group" aria-label="A model of the installer's disk step">
+        <aside>
+          <div class="mk"><svg><use href="#mark"/></svg>SlateOS</div>
+          <div class="st done"><i>✓</i>Language</div>
+          <div class="st done"><i>✓</i>Region</div>
+          <div class="st on"><i>03</i>Disk</div>
+          <div class="st"><i>04</i>Mode</div>
+          <div class="st"><i>05</i>Desktop</div>
+          <div class="st"><i>06</i>Network</div>
+          <div class="st"><i>07</i>Account</div>
+          <div class="st"><i>08</i>Install</div>
+        </aside>
+        <main>
+          <div>
+            <h4>Where should SlateOS go?</h4>
+          </div>
+          <p class="q">NVMe SSD · 1 TB · it holds Windows</p>
+          <div class="diskbar" id="diskbar">
+            <div class="esp" style="flex-basis:7%">EFI</div>
+            <div class="oth" style="flex-basis:43%">Windows · 420 GB</div>
+            <div class="free" style="flex-basis:50%">free · 580 GB</div>
+            <div class="slate" style="flex-basis:0%;padding:0"></div>
+          </div>
+          <div class="disklegend"><span>0</span><span id="disk-note">nothing changes until you choose Install</span><span>1 TB</span></div>
+          <div class="opts" id="opts">
+            <button type="button" class="opt" data-mode="beside" aria-pressed="true"><i class="r"></i><div><b>Install beside Windows</b><span>Uses the 580 GB of free space. Windows stays as it is.</span></div></button>
+            <button type="button" class="opt" data-mode="erase" aria-pressed="false"><i class="r"></i><div><b>Erase the disk</b><span>Removes Windows and everything on the disk.</span></div></button>
+            <button type="button" class="opt" data-mode="manual" aria-pressed="false"><i class="r"></i><div><b>Choose partitions yourself</b><span>Delete partitions, then give SlateOS a free space and a size.</span></div></button>
+          </div>
+          <div class="inst-foot"><span class="lock"><svg><use href="#i-lock"/></svg>encrypted</span><span class="next">Continue</span></div>
+        </main>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── Hardware ── -->
+<section class="band" id="hardware" aria-labelledby="hw-title" style="padding-top: clamp(40px, 6vw, 80px)">
+  <div class="frame">
+    <div class="sec-head">
+      <div class="ruled">hardware<b>what it runs on</b></div>
+      <div class="split">
+        <h2 class="h2" id="hw-title" style="grid-column: span 7">Its own drivers. <span class="serif">Honest about them.</span></h2>
+        <p class="lede" style="grid-column: 8 / span 5; align-self: end">Every driver is written for SlateOS, so it works with some hardware and not yet with the rest. Check your PC first: a 64-bit Intel or AMD machine, in UEFI or legacy BIOS mode, with Secure Boot off.</p>
+      </div>
+    </div>
+    <div class="hw">
+      <div class="ok">
+        <h3><svg><use href="#i-check"/></svg>works today</h3>
+        <dl>
+          <dt>disks</dt><dd>NVMe, SATA (in AHCI mode) and USB drives</dd>
+          <dt>wired network</dt><dd>Intel I210, I211 and 82576 cards, and standard USB Ethernet adapters</dd>
+          <dt>graphics</dt><dd>Any card, on the firmware's framebuffer. Full graphics on supported AMD Radeon integrated graphics</dd>
+          <dt>input</dt><dd>USB keyboards and mice (on the USB 3 controller) and PS/2</dd>
+          <dt>bluetooth</dt><dd>USB adapters pair with devices</dd>
+        </dl>
+      </div>
+      <div class="no">
+        <h3><svg><use href="#i-dash"/></svg>not yet</h3>
+        <ul>
+          <li>Wi-Fi <span>· use a cable or a USB Ethernet adapter</span></li>
+          <li>Sound</li>
+          <li>Sleep <span>· the power button shuts down cleanly</span></li>
+          <li>Bluetooth keyboards, mice and headphones</li>
+          <li>Many built-in Realtek network ports</li>
+          <li>Secure Boot <span>· the bootloader isn't signed</span></li>
+        </ul>
+      </div>
+    </div>
+    <p class="hw-note">The full table, and what to do when something goes wrong, are in <a href="https://github.com/neuralpunk/slate-os/blob/main/guides/INSTALL.md">the install guide</a>. It also runs in QEMU, virt-manager and GNOME Boxes.</p>
+  </div>
+</section>
+
+<!-- ── Get it ── -->
+<section class="finale" id="get" aria-labelledby="fin-title">
+  <div class="frame finale-grid">
+    <div>
+      <div class="ruled" style="margin-bottom:48px">get it<b>from source</b></div>
+      <h2 id="fin-title">Begin <span class="serif">again.</span></h2>
+      <p>SlateOS is young and in active development, with laptop support next. There are no downloads yet: <b>make</b> builds the install media from source, a USB image and an ISO.</p>
+      <div class="repo-card"><code id="clone-cmd"><span>git clone </span>https://github.com/neuralpunk/slate-os</code><button type="button" id="copy-clone">Copy</button></div>
+      <ol class="steps">
+        <li><span>On Linux, with rustup, git, a C compiler and binutils: <code>cd slate-os &amp;&amp; make</code></span></li>
+        <li><span>Write <code>target/slate-usb.img</code> to a USB stick, byte for byte, with <code>dd</code> or GNOME Disks.</span></li>
+        <li><span>Start the PC from the stick, try the desktop, then install. Or <code>make run</code> boots it in QEMU.</span></li>
+      </ol>
+      <div class="get-cta">
+        <a class="btn btn-primary" href="https://github.com/neuralpunk/slate-os"><svg><use href="#i-gh"/></svg>View on GitHub</a>
+        <a class="btn btn-ghost" href="https://github.com/neuralpunk/slate-os/blob/main/guides/INSTALL.md"><svg><use href="#i-book"/></svg>Install guide</a>
+      </div>
+      <p class="get-note">The first build fetches the pinned Rust toolchain and takes a few minutes. Installing erases the disk you choose unless you install beside what is on it: back up first.</p>
+    </div>
+    <div class="monument" aria-hidden="true">
+      <svg id="monument" viewBox="-2 -2 36 36">
+        <g fill="none" stroke-linejoin="round" stroke-width=".22">
+          <polygon class="m-side" points="3,9.5 3,12.5 16,19 16,16" fill="#1F1F1E" stroke="#75736F"/>
+          <polygon class="m-side" points="29,9.5 29,12.5 16,19 16,16" fill="#161615" stroke="#75736F"/>
+          <polygon class="m-top" points="16,3 29,9.5 16,16 3,9.5" fill="#262625" stroke="#E3E1DC"/>
+          <polyline class="m-s1" points="3,17.5 16,24 29,17.5" stroke="#A9A7A2"/>
+          <polyline class="m-s2" points="3,23.5 16,30 29,23.5" stroke="#5F5D59"/>
+        </g>
+      </svg>
+    </div>
+  </div>
+</section>
+
+</main>
+<footer>
+  <div class="frame">
+    <div class="foot">
+      <div class="about">
+        <a class="brand" href="#top"><svg><use href="#mark"/></svg>SlateOS</a>
+        <span>An x86-64 operating system written from scratch in Rust. It runs Linux software unmodified and contains none of Linux's code.</span>
+      </div>
+      <div><h6>system</h6><ul><li><a href="#system">Kernel</a></li><li><a href="#security">Slate mode</a></li><li><a href="#updates">SlateFS</a></li><li><a href="#desktop">Strata</a></li><li><a href="#themes">Themes</a></li><li><a href="#graphics">Graphics</a></li></ul></div>
+      <div><h6>project</h6><ul><li><a href="https://github.com/neuralpunk/slate-os">Source on GitHub</a></li><li><a href="https://github.com/neuralpunk/slate-os/blob/main/guides/INSTALL.md">Install guide</a></li><li><a href="https://github.com/neuralpunk/slate-os/blob/main/guides/getting-started.md">Getting started</a></li></ul></div>
+      <div><h6>principles</h6><ul><li>Minimal by default</li><li>Clean room</li><li>Fast everywhere</li><li>Opt-in compatibility</li></ul></div>
+      <div><h6>status</h6><ul><li>In development</li><li>Next: laptops</li><li>No downloads yet</li><li>MIT or Apache-2.0</li></ul></div>
+    </div>
+    <div class="legal"><span>neuralpunk.github.io/slate-os</span><span>No Linux, BSD or UNIX code. On purpose.</span></div>
+  </div>
+</footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/ScrollTrigger.min.js"></script>
+<script>
+(() => {
+  'use strict';
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const hasGsap = typeof window.gsap !== 'undefined';
+  if (hasGsap && window.ScrollTrigger) gsap.registerPlugin(ScrollTrigger);
+  const $ = (s, r = document) => r.querySelector(s);
+  const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
+  const NS = 'http://www.w3.org/2000/svg';
+  const svgEl = (tag, attrs) => { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); return e; };
+
+  // ── Navigation background ─────────────────────
+  const nav = $('#nav');
+  const onScroll = () => nav.classList.toggle('scrolled', scrollY > 40);
+  addEventListener('scroll', onScroll, { passive: true }); onScroll();
+
+  // ── Hero: layered sheets of slate (three.js shader) ─
+  (function waves() {
+    const canvas = $('#waves');
+    if (typeof THREE === 'undefined') return;
+    let renderer;
+    try { renderer = new THREE.WebGLRenderer({ canvas, antialias: false, alpha: false, powerPreference: 'high-performance' }); }
+    catch (e) { return; }
+    const dpr = Math.min(devicePixelRatio || 1, 1.5);
+    renderer.setPixelRatio(dpr);
+    const scene = new THREE.Scene(), cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+    const uniforms = {
+      uRes: { value: new THREE.Vector2(1, 1) }, uT: { value: 0 }, uC: { value: new THREE.Vector2(1.2, 0.5) },
+      uDesk: { value: new THREE.Color(0x121211) }, uChalk: { value: new THREE.Color(0xE3E1DC) }
+    };
+    // The same field and shading as the wallpaper images (one sheet per band of the field,
+    // each with a lit hairline edge and a soft shadow under the sheet above it).
+    const frag = `
+      uniform vec2 uRes; uniform float uT; uniform vec2 uC; uniform vec3 uDesk; uniform vec3 uChalk;
+      float field(vec2 p, float t){
+        vec2 d = p - uC; float r2 = dot(d, d);
+        float ang = 2.1 * exp(-r2 / 0.055) + 0.6 * exp(-r2 / 0.6) + 0.25 * sin(t * 0.3);
+        float ca = cos(ang), sa = sin(ang);
+        float x = uC.x + d.x * ca - d.y * sa, y = uC.y + d.x * sa + d.y * ca;
+        return y * 1.05 + 0.20 * sin(x * 2.1 + 0.4 + t * 0.10) + 0.07 * sin(x * 4.3 - y * 2.6 + 1.7 - t * 0.13)
+             + 0.035 * sin(x * 7.9 + y * 5.1 + 0.3 + t * 0.07) - 0.16 * x;
+      }
+      float hash(vec2 p){ return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
+      void main(){
+        vec2 fc = vec2(gl_FragCoord.x, uRes.y - gl_FragCoord.y);
+        float s = 1.0 / uRes.y, N = 17.0;
+        vec2 p = fc * s;
+        float f = field(p, uT);
+        float fx = (field(p + vec2(s, 0.0), uT) - field(p - vec2(s, 0.0), uT)) * 0.5;
+        float fy = (field(p + vec2(0.0, s), uT) - field(p - vec2(0.0, s), uT)) * 0.5;
+        float g = length(vec2(fx, fy)) * N + 1e-6;
+        float q = f * N, n = floor(q), tt = q - n;
+        float pe = tt / g, pn = (1.0 - tt) / g, sc = uRes.y / 900.0;
+        float tone = 0.05 + 0.032 * sin(n * 0.5 + 0.6) + 0.04 * exp(-pe / (90.0 * sc));
+        float sh = 0.06 * exp(-pn / (12.0 * sc)) + 0.035 * exp(-pn / (70.0 * sc));
+        float e = pe / (0.85 * sc);
+        float edge = exp(-e * e) * 0.2;
+        float ux = p.x / (uRes.x / uRes.y);
+        float vig = clamp(1.15 - 0.55 * ((ux - 0.62) * (ux - 0.62) * 2.2 + (p.y - 0.5) * (p.y - 0.5) * 1.8), 0.35, 1.0);
+        float lum = clamp((tone - sh) * vig + edge * vig, 0.0, 1.0);
+        vec3 col = mix(uDesk, uChalk, lum) + (hash(fc) - 0.5) / 255.0;
+        gl_FragColor = vec4(col, 1.0);
+      }`;
+    const mat = new THREE.ShaderMaterial({ uniforms, vertexShader: 'void main(){ gl_Position = vec4(position.xy, 0.0, 1.0); }', fragmentShader: frag, depthTest: false, depthWrite: false });
+    scene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), mat));
+    const hero = canvas.parentElement;
+    const base = new THREE.Vector2(), target = new THREE.Vector2();
+    let aspect = 1;
+    function size() {
+      const w = hero.clientWidth, h = hero.clientHeight;
+      renderer.setSize(w, h, false);
+      uniforms.uRes.value.set(w * dpr, h * dpr);
+      aspect = w / h;
+      if (aspect > 1) base.set(aspect * 0.70, 0.5); else base.set(aspect * 0.62, 0.62);
+      target.copy(base); uniforms.uC.value.copy(base);
+      if (reduce) render();
+    }
+    let px = 0.5, py = 0.5;
+    hero.addEventListener('pointermove', e => {
+      const r = hero.getBoundingClientRect();
+      px = (e.clientX - r.left) / r.width; py = (e.clientY - r.top) / r.height;
+      target.set(base.x + (px - 0.5) * 0.3 * aspect, base.y + (py - 0.5) * 0.3);
+    });
+    hero.addEventListener('pointerleave', () => target.copy(base));
+    function render() { renderer.render(scene, cam); canvas.classList.add('on'); }
+    size();
+    new ResizeObserver(size).observe(hero);
+    if (reduce) { render(); return; }
+    let visible = true, running = false, last = performance.now();
+    uniforms.uT.value = 0;
+    const tick = now => {
+      if (!visible) { running = false; return; }
+      const dt = Math.min(0.05, (now - last) / 1000); last = now;
+      uniforms.uT.value += dt * 0.45;
+      uniforms.uC.value.lerp(target, 1 - Math.pow(0.15, dt));
+      render();
+      requestAnimationFrame(tick);
+    };
+    const start = () => { if (running) return; running = true; last = performance.now(); requestAnimationFrame(tick); };
+    new IntersectionObserver(([en]) => { visible = en.isIntersecting; if (visible) start(); }).observe(hero);
+    start();
+  })();
+
+  // ── Screenshots: tabs ───────────
+  (function gallery() {
+    const SHOTS = [
+      { k: 'Desktop', src: 'assets/shot-desktop.webp', w: 1440, h: 900, alt: 'The Strata desktop: a code editor and a terminal tiled side by side, htop below, under the top bar', cap: 'Two windows tiled side by side and a third below. Along the top: Applications, four workspaces, the window list, slate mode and the clock.' },
+      { k: 'Linux app focused', src: 'assets/shot-desktop-linux-focused.webp', w: 1440, h: 900, alt: 'The same desktop with htop focused; the top bar reads linux', cap: 'htop runs in the Linux domain. With it focused, the top bar says linux where it said slate mode.' },
+      { k: 'Applications', src: 'assets/shot-appmenu.webp', w: 1280, h: 800, alt: 'The Applications menu with its categories and the recently used apps', cap: 'The Applications menu: categories on the left, the apps you used last first. Type to search them all.' },
+      { k: 'Launcher', src: 'assets/shot-launcher-fuzzy.webp', w: 1440, h: 900, alt: 'The launcher with the letters trml typed and Terminal selected', cap: 'super + space, then a few letters. Here "trml" is enough to find Terminal.' },
+      { k: 'Desktop icons', src: 'assets/shot-desk-icons.webp', w: 1280, h: 800, alt: 'Icons from the Desktop folder down the left edge, and a terminal being resized, showing 77 by 18', cap: 'The Desktop folder, as icons you can drag, rename and open. A terminal resizes by whole characters and shows its size as you drag.' },
+      { k: 'System approval', src: 'assets/shot-approval.webp', w: 1440, h: 900, alt: 'The system approval dialog asking for a password to approve a system update', cap: 'quarry asks to switch to a new signed system image. The current one is kept, so the change can be undone.' },
+      { k: 'Lock screen', src: 'assets/shot-lock.webp', w: 1440, h: 900, alt: 'The lock screen: a large clock, the slab mark as a monument, and a password field', cap: 'The lock screen: the time, the mark drawn as a monument, and your password.' },
+      { k: 'Login', src: 'assets/shot-login.webp', w: 1440, h: 900, alt: 'The login screen with a list of people and a password field', cap: 'Choose who you are and log in. Restart and power off wait at the bottom.' },
+      { k: 'Power', src: 'assets/shot-power-dialog.webp', w: 1280, h: 800, alt: 'The power dialog with Lock, Log out, Restart and Shut down', cap: 'Lock, log out, restart or shut down, now or a little later.' },
+      { k: 'Boot menu', src: 'assets/shot-boot-menu.webp', w: 1280, h: 800, alt: "slate-loader's boot menu: Choose a system, with Slate and the previous system", cap: "slate-loader, SlateOS's own bootloader: the current system, the one before it, and any other system on the disk." }
+    ];
+    const tabs = $('#shot-tabs'), img = $('#shot-img'), cap = $('#shot-cap'), sz = $('#shot-size'), frame = $('#shot-frame');
+    let idx = 0;
+    SHOTS.forEach((s, i) => {
+      const b = document.createElement('button'); b.type = 'button'; b.setAttribute('role', 'tab'); b.textContent = s.k.toLowerCase();
+      b.setAttribute('aria-selected', i === 0); b.addEventListener('click', () => show(i)); tabs.appendChild(b);
+    });
+    SHOTS.slice(1).forEach(s => { const p = new Image(); p.src = s.src; });
+    function show(i) {
+      if (i === idx) return; idx = i; const s = SHOTS[i];
+      $$('button', tabs).forEach((b, j) => b.setAttribute('aria-selected', j === i));
+      img.classList.add('swap');
+      setTimeout(() => { img.src = s.src; img.width = s.w; img.height = s.h; img.alt = s.alt; img.classList.remove('swap'); }, reduce ? 0 : 160);
+      cap.textContent = s.cap; sz.textContent = `${s.w} × ${s.h} · rendered by slate-ui`;
+    }
+    if (hasGsap && !reduce) gsap.fromTo(frame, { rotateX: 16, scale: 0.94 }, { rotateX: 0, scale: 1, ease: 'none', scrollTrigger: { trigger: frame, start: 'top 98%', end: 'top 30%', scrub: 0.6 } });
+  })();
+
+  // ── Down to the pixel: crops at whole-number zoom ─
+  $$('.macro-view').forEach(v => {
+    const [x, y, w, h] = v.dataset.rect.split(',').map(Number), [iw, ih] = v.dataset.size.split(',').map(Number);
+    const well = v.parentElement, badge = $('.macro-zoom b', well);
+    v.style.backgroundImage = `url(${v.dataset.src})`;
+    const fit = () => {
+      const cs = getComputedStyle(well);
+      const avail = well.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+      const z = Math.max(2, Math.min(9, Math.floor(avail / w)));
+      v.style.width = w * z + 'px'; v.style.height = h * z + 'px';
+      v.style.backgroundSize = `${iw * z}px ${ih * z}px`;
+      v.style.backgroundPosition = `${-x * z}px ${-y * z}px`;
+      v.style.setProperty('--z', z + 'px');
+      v.classList.toggle('grid', z >= 5);
+      badge.textContent = z + '×';
+    };
+    fit(); new ResizeObserver(fit).observe(well);
+  });
+
+  // ── Apps collage: scale to fit, windows drift at their own depth ─
+  (function collage() {
+    const fit = $('#collage-fit'), c = $('#collage');
+    const scale = () => { c.style.transform = `scale(${fit.clientWidth / 1320})`; };
+    scale(); new ResizeObserver(scale).observe(fit);
+    if (!hasGsap || reduce) return;
+    $$('.cwin', c).forEach(w => {
+      const d = +w.dataset.depth;
+      gsap.fromTo(w, { y: 30 * d }, { y: -30 * d, ease: 'none', scrollTrigger: { trigger: fit, start: 'top bottom', end: 'bottom top', scrub: 0.8 } });
+    });
+  })();
+
+  // ── Hero entrance ─────────────────────────────
+  if (hasGsap && !reduce) {
+    const tl = gsap.timeline({ defaults: { ease: 'expo.out' } });
+    tl.from('#hero-mark .hm', { y: -16, opacity: 0, duration: 1.5, stagger: 0.09 })
+      .from('.wordmark', { y: 46, opacity: 0, duration: 1.7 }, 0.2)
+      .to('.wordmark .slate', { backgroundPosition: '100% 0', duration: 2.4, ease: 'power2.inOut' }, 0.9)
+      .from('.hero-tag, .hero-rule, .hero-lede, .hero-cta, .hero-base', { y: 16, opacity: 0, duration: 1.2, stagger: 0.08 }, 0.55);
+  }
+
+  // ── Thesis: words brighten as you read ────────
+  (function thesis() {
+    const p = $('#thesis-text');
+    const walk = node => {
+      for (const n of Array.from(node.childNodes)) {
+        if (n.nodeType === 3) {
+          const frag = document.createDocumentFragment();
+          n.textContent.split(/(\s+)/).forEach(part => {
+            if (!part) return;
+            if (/^\s+$/.test(part)) frag.appendChild(document.createTextNode(part));
+            else { const s = document.createElement('span'); s.className = 'w'; s.textContent = part; frag.appendChild(s); }
+          });
+          n.replaceWith(frag);
+        } else if (n.nodeType === 1) walk(n);
+      }
+    };
+    walk(p);
+    if (!hasGsap || reduce) return;
+    gsap.fromTo($$('.w', p), { color: '#5F5D59' }, {
+      color: '#E3E1DC', stagger: 0.05, ease: 'none',
+      scrollTrigger: { trigger: p, start: 'top 78%', end: 'bottom 45%', scrub: 0.6 }
+    });
+  })();
+
+  // ── Layers: the isometric stack ───────────────
+  (function stack() {
+    const g = $('#plates');
+    const cx = 300, a = 240, b = 120, t = 16, step = 132, y0 = 150;
+    const layers = [
+      { lbl: 'Your software', sub: 'Firefox · Podman · git · GCC · Python', tag: 'unmodified', face: '#262625', line: '#A3A29F' },
+      { lbl: 'Linux personality', sub: 'syscalls · /proc · ELF · namespaces · cgroup v2', tag: 'linux', face: '#1E211F', line: '#8FB2A4', moss: true },
+      { lbl: 'Native interface', sub: 'slate-rt · slate-libc', tag: 'slate', face: '#1F1F1E', line: '#85837E' },
+      { lbl: 'Slate kernel', sub: 'memory · scheduler · VFS · TCP/IP', tag: 'rust', face: '#2A2A28', line: '#E3E1DC', chalk: true },
+      { lbl: 'Your hardware', sub: 'NVMe · SATA · USB · Ethernet · AMD graphics', tag: 'x86-64', face: '#1A1A19', line: '#5F5D59' }
+    ];
+    const pts = arr => arr.map(p => p.join(',')).join(' ');
+    const plates = layers.map((L, i) => {
+      const y = y0 + i * step;
+      const grp = svgEl('g', { class: 'plate' });
+      grp.appendChild(svgEl('polygon', { points: pts([[cx - a, y], [cx - a, y + t], [cx, y + b + t], [cx, y + b]]), fill: 'url(#faceL)', stroke: L.line, 'stroke-opacity': .35, 'stroke-width': 1 }));
+      grp.appendChild(svgEl('polygon', { points: pts([[cx + a, y], [cx + a, y + t], [cx, y + b + t], [cx, y + b]]), fill: 'url(#faceR)', stroke: L.line, 'stroke-opacity': .35, 'stroke-width': 1 }));
+      grp.appendChild(svgEl('polygon', { class: 'top', points: pts([[cx, y - b], [cx + a, y], [cx, y + b], [cx - a, y]]), fill: L.face, stroke: L.line, 'stroke-width': L.chalk ? 1.4 : 1 }));
+      // Inner strata on each face: nested rhombi, like contour lines
+      for (let k = 1; k <= 3; k++) {
+        const s = 1 - k * 0.22;
+        grp.appendChild(svgEl('polygon', { points: pts([[cx, y - b * s], [cx + a * s, y], [cx, y + b * s], [cx - a * s, y]]), fill: 'none', stroke: L.line, 'stroke-opacity': 0.16 + (L.chalk ? 0.1 : 0), 'stroke-width': 1 }));
+      }
+      if (i === 3) { // the kernel's core
+        grp.appendChild(svgEl('polygon', { points: pts([[cx, y - 22], [cx + 44, y], [cx, y + 22], [cx - 44, y]]), fill: '#E3E1DC' }));
+      }
+      const lx = 600;
+      grp.appendChild(svgEl('path', { class: 'leader', d: `M${cx + a + 8} ${y} H${lx - 14}`, stroke: '#3A3A38', 'stroke-width': 1, fill: 'none' }));
+      grp.appendChild(svgEl('circle', { class: 'leader', cx: cx + a + 8, cy: y, r: 2.5, fill: L.line }));
+      const lbl = svgEl('text', { class: 'lbl', x: lx, y: y - 4 }); lbl.textContent = L.lbl; grp.appendChild(lbl);
+      const sub = svgEl('text', { class: 'sub', x: lx, y: y + 20 }); sub.textContent = L.sub; grp.appendChild(sub);
+      const tw = L.tag.length * 7 + 16;
+      const tagX = lx + (L.lbl.length * 10.4) + 14;
+      grp.appendChild(svgEl('rect', { class: 'tag', x: tagX, y: y - 21, width: tw, height: 20, rx: 4, fill: L.moss ? '#2A2F2C' : 'transparent', stroke: L.moss ? '#434F4A' : '#3A3A38' }));
+      const tg = svgEl('text', { class: 'tag', x: tagX + 8, y: y - 7, fill: L.moss ? '#8FB2A4' : '#9B9994' }); tg.textContent = L.tag; grp.appendChild(tg);
+      g.appendChild(grp);
+      return grp;
+    });
+    // Draw bottom first so upper plates sit on top
+    plates.slice().reverse().forEach(p => g.appendChild(p));
+    if (!hasGsap || reduce) return;
+    const mm = gsap.matchMedia();
+    const collapsedGap = 22;
+    const offset = i => (2 - i) * (step - collapsedGap);
+    mm.add('(min-width: 901px)', () => {
+      const tl = gsap.timeline({ scrollTrigger: { trigger: '.layers-grid', start: 'center center', end: '+=100%', scrub: 0.8, pin: true, anticipatePin: 1 } });
+      plates.forEach((p, i) => {
+        tl.fromTo(p, { y: offset(i) }, { y: 0, ease: 'power2.inOut', duration: 1 }, 0);
+        tl.fromTo($$('.lbl, .sub, .tag, .leader', p), { opacity: 0.12 }, { opacity: 1, duration: 0.45, ease: 'none' }, 0.45 + i * 0.08);
+      });
+    });
+    mm.add('(max-width: 900px)', () => {
+      plates.forEach((p, i) => gsap.fromTo(p, { y: offset(i) }, { y: 0, ease: 'power2.out', scrollTrigger: { trigger: '#stack', start: 'top 85%', end: 'center 50%', scrub: 0.6 } }));
+    });
+  })();
+
+  // ── Domains: the compatibility switch ─────────
+  (function domains() {
+    const on = $('#compat-on'), off = $('#compat-off'), note = $('#compat-note');
+    const set = v => {
+      on.setAttribute('aria-pressed', v); off.setAttribute('aria-pressed', !v);
+      $$('#ptbody tr[data-linux]').forEach(tr => tr.classList.toggle('off', !v));
+      note.classList.toggle('on', v);
+      note.innerHTML = v
+        ? '<svg><use href="#i-split"/></svg><span>Linux programs are running in their own domain. They can\'t signal Slate processes or write to the system.</span>'
+        : '<svg><use href="#i-shield"/></svg><span>Compatibility is off: only signed Slate programs run. Turn it back on from Settings, the installer or one command.</span>';
+    };
+    on.addEventListener('click', () => set(true));
+    off.addEventListener('click', () => set(false));
+  })();
+
+  // ── Files window contents ─────────────────────
+  (function files() {
+    const folder = '<svg viewBox="0 0 46 40"><path d="M3 8a3 3 0 0 1 3-3h11l4 4h19a3 3 0 0 1 3 3v22a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3z" fill="#262625" stroke="#5F5D59"/><path d="M3 14h40" stroke="#3A3A38"/></svg>';
+    const page = '<svg viewBox="0 0 46 40"><path d="M12 3h16l8 8v26H12z" fill="#1F1F1E" stroke="#5F5D59"/><path d="M28 3v8h8" fill="none" stroke="#5F5D59"/><path d="M17 19h14M17 24h14M17 29h9" stroke="#3A3A38"/></svg>';
+    const items = [['Desktop', folder], ['Documents', folder], ['Downloads', folder], ['Music', folder], ['Pictures', folder], ['Projects', folder], ['notes.txt', page], ['plan.md', page]];
+    $('#fgrid').innerHTML = items.map(([n, ic]) => `<div class="fi">${ic}<span>${n}</span></div>`).join('');
+  })();
+
+  // ── Strata stage: scale, focus, workspaces, menu ─
+  (function strata() {
+    const fit = $('#stage-fit'), stage = $('#stage');
+    const scale = () => { const s = fit.clientWidth / 1200; stage.style.transform = `scale(${s})`; };
+    scale(); new ResizeObserver(scale).observe(fit);
+
+    let ws = '1';
+    const wsx = $('#wsx'), wlist = $('#wlist');
+    const wins = () => $$(`.ws[data-ws="${ws}"] .win`, stage);
+    function focus(win) {
+      wins().forEach(w => w.classList.toggle('focused', w === win));
+      const c = $('#sb-center'), d = $('#sb-domain');
+      if (!win) { c.textContent = ''; d.innerHTML = '<svg><use href="#i-shield"/></svg><em style="font-style:normal">slate mode</em>'; renderList(); return; }
+      c.innerHTML = `${win.dataset.name} <i>—</i> ${win.dataset.doc}`;
+      d.innerHTML = win.dataset.domain === 'linux'
+        ? '<svg><use href="#i-split"/></svg><em style="font-style:normal">linux</em>'
+        : '<svg><use href="#i-shield"/></svg><em style="font-style:normal">slate mode</em>';
+      renderList();
+    }
+    function renderList() {
+      wlist.innerHTML = '';
+      wins().forEach(w => {
+        const b = document.createElement('button'); b.type = 'button'; b.textContent = w.dataset.name;
+        if (w.classList.contains('focused')) b.className = 'on';
+        b.addEventListener('click', () => focus(w));
+        wlist.appendChild(b);
+      });
+    }
+    function switchWs(n) {
+      if (n === ws) return;
+      const dir = Number(n) > Number(ws) ? 1 : -1;
+      const prev = $(`.ws[data-ws="${ws}"]`, stage), next = $(`.ws[data-ws="${n}"]`, stage);
+      ws = n;
+      $$('button', wsx).forEach(b => b.classList.toggle('on', b.dataset.ws === n));
+      next.hidden = false;
+      if (hasGsap && !reduce) {
+        gsap.fromTo(next, { x: 1200 * dir }, { x: 0, duration: 0.16, ease: 'power2.out' });
+        gsap.fromTo(prev, { x: 0 }, { x: -1200 * dir, duration: 0.16, ease: 'power2.out', onComplete: () => { prev.hidden = true; gsap.set(prev, { x: 0 }); } });
+      } else prev.hidden = true;
+      const f = wins().find(w => w.classList.contains('focused')) || wins()[0];
+      focus(f || null);
+    }
+    wsx.addEventListener('click', e => { const b = e.target.closest('button'); if (b) switchWs(b.dataset.ws); });
+    stage.addEventListener('pointerdown', e => {
+      const w = e.target.closest('.win');
+      if (w) focus(w);
+      if (!e.target.closest('#amenu') && !e.target.closest('#apps-btn')) closeMenu();
+    });
+    focus($('.win[data-id="term"]'));
+
+    // Clock
+    const clock = $('#sb-clock');
+    const D = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'], M = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const tick = () => { const d = new Date(); clock.textContent = `${D[d.getDay()]} ${d.getDate()} ${M[d.getMonth()]}  ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
+    tick(); setInterval(tick, 15000);
+
+    // Applications menu
+    const ICON = {
+      calc: '<rect x="3" y="1.8" width="10" height="12.4" rx="1.6"/><path d="M5.5 4.8h5M5.5 8h1M8 8h0M10.5 8h0M5.5 11h1M8 11h0M10.5 11h0"/>',
+      clock: '<circle cx="8" cy="8" r="6"/><path d="M8 4.6V8l2.4 1.6"/>',
+      doc: '<path d="M4 1.8h5.4L12 4.4v9.8H4z"/><path d="M6 7.5h4M6 10h4"/>',
+      image: '<rect x="2" y="3" width="12" height="10" rx="1.4"/><circle cx="5.6" cy="6.4" r="1"/><path d="m2.6 12 3.6-3.4 2.4 2 2-1.6 3 2.8"/>',
+      box: '<path d="M2.4 5 8 2.2 13.6 5v6L8 13.8 2.4 11z"/><path d="M2.4 5 8 7.8 13.6 5M8 7.8v6"/>',
+      cal: '<rect x="2.2" y="3" width="11.6" height="11" rx="1.4"/><path d="M2.2 6.4h11.6M5.4 1.6v2.6M10.6 1.6v2.6"/>',
+      person: '<circle cx="8" cy="5.6" r="2.8"/><path d="M2.8 14c.6-2.8 2.8-4.4 5.2-4.4s4.6 1.6 5.2 4.4"/>',
+      globe: '<circle cx="8" cy="8" r="6"/><path d="M2 8h12M8 2c2 2 2 10 0 12M8 2c-2 2-2 10 0 12"/>',
+      bag: '<path d="M3 5.4h10l-.8 8.6H3.8z"/><path d="M5.6 5.4V4.4a2.4 2.4 0 0 1 4.8 0v1"/>',
+      term: '<rect x="1.8" y="2.6" width="12.4" height="10.8" rx="1.6"/><path d="m4.6 6.4 2 1.6-2 1.6M8.4 10h3"/>',
+      folder: '<path d="M1.8 4.2c0-.7.5-1.2 1.2-1.2h3.2l1.5 1.6H13c.7 0 1.2.5 1.2 1.2v6.4c0 .7-.5 1.2-1.2 1.2H3c-.7 0-1.2-.5-1.2-1.2z"/>',
+      chart: '<path d="M2 13.6h12M3.6 11 6.6 7l2.4 2.4 3.8-5"/>',
+      disk: '<rect x="2" y="4" width="12" height="8" rx="1.6"/><path d="M4.4 9.4h4"/><circle cx="11.2" cy="9.4" r=".5"/>',
+      upd: '<path d="M13 8a5 5 0 1 1-1.5-3.6M13 2.4v3h-3"/>',
+      gear: '<circle cx="8" cy="8" r="2.2"/><path d="M8 1.6v2M8 12.4v2M1.6 8h2M12.4 8h2M3.5 3.5l1.4 1.4M11.1 11.1l1.4 1.4M3.5 12.5l1.4-1.4M11.1 4.9l1.4-1.4"/>',
+      help: '<circle cx="8" cy="8" r="6"/><path d="M6.2 6.2a1.9 1.9 0 0 1 3.7.5c0 1.3-1.9 1.6-1.9 2.8M8 11.6v.1"/>',
+      info: '<circle cx="8" cy="8" r="6"/><path d="M8 7.2v4M8 4.8v.1"/>',
+      recent: '<path d="M2.6 8a5.4 5.4 0 1 0 1.6-3.8M2.4 2.4v2.2h2.2"/><path d="M8 5v3.2l2 1.2"/>',
+      all: '<rect x="2" y="2" width="5" height="5" rx="1"/><rect x="9" y="2" width="5" height="5" rx="1"/><rect x="2" y="9" width="5" height="5" rx="1"/><rect x="9" y="9" width="5" height="5" rx="1"/>'
+    };
+    const ic = k => `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">${ICON[k]}</svg>`;
+    const APPS = [
+      { n: 'Terminal', d: 'chalk, the shell', c: 'System', i: 'term', w: 'term' },
+      { n: 'Files', d: 'Your folders and drives', c: 'System', i: 'folder', w: 'files' },
+      { n: 'Web Browser', d: 'Firefox, from Flathub', c: 'Internet', i: 'globe', w: 'ffx' },
+      { n: 'App Center', d: 'Apps from Flathub', c: 'Internet', i: 'bag' },
+      { n: 'Calculator', d: 'Sums, with a history', c: 'Accessories', i: 'calc' },
+      { n: 'Clock', d: 'Alarms, timers and other cities', c: 'Accessories', i: 'clock' },
+      { n: 'Text Editor', d: 'Plain text, quickly', c: 'Accessories', i: 'doc' },
+      { n: 'Image Viewer', d: 'Look through pictures', c: 'Accessories', i: 'image' },
+      { n: 'Archive Manager', d: 'Open and make zip and tar files', c: 'Accessories', i: 'box' },
+      { n: 'Calendar', d: 'Your days and events', c: 'Office', i: 'cal' },
+      { n: 'Contacts', d: 'The people you know', c: 'Office', i: 'person' },
+      { n: 'System Monitor', d: 'What is running, and how hard', c: 'System', i: 'chart', w: 'mon' },
+      { n: 'Disks', d: 'Drives and partitions', c: 'System', i: 'disk' },
+      { n: 'Software Updater', d: 'Updates you can undo', c: 'System', i: 'upd' },
+      { n: 'Settings', d: 'Appearance, network and people', c: 'Settings', i: 'gear', w: 'set' },
+      { n: 'Help', d: 'How SlateOS works', c: 'Help', i: 'help' },
+      { n: 'About', d: 'This computer and its system', c: 'Help', i: 'info' }
+    ];
+    const CATS = [['Recently used', 'recent'], ['All applications', 'all'], ['Accessories', 'box'], ['Internet', 'globe'], ['Office', 'cal'], ['System', 'chart'], ['Settings', 'gear'], ['Help', 'help']];
+    const RECENT = ['Terminal', 'Files', 'Web Browser', 'Settings', 'System Monitor'];
+    const menu = $('#amenu'), btn = $('#apps-btn'), q = $('#amenu-q'), cats = $('#cats'), alist = $('#alist');
+    let cat = 'Recently used', sel = 0, shown = [];
+    cats.innerHTML = CATS.map(([n, i]) => `<button type="button" data-c="${n}">${ic(i)}${n}</button>`).join('');
+    function render() {
+      const term = q.value.trim().toLowerCase();
+      if (term) shown = APPS.filter(a => (a.n + ' ' + a.d).toLowerCase().includes(term));
+      else if (cat === 'Recently used') shown = RECENT.map(n => APPS.find(a => a.n === n));
+      else if (cat === 'All applications') shown = APPS.slice().sort((x, y) => x.n.localeCompare(y.n));
+      else shown = APPS.filter(a => a.c === cat);
+      sel = Math.min(sel, Math.max(0, shown.length - 1));
+      $$('button', cats).forEach(b => b.classList.toggle('on', !term && b.dataset.c === cat));
+      const label = term ? 'results' : cat.toLowerCase();
+      alist.innerHTML = `<div class="ruled">${label}<b>${shown.length}</b></div>` + (shown.length ? shown.slice(0, 6).map((a, k) =>
+        `<button type="button" class="arow${k === sel ? ' sel' : ''}" data-k="${k}"><span class="tile">${ic(a.i)}</span><span><b>${a.n}</b><span>${a.d}</span></span></button>`).join('')
+        : '<div style="padding:14px 10px;font-size:12.5px;color:var(--muted)">Nothing matches. Try another word.</div>');
+    }
+    function openApp(a) {
+      closeMenu();
+      if (!a || !a.w) return;
+      const win = $(`.win[data-id="${a.w}"]`, stage);
+      const n = win.closest('.ws').dataset.ws;
+      switchWs(n); focus(win);
+    }
+    function openMenu() {
+      menu.hidden = false; btn.classList.add('open'); btn.setAttribute('aria-expanded', 'true');
+      q.value = ''; sel = 0; render();
+      if (hasGsap && !reduce) gsap.fromTo(menu, { opacity: 0, y: 6 }, { opacity: 1, y: 0, duration: 0.14, ease: 'power2.out' });
+      q.focus({ preventScroll: true });
+    }
+    function closeMenu() {
+      if (menu.hidden) return;
+      btn.classList.remove('open'); btn.setAttribute('aria-expanded', 'false');
+      if (hasGsap && !reduce) gsap.to(menu, { opacity: 0, duration: 0.1, onComplete: () => { menu.hidden = true; } });
+      else menu.hidden = true;
+    }
+    btn.addEventListener('click', () => menu.hidden ? openMenu() : closeMenu());
+    cats.addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; cat = b.dataset.c; q.value = ''; sel = 0; render(); });
+    alist.addEventListener('click', e => { const b = e.target.closest('.arow'); if (b) openApp(shown[+b.dataset.k]); });
+    alist.addEventListener('pointermove', e => { const b = e.target.closest('.arow'); if (b && +b.dataset.k !== sel) { sel = +b.dataset.k; render(); } });
+    q.addEventListener('input', () => { sel = 0; render(); });
+    q.addEventListener('keydown', e => {
+      if (e.key === 'ArrowDown') { sel = Math.min(sel + 1, Math.min(shown.length, 6) - 1); render(); e.preventDefault(); }
+      else if (e.key === 'ArrowUp') { sel = Math.max(sel - 1, 0); render(); e.preventDefault(); }
+      else if (e.key === 'Enter') { openApp(shown[sel]); e.preventDefault(); }
+      else if (e.key === 'Escape') { closeMenu(); btn.focus({ preventScroll: true }); }
+    });
+
+    // Terminal types its next command when it comes into view
+    const typeEl = $('#term-type');
+    const cmd = 'slate-compat status';
+    let typed = false;
+    new IntersectionObserver(([en]) => {
+      if (!en.isIntersecting || typed) return; typed = true;
+      if (reduce) { typeEl.textContent = cmd; return; }
+      let k = 0;
+      const step = () => {
+        typeEl.innerHTML = `<span class="c">${cmd.slice(0, ++k)}</span>`;
+        if (k < cmd.length) setTimeout(step, 55 + Math.random() * 70);
+        else setTimeout(() => {
+          const caret = $('#term .caret');
+          caret.insertAdjacentHTML('beforebegin', `\n<span class="m">linux compatibility</span>  <span class="y">on</span>\n<span class="m">linux programs     </span>  3 running, in their own domain\n<span class="u">ada@slate</span> <span class="d">~/src</span> <span class="c">$ </span>`);
+        }, 420);
+      };
+      setTimeout(step, 700);
+    }, { threshold: 0.4 }).observe(stage);
+
+    // System Monitor's processor graph
+    const cv = $('#cpu'), cx2 = cv.getContext('2d');
+    const pts = Array.from({ length: 120 }, (_, i) => 4 + 3 * Math.sin(i / 7) + Math.random() * 3);
+    function drawCpu() {
+      const W = cv.width, H = cv.height;
+      cx2.clearRect(0, 0, W, H);
+      cx2.strokeStyle = '#232322'; cx2.lineWidth = 1;
+      for (let y = 1; y < 4; y++) { cx2.beginPath(); cx2.moveTo(0, (H / 4) * y); cx2.lineTo(W, (H / 4) * y); cx2.stroke(); }
+      const X = i => (i / (pts.length - 1)) * W, Y = v => H - (v / 40) * H;
+      cx2.beginPath(); pts.forEach((v, i) => i ? cx2.lineTo(X(i), Y(v)) : cx2.moveTo(X(i), Y(v)));
+      cx2.lineTo(W, H); cx2.lineTo(0, H); cx2.closePath(); cx2.fillStyle = 'rgba(227,225,220,.06)'; cx2.fill();
+      cx2.beginPath(); pts.forEach((v, i) => i ? cx2.lineTo(X(i), Y(v)) : cx2.moveTo(X(i), Y(v)));
+      cx2.strokeStyle = '#C9C7C2'; cx2.lineWidth = 2; cx2.stroke();
+      const lv = pts[pts.length - 1];
+      cx2.fillStyle = '#E3E1DC'; cx2.beginPath(); cx2.arc(W - 4, Y(lv), 4, 0, Math.PI * 2); cx2.fill();
+      $('#cpu-now').textContent = Math.round(lv) + '%';
+    }
+    drawCpu();
+    if (!reduce) setInterval(() => { if (ws !== '2') return; pts.shift(); pts.push(Math.max(1, Math.min(30, pts[pts.length - 1] + (Math.random() - 0.5) * 5))); drawCpu(); }, 700);
+  })();
+
+  // ── SlateFS: an update, tried, kept or undone ─
+  (function timeline() {
+    const main = $('#tl-main'), up = $('#tl-up'), dn = $('#tl-dn'), dot = $('#tl-dot'), status = $('#tl-status');
+    const len = p => p.getTotalLength();
+    [main, up, dn].forEach(p => { p.style.strokeDasharray = len(p); p.style.strokeDashoffset = 0; });
+    if (!hasGsap || reduce) return;
+    const ok = '<span class="badge ok"><svg><use href="#i-check"/></svg>Verified</span><span>The trial boot worked. system-2 becomes the system.</span>';
+    const bad = '<span class="badge bad"><svg><use href="#i-back"/></svg>Rolled back</span><span>The trial boot failed. The kernel started system-1 again, untouched.</span>';
+    const mid = '<span class="badge"><svg><use href="#i-shield"/></svg>Trying</span><span>Writing the update beside the running system…</span>';
+    const along = (path, from, to) => ({ p: 0, path, from, to });
+    function moveDot(path, prog) { const pt = path.getPointAtLength(prog * len(path)); dot.setAttribute('cx', pt.x); dot.setAttribute('cy', pt.y); }
+    const tl = gsap.timeline({ repeat: -1, paused: true, repeatDelay: 0.4 });
+    const run = (branch, msg) => {
+      const s = { v: 0 }, b = { v: 0 };
+      tl.call(() => { status.innerHTML = mid; gsap.set([up, dn], { strokeDashoffset: (i, el) => len(el) }); gsap.set(main, { strokeDashoffset: len(main) }); dot.setAttribute('fill', '#E3E1DC'); })
+        .to(main, { strokeDashoffset: 0, duration: 2.2, ease: 'power1.inOut' })
+        .to(s, { v: 1, duration: 2.2, ease: 'power1.inOut', onUpdate: () => moveDot(main, s.v) }, '<')
+        .to(branch, { strokeDashoffset: 0, duration: 1.3, ease: 'power2.out' })
+        .to(b, { v: 1, duration: 1.3, ease: 'power2.out', onUpdate: () => moveDot(branch, b.v) }, '<')
+        .call(() => { status.innerHTML = msg; dot.setAttribute('fill', branch === up ? '#A4B38C' : '#D0907E'); })
+        .to({}, { duration: 2.6 });
+    };
+    run(up, ok); run(dn, bad);
+    ScrollTrigger.create({ trigger: '#tl', start: 'top 85%', end: 'bottom 10%', onToggle: self => self.isActive ? tl.play() : tl.pause() });
+  })();
+
+  // ── Budgets count up ──────────────────────────
+  if (hasGsap && !reduce) {
+    $$('[data-count]').forEach(el => {
+      const to = +el.dataset.count, o = { v: 0 };
+      ScrollTrigger.create({ trigger: el, start: 'top 88%', once: true, onEnter: () => gsap.fromTo(o, { v: 0 }, { v: to, duration: 1.6, ease: 'expo.out', onUpdate: () => { el.textContent = Math.round(o.v); } }) });
+    });
+    // Section headings drift gently
+    $$('.h2').forEach(h => gsap.fromTo(h, { y: 36 }, { y: 0, ease: 'none', scrollTrigger: { trigger: h, start: 'top 100%', end: 'top 55%', scrub: 0.6 } }));
+  }
+
+  // ── Bring everything: a slow light along the list ─
+  (function carry() {
+    const items = $$('#carry li');
+    if (reduce) return;
+    let k = 0, timer = null;
+    const step = () => { items.forEach((li, i) => li.classList.toggle('lit', i === k)); k = (k + 1) % items.length; };
+    new IntersectionObserver(([en]) => {
+      if (en.isIntersecting && !timer) { step(); timer = setInterval(step, 1100); }
+      else if (!en.isIntersecting && timer) { clearInterval(timer); timer = null; items.forEach(li => li.classList.remove('lit')); }
+    }).observe($('#carry'));
+    $('#carry').addEventListener('pointerenter', () => { if (timer) { clearInterval(timer); timer = null; } items.forEach(li => li.classList.remove('lit')); });
+  })();
+
+  // ── Installer: the disk step ──────────────────
+  (function installer() {
+    const bar = $('#diskbar'), [esp, oth, free, slate] = bar.children, note = $('#disk-note');
+    const modes = {
+      beside: { esp: 7, oth: 43, free: 0, slate: 50, s: 'SlateOS · 580 GB', n: 'Windows and its files stay put' },
+      erase: { esp: 7, oth: 0, free: 0, slate: 93, s: 'SlateOS · 1 TB', n: 'everything on this disk will be removed' },
+      manual: { esp: 7, oth: 43, free: 20, slate: 30, s: 'SlateOS · 350 GB', n: 'you set the size: 350 GB here' }
+    };
+    function set(m) {
+      const v = modes[m];
+      $$('#opts .opt').forEach(o => o.setAttribute('aria-pressed', o.dataset.mode === m));
+      esp.style.flexBasis = v.esp + '%';
+      oth.style.flexBasis = v.oth + '%'; oth.style.padding = v.oth ? '' : '0'; oth.textContent = v.oth ? 'Windows · 420 GB' : '';
+      free.style.flexBasis = v.free + '%'; free.style.padding = v.free ? '' : '0'; free.textContent = v.free ? 'free · 230 GB' : '';
+      slate.style.flexBasis = v.slate + '%'; slate.style.padding = ''; slate.textContent = v.s;
+      note.textContent = v.n;
+      note.style.color = m === 'erase' ? '#8E4433' : '';
+    }
+    $('#opts').addEventListener('click', e => { const b = e.target.closest('.opt'); if (b) set(b.dataset.mode); });
+    set('beside');
+  })();
+
+  // ── Finale: the monument breathes ─────────────
+  if (hasGsap && !reduce) {
+    gsap.fromTo('#monument .m-s1', { y: -1.2 }, { y: 0.6, duration: 3.2, ease: 'sine.inOut', yoyo: true, repeat: -1 });
+    gsap.fromTo('#monument .m-s2', { y: -2.0 }, { y: 1.0, duration: 3.2, ease: 'sine.inOut', yoyo: true, repeat: -1, delay: 0.25 });
+    gsap.fromTo('#monument', { rotate: -2 }, { rotate: 2, scrollTrigger: { trigger: '.finale', start: 'top bottom', end: 'bottom top', scrub: 1 } });
+  }
+
+  // ── Themes: four renders of the same desktop ─
+  (function themes() {
+    const T = {
+      graphite: { main: ['assets/shot-desktop.webp', 1440, 900], files: 'assets/files-graphite.webp', mon: ['assets/app-monitor-resources.webp', 900, 620], name: 'Graphite', cap: 'The default: warm graphite, chalk for whatever has your attention, and colour only where it means something.', note: 'dark · the default' },
+      light: { main: ['assets/theme-light.webp', 1280, 800], files: 'assets/files-light.webp', mon: ['assets/monitor-light.webp', 900, 620], name: 'Light', cap: 'Pale stone and black ink, with the same layout. Here Settings › Appearance shows all four themes and the built-in wallpapers.', note: 'light' },
+      'copper-noir': { main: ['assets/theme-copper-noir.webp', 1440, 900], files: 'assets/files-copper-noir.webp', mon: ['assets/monitor-copper-noir.webp', 900, 620], name: 'Copper Noir', cap: 'Graphite warmed with copper: the focused window, the selection and the current workspace glow.', note: 'dark · copper' },
+      sediment: { main: ['assets/theme-sediment.webp', 1440, 900], files: 'assets/files-sediment.webp', mon: ['assets/monitor-sediment.webp', 900, 620], name: 'Sediment', cap: 'Cream windows over layers of ochre, rust and sage, with the terminal kept dark.', note: 'light · warm' }
+    };
+    const tabs = $('#theme-tabs'), show = $('#theme-show'), main = $('#theme-main'), files = $('#theme-files'), mon = $('#theme-mon'), cap = $('#theme-cap'), note = $('#theme-note');
+    let cur = 'graphite';
+    const io = new IntersectionObserver(([en]) => {
+      if (!en.isIntersecting) return; io.disconnect();
+      Object.values(T).forEach(t => [t.main[0], t.files, t.mon[0]].forEach(src => { const i = new Image(); i.src = src; }));
+    }, { rootMargin: '600px 0px' });
+    io.observe(show);
+    function pick(k) {
+      if (k === cur || !T[k]) return; cur = k; const t = T[k];
+      $$('button', tabs).forEach(b => b.setAttribute('aria-selected', b.dataset.t === k));
+      $$('.theme[data-theme-pick]').forEach(c => c.classList.toggle('on', c.dataset.themePick === k));
+      show.classList.add('swap');
+      setTimeout(() => {
+        main.src = t.main[0]; main.width = t.main[1]; main.height = t.main[2]; main.alt = `The Strata desktop in the ${t.name} theme`;
+        files.src = t.files; files.alt = `Files in the ${t.name} theme`;
+        mon.src = t.mon[0]; mon.alt = `System Monitor in the ${t.name} theme`;
+        show.classList.remove('swap');
+      }, reduce ? 0 : 140);
+      cap.textContent = t.cap; note.textContent = t.note;
+    }
+    tabs.addEventListener('click', e => { const b = e.target.closest('button'); if (b) pick(b.dataset.t); });
+    tabs.addEventListener('keydown', e => {
+      const ks = Object.keys(T), i = ks.indexOf(cur);
+      if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+        const n = ks[(i + (e.key === 'ArrowRight' ? 1 : ks.length - 1)) % ks.length];
+        pick(n); $(`button[data-t="${n}"]`, tabs).focus(); e.preventDefault();
+      }
+    });
+    $$('.theme[data-theme-pick]').forEach(c => c.addEventListener('click', () => pick(c.dataset.themePick)));
+  })();
+
+  // ── Graphics: the 20-second question, reverting by itself ─
+  (function keep() {
+    const box = $('#keep'), n = $('#keep-n'), arc = $('#keep-arc'), st = $('#keep-st');
+    const C = 119.4;
+    let t = 20, timer = null;
+    const draw = () => { n.textContent = t; arc.style.strokeDashoffset = C * (1 - t / 20); };
+    const tick = () => {
+      t -= 1;
+      if (t <= 0) { t = 0; draw(); st.textContent = 'no answer: back to standard graphics'; clearInterval(timer); timer = setTimeout(() => { t = 20; st.textContent = 'no answer needed to go back'; draw(); timer = setInterval(tick, 1000); }, 3200); return; }
+      draw();
+    };
+    draw();
+    if (reduce) return;
+    new IntersectionObserver(([en]) => {
+      if (en.isIntersecting && !timer) timer = setInterval(tick, 1000);
+      else if (!en.isIntersecting && timer) { clearInterval(timer); clearTimeout(timer); timer = null; }
+    }).observe(box);
+  })();
+
+  // Copy the clone command
+  $('#copy-clone').addEventListener('click', async e => {
+    const b = e.currentTarget, text = 'git clone https://github.com/neuralpunk/slate-os';
+    try { await navigator.clipboard.writeText(text); b.textContent = 'Copied'; }
+    catch (err) { const r = document.createRange(); r.selectNodeContents($('#clone-cmd')); const s = getSelection(); s.removeAllRanges(); s.addRange(r); b.textContent = 'Selected'; }
+    setTimeout(() => { b.textContent = 'Copy'; }, 1800);
+  });
+
+  if (hasGsap && window.ScrollTrigger) addEventListener('load', () => ScrollTrigger.refresh());
+})();
+</script>
+
+</body></html>

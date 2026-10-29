@@ -12,6 +12,8 @@ Flatpak apps and Linux drives, on a kernel and base system that are
 entirely its own; and, beyond that, a clean slate: minimal, fast and
 modern, with nothing preinstalled beyond the basics.
 
+Website: **[neuralpunk.github.io/slate-os](https://neuralpunk.github.io/slate-os/)**
+
 ## What it does today
 
 - **Runs Linux programs unmodified:** static and dynamic ELF, threads,
@@ -70,6 +72,7 @@ and the command line (both are also in the system's Help).
 | `tests/` | Test programs, shell scripts, GNU comparisons, acceptance projects |
 | `tools/` | `xtask` (builds, images, QEMU runs, tests), `slate-cc`, target specs |
 | `guides/` | The user guides: installing, getting started |
+| `site/` | The website, deployed to GitHub Pages by `.github/workflows/pages.yml` |
 
 ## Principles
 
