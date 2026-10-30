@@ -3,13 +3,23 @@
 //! The bridge: one Strata window for the compositor's one output.
 //!
 //! Start-up: open the window, connect to the compositor (the display
-//! socket in `$XDG_RUNTIME_DIR`, waiting for it to appear), bind
-//! the globals, give the virtual keyboard its keymap, and size the output
-//! to the window. Then, in turn: ask for a frame, copy it when the
-//! compositor has damage (`copy_with_damage`), show it, ask again. Keys,
+//! socket in `$XDG_RUNTIME_DIR`, watching the directory until it appears),
+//! bind the globals, give the virtual keyboard its keymap, and size the
+//! output to the window. Then, in turn: ask for a frame, have the
+//! compositor copy it when it has damage (`copy_with_damage`), show it,
+//! and ask again once Strata says the frame is on the screen (M31 phase
+//! 2), or after [`FRAME_WAIT_MS`]. Keys,
 //! pointer events and the wheel from Strata go to the virtual keyboard
 //! and pointer; a new window size becomes a new output mode. Closing the
 //! window, or the compositor going away, ends the program.
+//!
+//! Frames go straight into Strata's buffers where they can (M31 phase 2):
+//! two files of shared memory are both wl_shm buffers for the compositor
+//! and buffers given to Strata (opaque: XRGB8888's fourth byte means
+//! nothing), so the compositor's copy is the only one, and Strata is told
+//! the rectangles that changed. A frame of another size than the window
+//! (while it resizes), in a format other than XRGB8888 or ARGB8888, or
+//! upside down is copied into the window's canvas instead, as before.
 //!
 //! The clipboards go both ways (wlr-data-control): text the Linux side
 //! selects is read through a pipe and copied to Strata's clipboard;
@@ -28,19 +38,21 @@
 //! Opcodes and argument orders are those of the protocol descriptions
 //! named in the crate's documentation.
 
-use alloc::collections::{BTreeMap, VecDeque};
+use alloc::collections::BTreeMap;
 use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 
 use slate_rt::mem::Mapping;
-use slate_rt::{fs, io, lossy, net, process};
+use slate_rt::{fs, io, lossy, process};
 use slate_strata_client::{Connection, Event, MAX_TEXT, PointerKind, Window, clipboard};
 use slate_ui::Canvas;
 
+use crate::conn::{self, now_ms, shm_file, socket_path};
 use crate::keymap;
 use crate::pixels;
-use crate::wire::{self, Args, Msg, Out};
+use crate::stats::FrameStats;
+use crate::wire::{Args, Msg, Out};
 
 /// What each object is (to read its events).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -118,55 +130,7 @@ struct Reading {
     data: Vec<u8>,
 }
 
-/// The connection to the compositor.
-struct Wl {
-    fd: i32,
-    inbuf: Vec<u8>,
-    next: u32,
-    kinds: BTreeMap<u32, Kind>,
-    /// Descriptors that came with events, in order.
-    fds: VecDeque<i32>,
-}
-
-impl Wl {
-    fn connect(path: &[u8]) -> Result<Wl, String> {
-        let fd = net::connect_path(path).map_err(|e| format!("{}: {e}", lossy(path)))?;
-        let mut kinds = BTreeMap::new();
-        kinds.insert(1, Kind::Display);
-        Ok(Wl { fd, inbuf: Vec::new(), next: 2, kinds, fds: VecDeque::new() })
-    }
-
-    fn id(&mut self, k: Kind) -> u32 {
-        let id = self.next;
-        self.next += 1;
-        self.kinds.insert(id, k);
-        id
-    }
-
-    fn send(&mut self, m: Out) -> Result<(), String> {
-        io::write_all(self.fd, &m.done()).map_err(|e| format!("talking to the compositor: {e}"))
-    }
-
-    fn send_fd(&mut self, m: Out, fd: i32) -> Result<(), String> {
-        net::send_fds(self.fd, &m.done(), &[fd]).map(|_| ()).map_err(|e| format!("talking to the compositor: {e}"))
-    }
-
-    /// Read what has arrived; Err when the compositor has gone.
-    fn read(&mut self) -> Result<Vec<Msg>, String> {
-        let mut buf = [0u8; 8192];
-        let (n, fds) = net::recv_fds(self.fd, &mut buf).map_err(|e| format!("reading from the compositor: {e}"))?;
-        self.fds.extend(fds);
-        if n == 0 {
-            return Err("the compositor has gone".into());
-        }
-        self.inbuf.extend_from_slice(&buf[..n]);
-        let mut out = Vec::new();
-        while let Some(m) = wire::next(&mut self.inbuf).map_err(|_| String::from("the compositor sent garbage"))? {
-            out.push(m);
-        }
-        Ok(out)
-    }
-}
+type Wl = conn::Wl<Kind>;
 
 /// The buffer frames are copied into: a shared-memory pool of one buffer.
 struct ShmBuffer {
@@ -177,6 +141,17 @@ struct ShmBuffer {
     size: (u32, u32, u32, u32),
 }
 
+/// One of the two buffers shared with both the compositor and Strata.
+struct Direct {
+    pool: u32,
+    buffer: u32,
+    map: Mapping,
+    fd: i32,
+    size: (u32, u32, u32, u32),
+    /// Strata has it as this index of the window's buffers.
+    given: bool,
+}
+
 /// A frame being captured.
 #[derive(Debug, Default)]
 struct Capture {
@@ -184,8 +159,36 @@ struct Capture {
     format: Option<(u32, u32, u32, u32)>,
     y_invert: bool,
     copying: bool,
-    /// Rows the compositor said changed.
-    damage: Option<(u32, u32)>,
+    /// The rectangles the compositor said changed (x, y, w, h).
+    damage: Vec<(u32, u32, u32, u32)>,
+    /// When it was asked for (µs).
+    asked: i64,
+    /// The shared buffer it goes into, if it goes straight to Strata.
+    direct: Option<u8>,
+}
+
+/// How long the bridge waits for Strata to say a frame is on the screen
+/// before asking the compositor for the next anyway (a window not drawn,
+/// minimised or on another workspace, still gets frames, more slowly).
+pub const FRAME_WAIT_MS: i64 = 100;
+
+/// The rows `damage` covers (top, bottom), within `height`; all of them if
+/// it says nothing.
+pub fn rows(damage: &[(u32, u32, u32, u32)], height: u32) -> (u32, u32) {
+    let top = damage.iter().map(|d| d.1).min();
+    let bottom = damage.iter().map(|d| d.1.saturating_add(d.3)).max();
+    match (top, bottom) {
+        (Some(t), Some(b)) => (t.min(height), b.min(height)),
+        _ => (0, height),
+    }
+}
+
+/// Whether a frame of `size` (wl_shm format, width, height, stride) can
+/// go straight into Strata's buffers for a `window`-sized window: words
+/// of 0xAARRGGBB rows with nothing between them, of the window's size.
+pub fn direct_fits(size: (u32, u32, u32, u32), window: (u32, u32)) -> bool {
+    let (format, w, h, stride) = size;
+    matches!(format, pixels::XRGB8888 | pixels::ARGB8888) && stride == w * 4 && (w, h) == window && w > 0 && h > 0
 }
 
 struct Bridge {
@@ -212,6 +215,14 @@ struct Bridge {
     synced: Option<u32>,
     capture: Option<Capture>,
     shm_buffer: Option<ShmBuffer>,
+    direct: [Option<Direct>; 2],
+    /// Frames may go straight to Strata (none has come upside down).
+    direct_ok: bool,
+    /// A frame is wanted once Strata has shown the last: Strata's frame
+    /// count when it was shown, and when (ms).
+    want_frame: bool,
+    shown_frames: u64,
+    shown_at: i64,
     retry_at: Option<i64>,
     /// A whole frame must be shown (the window changed).
     full: bool,
@@ -238,22 +249,13 @@ struct Bridge {
     idled: bool,
     last_input: i64,
     holding: bool,
-}
-
-fn now_ms() -> i64 {
-    let (s, ns) = slate_rt::time::now(slate_rt::time::CLOCK_MONOTONIC);
-    s * 1000 + ns / 1_000_000
-}
-
-/// A file in shared memory: created and unlinked at once.
-fn shm_file(len: usize) -> Result<i32, String> {
-    let dir = slate_rt::env::var(b"XDG_RUNTIME_DIR").unwrap_or_else(|| b"/tmp".to_vec());
-    let path = format!("{}/.strata-wl-{}-{}", lossy(&dir), process::getpid(), now_ms());
-    let fd = fs::open(path.as_bytes(), fs::O_RDWR | fs::O_CREAT | fs::O_EXCL | fs::O_CLOEXEC, 0o600)
-        .map_err(|e| format!("{path}: {e}"))?;
-    let _ = fs::unlink(path.as_bytes());
-    fs::ftruncate(fd, len as u64).map_err(|e| format!("{path}: {e}"))?;
-    Ok(fd)
+    /// Start-up's stages (M31 phase 1): the time the program was asked
+    /// for (`SLATE_LINUX_T0`), the stages so far in ms since, and whether
+    /// they have been told; frame timings with `strata.stats`.
+    t0: u64,
+    stages: Vec<(&'static str, u64)>,
+    timed: bool,
+    stats: Option<FrameStats>,
 }
 
 /// Linux's button codes (input-event-codes.h, ADR 0033).
@@ -338,14 +340,14 @@ impl Bridge {
                 (Some(Kind::Frame), 3) => {
                     self.wl.send(Out::new(m.object, 1))?;
                     self.capture = None;
+                    self.want_frame = true;
                     self.retry_at = Some(now_ms() + 100);
                 }
                 (Some(Kind::Frame), 4) => {
-                    if let (Some(_x), Some(y), Some(_w), Some(h), Some(c)) =
+                    if let (Some(x), Some(y), Some(w), Some(h), Some(c)) =
                         (a.uint(), a.uint(), a.uint(), a.uint(), self.capture.as_mut())
                     {
-                        let (t, b) = c.damage.unwrap_or((y, y + h));
-                        c.damage = Some((t.min(y), b.max(y + h)));
+                        c.damage.push((x, y, w, h));
                     }
                 }
                 (Some(Kind::Frame), 6) => self.copy()?,
@@ -379,6 +381,9 @@ impl Bridge {
                     self.wl.send(Out::new(m.object, 1))?;
                 }
                 (Some(Kind::ToplevelManager), 0) => {
+                    if self.toplevels.is_empty() && !self.timed {
+                        self.stage("app window");
+                    }
                     if let Some(id) = a.uint() {
                         self.wl.kinds.insert(id, Kind::Toplevel);
                         self.toplevels.insert(id, Toplevel::default());
@@ -411,6 +416,20 @@ impl Bridge {
             }
         }
         Ok(())
+    }
+
+    /// The frames not yet summed up, as the bridge ends.
+    fn flush_stats(&mut self) {
+        if let Some(line) = self.stats.as_mut().and_then(|s| s.still(i64::MAX)) {
+            slate_rt::eprintln!("{line}");
+        }
+    }
+
+    /// Start-up reached `what` now.
+    fn stage(&mut self, what: &'static str) {
+        if !self.stages.iter().any(|s| s.0 == what) {
+            self.stages.push((what, conn::since_ms(self.t0)));
+        }
     }
 
     /// The window's title: the program's name and the active Linux
@@ -527,11 +546,29 @@ impl Bridge {
         Ok(())
     }
 
+    /// Ask for the next frame if one is wanted and Strata has shown the
+    /// last (or hasn't said so for [`FRAME_WAIT_MS`]).
+    fn maybe_capture(&mut self) -> Result<(), String> {
+        if !self.want_frame || self.capture.is_some() || self.retry_at.is_some() {
+            return Ok(());
+        }
+        // Somewhere to put it: a buffer Strata isn't reading (it lets the
+        // last one go as soon as it has the next).
+        if (0..2u8).all(|i| self.conn.held(&self.win, i)) {
+            return Ok(());
+        }
+        if self.conn.frames(&self.win) > self.shown_frames || now_ms() - self.shown_at >= FRAME_WAIT_MS {
+            self.want_frame = false;
+            self.capture()?;
+        }
+        Ok(())
+    }
+
     /// Ask for the next frame.
     fn capture(&mut self) -> Result<(), String> {
         let id = self.wl.id(Kind::Frame);
         self.wl.send(Out::new(self.screencopy, 0).uint(id).int(1).uint(self.output))?;
-        self.capture = Some(Capture { id, ..Capture::default() });
+        self.capture = Some(Capture { id, asked: conn::now_us(), ..Capture::default() });
         Ok(())
     }
 
@@ -546,6 +583,17 @@ impl Bridge {
         };
         c.copying = true;
         let frame = c.id;
+        let op = if self.screencopy_version >= 2 { 2 } else { 0 };
+        // Straight into the buffer Strata isn't reading, where it fits.
+        let window = (self.win.width, self.win.height);
+        let free = (0..2u8).find(|&i| !self.conn.held(&self.win, i));
+        if let Some(i) = free.filter(|_| self.direct_ok && direct_fits(size, window)) {
+            let buffer = self.direct_buffer(i, size)?;
+            if let Some(c) = self.capture.as_mut() {
+                c.direct = Some(i);
+            }
+            return self.wl.send(Out::new(frame, op).uint(buffer));
+        }
         if self.shm_buffer.as_ref().is_none_or(|b| b.size != size) {
             if let Some(old) = self.shm_buffer.take() {
                 self.wl.send(Out::new(old.buffer, 0))?;
@@ -566,24 +614,100 @@ impl Bridge {
             self.full = true;
         }
         let buffer = self.shm_buffer.as_ref().map_or(0, |b| b.buffer);
-        let op = if self.screencopy_version >= 2 { 2 } else { 0 };
         self.wl.send(Out::new(frame, op).uint(buffer))
     }
 
-    /// A frame is in our buffer: show it, and ask for the next.
+    /// Shared buffer `i`, of `size`, made (and given to Strata) if need be:
+    /// its wl_buffer.
+    fn direct_buffer(&mut self, i: u8, size: (u32, u32, u32, u32)) -> Result<u32, String> {
+        let slot = usize::from(i);
+        if self.direct[slot].as_ref().is_none_or(|d| d.size != size) {
+            if let Some(old) = self.direct[slot].take() {
+                self.wl.send(Out::new(old.buffer, 0))?;
+                self.wl.send(Out::new(old.pool, 1))?;
+                let _ = io::close(old.fd);
+            }
+            let (format, w, h, stride) = size;
+            let len = (stride * h) as usize;
+            let fd = shm_file(len)?;
+            let map = Mapping::shared(fd, len, 0).map_err(|e| format!("mapping a frame buffer: {e}"))?;
+            let pool = self.wl.id(Kind::Pool);
+            self.wl.send_fd(Out::new(self.shm, 0).uint(pool).int(len as i32), fd)?;
+            let buffer = self.wl.id(Kind::Buffer);
+            self.wl.send(
+                Out::new(pool, 0).uint(buffer).int(0).int(w as i32).int(h as i32).int(stride as i32).uint(format),
+            )?;
+            self.direct[slot] = Some(Direct { pool, buffer, map, fd, size, given: false });
+            self.full = true;
+        }
+        let Some(d) = self.direct[slot].as_mut() else { return Err("no shared buffer".into()) };
+        if !d.given {
+            let (_, w, h, _) = d.size;
+            self.conn.give(&self.win, i, d.fd, w, h, true)?;
+            d.given = true;
+        }
+        Ok(d.buffer)
+    }
+
+    /// A frame is in our buffer: show it, and want the next.
     fn ready(&mut self, frame: u32) -> Result<(), String> {
         let Some(c) = self.capture.take() else { return Ok(()) };
         self.wl.send(Out::new(frame, 1))?;
-        if let (Some((format, w, h, stride)), Some(b)) = (c.format, self.shm_buffer.as_mut()) {
-            let f =
-                pixels::Frame { data: b.map.as_mut_slice(), width: w, height: h, stride, format, y_invert: c.y_invert };
+        self.want_frame = true;
+        let Some((format, w, h, stride)) = c.format else { return Ok(()) };
+        // Upside down: never straight to Strata again.
+        if c.direct.is_some() && c.y_invert {
+            self.direct_ok = false;
+        }
+        if let Some(i) = c.direct.filter(|_| !c.y_invert) {
+            // In Strata's buffer already: say where it changed.
+            let t = conn::now_us();
+            let rects = if self.full || c.damage.is_empty() { alloc::vec![(0, 0, w, h)] } else { c.damage };
+            self.full = false;
+            self.conn.show(&self.win, i, &rects)?;
+            let shown = conn::now_us();
+            if let Some(s) = self.stats.as_mut() {
+                // The compositor's copy into the shared buffer, only.
+                s.frame(shown, t - c.asked, 0, shown - t, u64::from(stride * h));
+            }
+        } else {
+            let data = match c.direct {
+                Some(i) => self.direct[usize::from(i)].as_mut().map(|d| d.map.as_mut_slice()),
+                None => self.shm_buffer.as_mut().map(|b| b.map.as_mut_slice()),
+            };
+            let Some(data) = data else { return Ok(()) };
+            let f = pixels::Frame { data, width: w, height: h, stride, format, y_invert: c.y_invert };
             let (cw, ch) = (self.canvas.width as u32, self.canvas.height as u32);
-            let (top, bottom) = if self.full || c.y_invert { (0, ch) } else { c.damage.unwrap_or((0, ch)) };
+            let (top, bottom) = if self.full || c.y_invert { (0, ch) } else { rows(&c.damage, ch) };
+            let t = conn::now_us();
             pixels::copy(&f, &mut self.canvas.pixels, cw, ch, top, bottom);
+            let copied = conn::now_us();
             self.full = false;
             self.conn.present(&mut self.win, &self.canvas)?;
+            // present() put buffers of its own where the shared ones were.
+            for d in self.direct.iter_mut().flatten() {
+                d.given = false;
+            }
+            let shown = conn::now_us();
+            if let Some(s) = self.stats.as_mut() {
+                // Sway's whole frame into ours, the damaged rows into the
+                // canvas, then the canvas compared with Strata's buffer
+                // (at most all of it) and what changed copied.
+                let rows = u64::from(bottom.min(ch).saturating_sub(top));
+                let bytes = u64::from(stride * h) + rows * u64::from(cw) * 4 * 2 + u64::from(cw * ch) * 4;
+                s.frame(shown, t - c.asked, copied - t, shown - copied, bytes);
+            }
         }
-        self.capture()
+        self.shown_frames = self.conn.frames(&self.win);
+        self.shown_at = now_ms();
+        // The first frame with the program's window in it ends start-up.
+        if !self.timed && !self.toplevels.is_empty() {
+            self.stage("first frame");
+            self.timed = true;
+            let parts: Vec<String> = self.stages.iter().map(|(w, ms)| format!("{w} {ms} ms")).collect();
+            slate_rt::eprintln!("strata-wl: timing: {}", parts.join(", "));
+        }
+        Ok(())
     }
 
     /// A Strata event; false when the window was closed.
@@ -644,7 +768,7 @@ impl Bridge {
             Event::Close { .. } => return Ok(false),
             Event::Paste { which, text, .. } => self.offer(which, text)?,
             // Taken by the client library itself.
-            Event::Release { .. } => {}
+            Event::Release { .. } | Event::Frame { .. } => {}
             // Linux programs aren't sent drops (ADR 0156).
             Event::Drop { .. } => {}
         }
@@ -652,25 +776,51 @@ impl Bridge {
     }
 }
 
-/// Whether `name` is a Wayland display socket's (`wayland-N`).
-fn display_socket(name: &[u8]) -> bool {
-    name.strip_prefix(b"wayland-").is_some_and(|n| !n.is_empty() && n.iter().all(u8::is_ascii_digit))
-}
-
-/// The compositor's socket: `$WAYLAND_DISPLAY` in the runtime directory,
-/// else the display socket there (the directory is the bridge's own, so
-/// the compositor, which names its socket itself, is the only one in it).
-fn socket_path(dir: &[u8]) -> Option<Vec<u8>> {
-    let join = |name: &[u8]| [dir, b"/", name].concat();
-    if let Some(d) = slate_rt::env::var(b"WAYLAND_DISPLAY")
-        && fs::exists(&join(&d))
-    {
-        return Some(join(&d));
+/// Connect to the compositor's socket in `dir`, waiting up to 30 s for it
+/// to appear: the directory is watched (inotify(7)), so the bridge
+/// connects as soon as the compositor has made it, not at its next look
+/// (M31 phase 2: it looked every 100 ms). Without a watch it looks every
+/// 5 ms.
+fn wait_compositor(dir: &[u8]) -> Result<Wl, String> {
+    use slate_abi::watch as w;
+    let watch = fs::watch_open(true).ok().filter(|&fd| {
+        let ok = fs::watch_add(fd, dir, w::CREATE | w::MOVED_TO).is_ok();
+        if !ok {
+            let _ = io::close(fd);
+        }
+        ok
+    });
+    let deadline = now_ms() + 30_000;
+    let mut last = String::from("no compositor's socket appeared");
+    let r = loop {
+        if let Some(path) = socket_path(dir) {
+            match Wl::connect(&path, Kind::Display) {
+                Ok(wl) => break Ok(wl),
+                // Made, not yet listening.
+                Err(e) => last = e,
+            }
+        }
+        let left = deadline - now_ms();
+        if left <= 0 {
+            break Err(last);
+        }
+        match watch {
+            Some(fd) => {
+                let mut p = [io::PollFd { fd, events: io::POLLIN, revents: 0 }];
+                // (Short, for a socket made but not yet listening.)
+                let _ = io::poll(&mut p, left.min(if last.contains("appeared") { 1000 } else { 5 }) as i32);
+                let mut buf = [0u8; 1024];
+                while io::read(fd, &mut buf).is_ok_and(|n| n > 0) {}
+            }
+            None => {
+                slate_rt::time::sleep_ns(5_000_000);
+            }
+        }
+    };
+    if let Some(fd) = watch {
+        let _ = io::close(fd);
     }
-    let mut names: Vec<Vec<u8>> =
-        fs::read_dir(dir).unwrap_or_default().into_iter().map(|e| e.name).filter(|n| display_socket(n)).collect();
-    names.sort();
-    names.first().map(|n| join(n))
+    r
 }
 
 pub fn main() -> i32 {
@@ -690,21 +840,13 @@ fn run() -> Result<(), String> {
     let _ = slate_rt::signal::set(slate_rt::signal::SIGPIPE, slate_rt::signal::Disposition::Ignore);
     let args = slate_rt::env::args();
     let title = args.get(1).map(|a| String::from(lossy(a))).unwrap_or_else(|| String::from("linux app"));
+    let t0 = conn::t0_ns();
     let mut conn = Connection::connect()?;
     let win = conn.create(&title, None)?;
+    let window_ms = conn::since_ms(t0);
     let dir = slate_rt::env::var(b"XDG_RUNTIME_DIR").ok_or("XDG_RUNTIME_DIR is not set")?;
-    // The compositor may still be starting.
-    let mut wl = Err(String::from("no compositor's socket appeared"));
-    for _ in 0..300 {
-        if let Some(path) = socket_path(&dir) {
-            wl = Wl::connect(&path);
-            if wl.is_ok() {
-                break;
-            }
-        }
-        slate_rt::time::sleep_ns(100_000_000);
-    }
-    let wl = wl?;
+    let wl = wait_compositor(&dir)?;
+    let connected_ms = conn::since_ms(t0);
     let canvas = win.canvas(slate_ui::Color::rgb(0));
     let want = (win.width, win.height);
     let mut b = Bridge {
@@ -729,6 +871,11 @@ fn run() -> Result<(), String> {
         synced: None,
         capture: None,
         shm_buffer: None,
+        direct: [None, None],
+        direct_ok: true,
+        want_frame: false,
+        shown_frames: 0,
+        shown_at: 0,
         retry_at: None,
         full: true,
         name: title.clone(),
@@ -746,6 +893,10 @@ fn run() -> Result<(), String> {
         idled: false,
         last_input: now_ms(),
         holding: false,
+        t0,
+        stages: alloc::vec![("window", window_ms), ("compositor", connected_ms)],
+        timed: false,
+        stats: None,
     };
     let registry = b.wl.id(Kind::Registry);
     b.wl.send(Out::new(1, 1).uint(registry))?;
@@ -776,11 +927,14 @@ fn run() -> Result<(), String> {
     // wl_keyboard.keymap's are).
     b.keyboard = b.wl.id(Kind::Keyboard);
     b.wl.send(Out::new(km.0, 0).uint(b.seat).uint(b.keyboard))?;
-    let layout = fs::read_file(b"/proc/cmdline")
-        .ok()
-        .and_then(|c| {
-            String::from(lossy(&c)).split_whitespace().find_map(|w| w.strip_prefix("slate.keyboard=")).map(String::from)
-        })
+    let cmdline = fs::read_file(b"/proc/cmdline").map(|c| String::from(lossy(&c))).unwrap_or_default();
+    if cmdline.split_whitespace().any(|w| w == "strata.stats") {
+        b.stats = Some(FrameStats::default());
+    }
+    let layout = cmdline
+        .split_whitespace()
+        .find_map(|w| w.strip_prefix("slate.keyboard="))
+        .map(String::from)
         .or_else(|| slate_rt::env::var(b"SLATE_KEYBOARD").map(|k| String::from(lossy(&k))))
         .unwrap_or_default();
     let mut text = keymap::keymap(slate_display::input::Layout::named(&layout)).into_bytes();
@@ -793,8 +947,10 @@ fn run() -> Result<(), String> {
     b.pointer = b.wl.id(Kind::Pointer);
     b.wl.send(Out::new(pm.0, 0).uint(b.seat).uint(b.pointer))?;
     b.roundtrip()?;
+    b.stage("bound");
     b.resize_output()?;
-    b.capture()?;
+    b.want_frame = true;
+    b.maybe_capture()?;
     slate_rt::eprintln!(
         "strata-wl: showing {title} ({}x{}; screencopy v{}{}{}{}{})",
         b.win.width,
@@ -810,6 +966,21 @@ fn run() -> Result<(), String> {
         // Idling is looked at each second.
         if b.idle != 0 {
             timeout = if timeout < 0 { 1000 } else { timeout.min(1000) };
+        }
+        // A frame wanted waits for Strata's word, or not long.
+        if b.want_frame && b.capture.is_none() {
+            let t = (b.shown_at + FRAME_WAIT_MS - now_ms()).clamp(0, FRAME_WAIT_MS) as i32;
+            timeout = if timeout < 0 { t } else { timeout.min(t) };
+        }
+        // A summary is looked for once frames stop.
+        if b.stats.as_ref().is_some_and(FrameStats::pending) {
+            let t = (crate::stats::STILL_US / 1000) as i32;
+            timeout = if timeout < 0 { t } else { timeout.min(t) };
+        }
+        if let Some(line) = b.stats.as_mut().and_then(|s| s.still(conn::now_us())) {
+            slate_rt::eprintln!("{line}");
+        }
+        if b.idle != 0 {
             let hold = held_off(b.idled, now_ms(), b.last_input);
             if hold != b.holding {
                 b.holding = hold;
@@ -828,22 +999,26 @@ fn run() -> Result<(), String> {
         }
         if b.retry_at.is_some_and(|at| now_ms() >= at) {
             b.retry_at = None;
-            b.capture()?;
         }
         if fds[0].revents != 0 {
             match b.wl.read() {
                 Ok(msgs) => b.handle(msgs)?,
-                Err(_) => return Ok(()),
+                Err(_) => {
+                    b.flush_stats();
+                    return Ok(());
+                }
             }
         }
         if fds[1].revents != 0 {
             b.conn.read()?;
             for e in b.conn.take_events() {
                 if !b.strata(e)? {
+                    b.flush_stats();
                     return Ok(());
                 }
             }
         }
+        b.maybe_capture()?;
     }
 }
 
@@ -860,11 +1035,18 @@ mod tests {
     }
 
     #[test]
-    fn sockets() {
-        assert!(display_socket(b"wayland-1"));
-        assert!(!display_socket(b"wayland-1.lock"));
-        assert!(!display_socket(b"wayland-"));
-        assert!(!display_socket(b"sway-ipc.0.30.sock"));
+    fn damage_and_direct_frames() {
+        assert_eq!(rows(&[], 600), (0, 600));
+        assert_eq!(rows(&[(0, 10, 5, 5), (3, 40, 9, 2)], 600), (10, 42));
+        assert_eq!(rows(&[(0, 590, 5, 50)], 600), (590, 600));
+        let (x, a, b) = (pixels::XRGB8888, pixels::ARGB8888, pixels::XBGR8888);
+        assert!(direct_fits((x, 800, 600, 3200), (800, 600)));
+        assert!(direct_fits((a, 800, 600, 3200), (800, 600)));
+        // Red and blue the other way, padded rows, another size.
+        assert!(!direct_fits((b, 800, 600, 3200), (800, 600)));
+        assert!(!direct_fits((x, 800, 600, 3328), (800, 600)));
+        assert!(!direct_fits((x, 800, 600, 3200), (801, 600)));
+        assert!(!direct_fits((x, 0, 0, 0), (0, 0)));
     }
 
     #[test]

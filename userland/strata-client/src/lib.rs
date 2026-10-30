@@ -9,6 +9,11 @@
 //! 0065): the frame is compared with the buffer shown last, and the
 //! other buffer is brought up to date with what it missed meanwhile.
 //!
+//! An app whose pixels another program writes (strata-wl, whose
+//! compositor copies its frames straight into them; M31) gives Strata its
+//! own buffers instead (`give`) and says which to show (`show`); Strata's
+//! `Frame` events say when what was shown is on the screen (`frames`).
+//!
 //! The socket is the abstract name in `STRATA_SOCKET` (Strata sets it for
 //! the programs it starts), or `strata-<uid>`.
 
@@ -58,6 +63,10 @@ struct Buffers {
     shown: Option<usize>,
     /// Where each buffer differs from the frame shown last.
     stale: [Rect; 2],
+    /// The app gave this buffer itself ([`Connection::give`]).
+    given: [bool; 2],
+    /// The frames Strata has said were shown.
+    frames: u64,
 }
 
 /// The smallest rectangle where the `w`-pixel-wide images `a` and `b`
@@ -138,6 +147,8 @@ impl Connection {
                         *h = false;
                     }
                 }
+                // What was shown is on the screen.
+                Next::Message(Event::Frame { win }) => self.buffers.entry(win).or_default().frames += 1,
                 Next::Message(e) => self.pending.push_back(e),
                 Next::Incomplete => return Ok(()),
                 Next::Broken => return Err("Strata sent something unreadable".into()),
@@ -265,15 +276,16 @@ impl Connection {
         // Strata kept both (it shouldn't): the older one, rather than none.
         let i = index.unwrap_or(0);
         let full = Rect::new(0, 0, cw as i32, ch as i32);
-        let fresh =
-            self.buffers.entry(w.id).or_default().shm[i].as_ref().is_none_or(|s| s.width != cw || s.height != ch);
+        let b = self.buffers.entry(w.id).or_default();
+        let fresh = b.given[i] || b.shm[i].as_ref().is_none_or(|s| s.width != cw || s.height != ch);
         if fresh {
             let shm = Shm::new(cw, ch, self.files)?;
             self.files += 1;
-            let r = Request::Buffer { win: w.id, width: cw, height: ch, index: i as u8 };
+            let r = Request::Buffer { win: w.id, width: cw, height: ch, index: i as u8, flags: 0 };
             net::send_fds(self.fd, &r.encode(), &[shm.fd]).map_err(|e| format!("sending the buffer: {e}"))?;
             let b = self.buffers.entry(w.id).or_default();
             b.shm[i] = Some(shm);
+            b.given[i] = false;
             b.stale[i] = full;
         }
         let b = self.buffers.entry(w.id).or_default();
@@ -295,6 +307,60 @@ impl Connection {
         b.shown = Some(i);
         let (x, y, width, height) = (new.x as u32, new.y as u32, new.w as u32, new.h as u32);
         self.send(&Request::Damage { win: w.id, x, y, width, height, index: i as u8 })
+    }
+}
+
+impl Connection {
+    /// Give Strata buffer `index` (0 or 1) of `w` from the app's own
+    /// shared memory `fd`: `width` x `height` pixels, rows `width` apart;
+    /// `opaque` when their fourth byte means nothing. Shown with
+    /// [`Connection::show`]; [`Connection::present`] puts a buffer of its
+    /// own in its place.
+    pub fn give(
+        &mut self,
+        w: &Window,
+        index: u8,
+        fd: i32,
+        width: u32,
+        height: u32,
+        opaque: bool,
+    ) -> Result<(), String> {
+        let i = usize::from(index.min(1));
+        let flags = if opaque { strata_proto::buffer::OPAQUE } else { 0 };
+        let r = Request::Buffer { win: w.id, width, height, index: i as u8, flags };
+        net::send_fds(self.fd, &r.encode(), &[fd]).map_err(|e| format!("sending the buffer: {e}"))?;
+        let b = self.buffers.entry(w.id).or_default();
+        b.shm[i] = None;
+        b.given[i] = true;
+        Ok(())
+    }
+
+    /// Whether Strata may still be reading buffer `index` of `w`.
+    pub fn held(&self, w: &Window, index: u8) -> bool {
+        self.buffers.get(&w.id).is_some_and(|b| b.held[usize::from(index.min(1))])
+    }
+
+    /// Show buffer `index` of `w`, given with [`Connection::give`]: these
+    /// rectangles of it (x, y, width, height) changed since the frame
+    /// shown before.
+    pub fn show(&mut self, w: &Window, index: u8, rects: &[(u32, u32, u32, u32)]) -> Result<(), String> {
+        let i = usize::from(index.min(1));
+        let b = self.buffers.entry(w.id).or_default();
+        b.held[i] = true;
+        b.shown = Some(i);
+        // At least one record, which is what shows the buffer.
+        let none = [(0, 0, 0, 0)];
+        let rects = if rects.is_empty() { &none[..] } else { rects };
+        let mut out = Vec::new();
+        for &(x, y, width, height) in rects {
+            out.extend(Request::Damage { win: w.id, x, y, width, height, index: i as u8 }.encode());
+        }
+        io::write_all(self.fd, &out).map_err(|e| format!("talking to Strata: {e}"))
+    }
+
+    /// How many of `w`'s frames Strata has said are on the screen.
+    pub fn frames(&self, w: &Window) -> u64 {
+        self.buffers.get(&w.id).map_or(0, |b| b.frames)
     }
 }
 

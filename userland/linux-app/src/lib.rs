@@ -9,6 +9,10 @@
 //!   of the runtime, on the terminal.
 //! - `slate-linux setup [--root DIR] [--mirror URL] [--from FILE|URL]
 //!   [PACKAGE...]` makes the runtime (see [`setup`]).
+//! - `slate-linux warm [--root DIR]` reads what starting a program needs
+//!   (Sway, Flatpak, bubblewrap and their libraries) into memory ahead of
+//!   time; Strata runs it when a session starts (M31 phase 2), so the
+//!   first program started after a boot starts as fast as the later ones.
 //!
 //! It is itself a Linux program, so it runs in the Linux domain (which
 //! needs Linux compatibility mode), and running programs needs no
@@ -41,6 +45,11 @@ pub mod setup;
 pub const DEFAULT_ROOT: &str = "/var/lib/slate/linux";
 /// The bridge, copied into the runtime's /tmp to run there.
 const BRIDGE: &[u8] = b"/usr/lib/slate/strata-wl";
+/// The Settings portal (M31 phase 4), copied there the same way.
+const PORTAL: &[u8] = b"/usr/lib/slate/slate-portal";
+/// What slate-portal makes in the runtime directory once it is on the
+/// bus, which the program waits for.
+pub const PORTAL_READY: &str = ".slate-portal-ready";
 /// SIGTERM (signal(7)).
 const SIGTERM: i32 = 15;
 
@@ -124,7 +133,8 @@ pub fn main() -> i32 {
                 Some("upgrade") => setup::upgrade(&args[1..]).map(|()| 0),
                 Some("rollback") => setup::rollback(&args[1..]).map(|()| 0),
                 Some("run") => parse(&args[1..]).and_then(|c| run_plain(&c)),
-                _ => Err("usage: slate-linux setup|upgrade|rollback|run ... (see /usr/share/doc/slate/guides/installing.md, \"Linux programs\")"
+                Some("warm") => warm(&args[1..]).map(|()| 0),
+                _ => Err("usage: slate-linux setup|upgrade|rollback|run|warm ... (see /usr/share/doc/slate/guides/installing.md, \"Linux programs\")"
                     .into()),
             }
     } else {
@@ -203,11 +213,19 @@ pub fn sway_config(script: &str) -> String {
 /// Where the kiosk script leaves the program's exit status.
 const KIOSK_STATUS: &str = "/tmp/.slate/status";
 
-/// The script Sway runs: the program, its exit status kept in
-/// `KIOSK_STATUS` (Sway's own is lost), then Sway's own end.
-pub fn kiosk_script(program: &[String]) -> String {
+/// The script Sway runs: the program (once the Settings portal is on the
+/// bus, waiting up to two seconds for it, when `portal`), its exit status
+/// kept in `KIOSK_STATUS` (Sway's own is lost), then Sway's own end.
+pub fn kiosk_script(program: &[String], portal: bool) -> String {
     let cmd: Vec<String> = program.iter().map(|a| quote(a)).collect();
-    format!("{}\necho $? > {KIOSK_STATUS}\nswaymsg exit\n", cmd.join(" "))
+    let wait = if portal {
+        format!(
+            "i=0; while [ ! -e \"$XDG_RUNTIME_DIR/{PORTAL_READY}\" ] && [ $i -lt 200 ]; do sleep 0.01; i=$((i+1)); done\n"
+        )
+    } else {
+        String::new()
+    };
+    format!("{wait}{}\necho $? > {KIOSK_STATUS}\nswaymsg exit\n", cmd.join(" "))
 }
 
 /// The status a kiosk run reports: 0 when the window was closed (the
@@ -302,7 +320,8 @@ fn enter(root: &str, uid: u32, gid: u32, user: &str, home: &str) -> Result<(), S
             }
         }
         mount(home, &point, "", fs::MS_BIND, "")?;
-    } else if fs::exists(format!("{root}{home}").as_bytes()) {
+    } else if !home.trim_end_matches('/').is_empty() && fs::exists(format!("{root}{home}").as_bytes()) {
+        // (A home of / would cover the runtime with the system's root.)
         mount(home, &format!("{root}{home}"), "", fs::MS_BIND, "")?;
     }
     fs::chroot(root.as_bytes()).map_err(|e| format!("entering {root}: {e}"))?;
@@ -349,13 +368,63 @@ fn run_plain(c: &Command) -> Result<i32, String> {
     if !fs::exists(format!("{}/etc/alpine-release", c.root).as_bytes()) {
         return Err(no_runtime(&c.root));
     }
+    let t0 = slate_rt::time::monotonic_ns();
     let (uid, gid, user, home) = person();
     enter(&c.root, uid, gid, &user, &home)?;
     let env = environment(uid, &home, &user, None);
+    // SLATE_LINUX_TIMING says how long entering took (M31 phase 1).
+    if slate_rt::env::var(b"SLATE_LINUX_TIMING").is_some() {
+        eprintln!(
+            "slate-linux: timing: runtime entered {} us",
+            slate_rt::time::monotonic_ns().saturating_sub(t0) / 1000
+        );
+    }
     let argv: Vec<Vec<u8>> = c.program.iter().map(|a| a.clone().into_bytes()).collect();
     let pid = spawn(&argv, &env, false)?;
     let status = process::wait(pid, 0).map(|(_, s)| s).unwrap_or(0);
     Ok(if status & 0x7f == 0 { (status >> 8) & 0xff } else { 128 + (status & 0x7f) })
+}
+
+/// What `slate-linux warm` runs in the runtime, where it has them: each
+/// program loads itself and its libraries and says its version.
+pub const WARM: &[&[&str]] =
+    &[&["/usr/bin/sway", "--version"], &["/usr/bin/flatpak", "--version"], &["/usr/bin/bwrap", "--version"]];
+
+/// `slate-linux warm`: [`WARM`]'s programs run once in the runtime, as
+/// the person, their output dropped. Nothing to do without a runtime.
+fn warm(args: &[String]) -> Result<(), String> {
+    let root = match args {
+        [flag, dir] if flag == "--root" => dir.clone(),
+        [] => String::from(DEFAULT_ROOT),
+        _ => return Err("usage: slate-linux warm [--root DIR]".into()),
+    };
+    if !fs::exists(format!("{root}/usr/bin/sway").as_bytes()) {
+        return Ok(());
+    }
+    let t0 = slate_rt::time::monotonic_ns();
+    let (uid, gid, user, home) = person();
+    enter(&root, uid, gid, &user, &home)?;
+    let env = environment(uid, &home, &user, None);
+    let null = fs::open(b"/dev/null", fs::O_WRONLY | fs::O_CLOEXEC, 0).ok();
+    for argv in WARM.iter().filter(|a| fs::exists(a[0].as_bytes())) {
+        let bytes: Vec<Vec<u8>> = argv.iter().map(|a| a.as_bytes().to_vec()).collect();
+        match process::fork() {
+            Ok(0) => {
+                if let Some(n) = null {
+                    let _ = process::dup2(n, 1);
+                    let _ = process::dup2(n, 2);
+                }
+                let _ = process::execve(&bytes[0], &bytes, &env);
+                process::exit_now(127)
+            }
+            Ok(pid) => {
+                let _ = process::wait(pid, 0);
+            }
+            Err(e) => return Err(format!("starting {}: {e}", argv[0])),
+        }
+    }
+    eprintln!("slate-linux: warm in {} ms", ms_since(t0));
+    Ok(())
 }
 
 /// The program's exit status from a wait status.
@@ -368,6 +437,97 @@ fn spawn_wait(argv: &[String], env: &[Vec<u8>]) -> Result<i32, String> {
     let argv: Vec<Vec<u8>> = argv.iter().map(|a| a.clone().into_bytes()).collect();
     let pid = spawn(&argv, env, false)?;
     Ok(exit_code(process::wait(pid, 0).map(|(_, s)| s).unwrap_or(0)))
+}
+
+/// Start `argv` (flatpak installing or updating) and wait: its status.
+/// Flatpak's plan and progress lines become slate-flatpak's own, one each
+/// time the whole moves on by a percent ([`flatpak::Progress`]); what else
+/// it says is passed on.
+fn spawn_progress(argv: &[String], env: &[Vec<u8>]) -> Result<i32, String> {
+    let mut env = env.to_vec();
+    env.push(b"FLATPAK_FANCY_OUTPUT=1".to_vec());
+    let (r, w) = process::pipe(fs::O_CLOEXEC).map_err(|e| format!("{e}"))?;
+    // (`--noninteractive` turns flatpak's plan and progress lines off; `-y`
+    // answers its questions, and standard input is empty, so none waits.)
+    let bytes: Vec<Vec<u8>> =
+        argv.iter().filter(|a| *a != "--noninteractive").map(|a| a.clone().into_bytes()).collect();
+    let null = fs::open(b"/dev/null", fs::O_RDONLY | fs::O_CLOEXEC, 0).ok();
+    let pid = match process::fork() {
+        Ok(0) => {
+            if let Some(n) = null {
+                let _ = process::dup2(n, 0);
+            }
+            let _ = process::dup2(w, 1);
+            let e = process::execve(&bytes[0], &bytes, &env);
+            eprintln!("slate-flatpak: {}: {e}", argv[0]);
+            process::exit_now(127)
+        }
+        Ok(pid) => pid,
+        Err(e) => return Err(format!("{e}")),
+    };
+    let _ = io::close(w);
+    if let Some(n) = null {
+        let _ = io::close(n);
+    }
+    let mut progress = flatpak::Progress::default();
+    let mut said = String::new();
+    let mut line = Vec::new();
+    let mut buf = [0u8; 4096];
+    let mut each = |l: &[u8]| {
+        let text = String::from(lossy(l));
+        if text.trim().is_empty() {
+            return;
+        }
+        if !progress.take(&text) {
+            slate_rt::println!("{}", text.trim_end());
+        } else if let Some(now) = progress.say()
+            && now.split('%').next() != said.split('%').next()
+        {
+            slate_rt::println!("slate-flatpak: {now}");
+            said = now;
+        }
+        // At once, not when a pipe's buffer fills: the Web Browser and App
+        // Center read the lines as they come.
+        let _ = io::flush_stdout();
+    };
+    while let Ok(n) = io::read(r, &mut buf) {
+        if n == 0 {
+            break;
+        }
+        for &b in &buf[..n] {
+            if b == b'\n' || b == b'\r' {
+                each(&line);
+                line.clear();
+            } else {
+                line.push(b);
+            }
+        }
+    }
+    each(&line);
+    let _ = io::close(r);
+    Ok(exit_code(process::wait(pid, 0).map(|(_, s)| s).unwrap_or(0)))
+}
+
+/// Flathub's catalog fetched again in the background, apart from this
+/// program, when it is missing or a day old (M31 phase 4): Strata takes
+/// the icons of apps that export only SVG from it.
+fn refresh_catalog(home: &str, env: &[Vec<u8>]) {
+    let at = format!("{home}/.local/share/flatpak/appstream/flathub/x86_64/active/appstream.xml.gz");
+    let fresh = fs::stat(at.as_bytes()).is_ok_and(|st| now_s() - st.mtime < 24 * 3600);
+    if fresh {
+        return;
+    }
+    let argv: Vec<Vec<u8>> = flatpak::argv::catalog().into_iter().map(String::into_bytes).collect();
+    if let Ok(0) = process::fork() {
+        let _ = process::setsid();
+        if let Ok(n) = fs::open(b"/dev/null", fs::O_RDWR | fs::O_CLOEXEC, 0) {
+            for fd in 0..3 {
+                let _ = process::dup2(n, fd);
+            }
+        }
+        let _ = process::execve(&argv[0], &argv, env);
+        process::exit_now(127);
+    }
 }
 
 /// Start `argv` and wait, with its standard output: (status, output).
@@ -614,7 +774,7 @@ fn flatpak_main(c: &flatpak::Cmd, system: bool, args: &[String]) -> Result<i32, 
                         return Ok(s);
                     }
                 }
-                spawn_wait(&argv::system(argv::install(from, ids)), &env)
+                spawn_progress(&argv::system(argv::install(from, ids)), &env)
             }
             Cmd::RemoteAdd(name, _) => spawn_wait(&argv::system(argv::add_remote(name, &description)), &env),
             Cmd::Remotes => spawn_wait(&argv::system(argv::remotes()), &env),
@@ -622,7 +782,7 @@ fn flatpak_main(c: &flatpak::Cmd, system: bool, args: &[String]) -> Result<i32, 
             Cmd::List => spawn_wait(&argv::system(argv::list()), &env),
             Cmd::Updates => spawn_wait(&argv::system(argv::updates()), &env),
             Cmd::Remove(ids) => spawn_wait(&argv::system(argv::remove(ids)), &env),
-            Cmd::Update(ids) => spawn_wait(&argv::system(argv::update(ids)), &env),
+            Cmd::Update(ids) => spawn_progress(&argv::system(argv::update(ids)), &env),
             _ => Err(String::from("--system: for your own apps only")),
         };
     }
@@ -634,7 +794,11 @@ fn flatpak_main(c: &flatpak::Cmd, system: bool, args: &[String]) -> Result<i32, 
                     return Ok(s);
                 }
             }
-            spawn_wait(&argv::install(from, ids), &env)
+            let status = spawn_progress(&argv::install(from, ids), &env)?;
+            if status == 0 && from == flatpak::FLATHUB_NAME {
+                refresh_catalog(&home, &env);
+            }
+            Ok(status)
         }
         Cmd::RemoteAdd(name, _) => spawn_wait(&argv::add_remote(name, &description), &env),
         Cmd::Remotes => spawn_wait(&argv::remotes(), &env),
@@ -696,7 +860,7 @@ fn flatpak_main(c: &flatpak::Cmd, system: bool, args: &[String]) -> Result<i32, 
                 let text = flatpak::record(&h, &apps, now_s());
                 let _ = fs::write_file(path.as_bytes(), text.as_bytes(), 0o644);
             }
-            spawn_wait(&argv::update(ids), &env)
+            spawn_progress(&argv::update(ids), &env)
         }
         Cmd::Rollback(id) => {
             let apps = match installed(&env)? {
@@ -948,12 +1112,35 @@ fn appimage_run(home: &str, args: &[String]) -> Result<i32, String> {
     run(&Command { root, program })
 }
 
+/// What the window is called: a Flatpak app's ID (`flatpak run [OPTION...]
+/// ID`), by which Strata finds its name and icon (M31 phase 4), else the
+/// program's name.
+pub fn window_name(program: &[String]) -> String {
+    let base = program[0].rsplit('/').next().unwrap_or(&program[0]);
+    if base == "flatpak"
+        && let Some(at) = program.iter().position(|a| a == "run")
+        && let Some(id) = program[at + 1..].iter().find(|a| !a.starts_with('-'))
+    {
+        return id.clone();
+    }
+    String::from(base)
+}
+
+/// Milliseconds since `t0` (ns on the monotonic clock).
+fn ms_since(t0: u64) -> u64 {
+    slate_rt::time::monotonic_ns().saturating_sub(t0) / 1_000_000
+}
+
 fn run(c: &Command) -> Result<i32, String> {
+    // Start-up's stages are timed from here (M31 phase 1): strata-wl
+    // tells the rest, from the same moment.
+    let t0 = slate_rt::time::monotonic_ns();
     if !fs::exists(format!("{}/usr/bin/sway", c.root).as_bytes()) {
         return Err(no_runtime(&c.root));
     }
     let (uid, gid, user, home) = person();
     let bridge = fs::read_file(BRIDGE).map_err(|e| format!("{}: {e}", lossy(BRIDGE)))?;
+    let portal = fs::read_file(PORTAL).ok();
     let keyboard = fs::read_file(b"/etc/slate/keyboard").ok().map(|k| String::from(lossy(&k).trim()));
     enter(&c.root, uid, gid, &user, &home)?;
     let xdg = format!("/tmp/xdg-{uid}");
@@ -963,17 +1150,50 @@ fn run(c: &Command) -> Result<i32, String> {
         fs::open(wl.as_bytes(), fs::O_WRONLY | fs::O_CREAT | fs::O_CLOEXEC, 0o755).map_err(|e| format!("{wl}: {e}"))?;
     io::write_all(fd, &bridge).map_err(|e| format!("{wl}: {e}"))?;
     let _ = io::close(fd);
-    let env = environment(uid, &home, &user, keyboard.as_deref());
-    let title = c.program[0].rsplit('/').next().unwrap_or(&c.program[0]);
-    create("/tmp/.slate/kiosk.sh", &kiosk_script(&c.program))?;
+    let mut env = environment(uid, &home, &user, keyboard.as_deref());
+    env.push(format!("SLATE_LINUX_T0={t0}").into_bytes());
+    eprintln!("slate-linux-app: timing: runtime entered {} ms", ms_since(t0));
+    let title = window_name(&c.program);
+    let title = title.as_str();
+    // A session bus of the program's own, with Slate's Settings portal on
+    // it (M31 phase 4): apps follow Strata's look. Where the runtime has
+    // D-Bus.
+    let mut helpers = Vec::new();
+    let with_portal = portal.is_some() && fs::exists(b"/usr/bin/dbus-daemon");
+    if let (true, Some(p)) = (with_portal, &portal) {
+        let address = format!("unix:path={xdg}/bus");
+        let daemon = [
+            b"/usr/bin/dbus-daemon".to_vec(),
+            b"--session".to_vec(),
+            b"--nofork".to_vec(),
+            b"--nopidfile".to_vec(),
+            format!("--address={address}").into_bytes(),
+        ];
+        env.push(format!("DBUS_SESSION_BUS_ADDRESS={address}").into_bytes());
+        helpers.push(spawn(&daemon, &env, true)?);
+        let at = "/tmp/slate-portal";
+        fs::write_file(at.as_bytes(), p, 0o755).map_err(|e| format!("{at}: {e}"))?;
+        helpers.push(spawn(&[at.as_bytes().to_vec()], &env, true)?);
+    }
+    create("/tmp/.slate/kiosk.sh", &kiosk_script(&c.program, with_portal))?;
     create("/tmp/.slate/sway.conf", &sway_config("/tmp/.slate/kiosk.sh"))?;
     let sway = [b"sway".to_vec(), b"--config".to_vec(), b"/tmp/.slate/sway.conf".to_vec()];
     let compositor = spawn(&sway, &env, true)?;
     let bridge = spawn(&[wl.as_bytes().to_vec(), title.as_bytes().to_vec()], &env, true)?;
-    // Whichever ends first, the other goes too.
-    let first = process::wait(-1, 0).map(|(p, _)| p).unwrap_or(compositor);
+    // Whichever of the compositor and the bridge ends first, the other
+    // goes too, and the bus with its portal.
+    let first = loop {
+        match process::wait(-1, 0) {
+            Ok((p, _)) if p == compositor || p == bridge => break p,
+            Ok(_) => {}
+            Err(_) => break compositor,
+        }
+    };
     let _ = process::kill(-compositor, SIGTERM);
     let _ = process::kill(bridge, SIGTERM);
+    for h in helpers {
+        let _ = process::kill(-h, SIGTERM);
+    }
     while process::wait(-1, 0).is_ok() {}
     // The program's own status, so a program that fails to start says so
     // (the Web Browser shows it, ADR 0115).
@@ -1026,12 +1246,36 @@ mod tests {
     }
 
     #[test]
+    fn window_names() {
+        let a = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(
+            window_name(&a(&["/usr/bin/flatpak", "run", "org.mozilla.firefox", "https://x"])),
+            "org.mozilla.firefox"
+        );
+        assert_eq!(
+            window_name(&a(&[
+                "/usr/bin/flatpak",
+                "run",
+                "--branch=stable",
+                "--command=lagrange",
+                "fi.skyjake.Lagrange"
+            ])),
+            "fi.skyjake.Lagrange"
+        );
+        assert_eq!(window_name(&a(&["/usr/bin/foot"])), "foot");
+        assert_eq!(window_name(&a(&["firefox", "run"])), "firefox");
+    }
+
+    #[test]
     fn kiosk() {
         let a = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
         assert_eq!(
-            kiosk_script(&a(&["firefox", "it's"])),
+            kiosk_script(&a(&["firefox", "it's"]), false),
             "'firefox' 'it'\\''s'\necho $? > /tmp/.slate/status\nswaymsg exit\n"
         );
+        let with = kiosk_script(&a(&["foot"]), true);
+        assert!(with.starts_with("i=0; while [ ! -e \"$XDG_RUNTIME_DIR/.slate-portal-ready\" ]"));
+        assert!(with.ends_with("'foot'\necho $? > /tmp/.slate/status\nswaymsg exit\n"));
         assert_eq!(kiosk_outcome(true, None), 0);
         assert_eq!(kiosk_outcome(false, Some("0\n")), 0);
         assert_eq!(kiosk_outcome(false, Some("127\n")), 127);

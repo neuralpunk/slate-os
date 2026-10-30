@@ -1,0 +1,26 @@
+# Arch Linux in a Linux box (ADR 0183). The bootstrap root is fetched when
+# the first Arch box is made, never shipped with SlateOS, and checked
+# against Arch's release signing key (Pierre Schmitz's, as on
+# archlinux.org/download); pacman then checks every package against
+# Arch's own keyring.
+title Arch Linux
+release 2026.10.01
+url https://geo.mirror.pkgbuild.com/iso/{release}/archlinux-bootstrap-{release}-x86_64.tar.zst
+fingerprint 3E80CA1A8B89F69CBA57D98A76A5EF9054449A5C
+key 983304635f915716092b06010401da470f010107407775dd6703a69a200b78fc1ddba06ede13db9407c77e518df8bb9d804d90c9bc
+strip 1
+mirror https://geo.mirror.pkgbuild.com
+shell /bin/bash
+# Packages from the mirror; pacman's download sandbox (its filesystem and
+# system call parts) needs Landlock, which Slate's kernel doesn't have:
+# the box is the sandbox.
+setup echo 'Server = {mirror}/$repo/os/$arch' > /etc/pacman.d/mirrorlist
+setup sed -i -e 's/^#DisableSandbox/DisableSandbox/' /etc/pacman.conf
+setup pacman-key --init
+setup pacman-key --populate archlinux
+# The keyring first: packages newer than the bootstrap may be signed by
+# packagers its keyring doesn't know yet.
+setup pacman -Sy --noconfirm --needed archlinux-keyring
+setup pacman -Syu --noconfirm --needed base-devel
+# What `slate-box clean` runs: pacman's cache of downloaded packages.
+clean pacman -Scc --noconfirm

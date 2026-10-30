@@ -1,4 +1,6 @@
-export PATH=/bin:/sbin:/usr/bin:/usr/sbin
+# The person's Linux programs (ADR 0183) come after SlateOS's own, so a
+# Linux program never stands in for a SlateOS command.
+export PATH=/bin:/sbin:/usr/bin:/usr/sbin:$HOME/.local/share/slate/linux/bin
 export PS1='\u@slate:\w\$ '
 # In Strata's terminal: graphite's prompt (docs/design/WM_STYLE.md section 7),
 # user@host in bold chalk, the path in `muted`, the sign in `inactive`:

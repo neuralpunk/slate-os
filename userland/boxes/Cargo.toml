@@ -1,0 +1,38 @@
+[package]
+name = "slate-boxes"
+description = "Linux boxes (ADR 0183): slate-boxd, which makes distributions' bases and boxes and maps their IDs, and slate-box, the person's command"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "slate-boxd"
+path = "src/bin/slate-boxd.rs"
+test = false
+bench = false
+
+[[bin]]
+name = "slate-host"
+path = "src/bin/slate-host.rs"
+test = false
+bench = false
+
+[[bin]]
+name = "slate-box"
+path = "src/bin/slate-box.rs"
+test = false
+bench = false
+
+[dependencies]
+slate-rt = { path = "../rt" }
+slate-quarry = { path = "../quarry" }
+slate-hash = { path = "../../libs/hash" }
+slate-pgp = { path = "../../libs/pgp" }
+slate-tls = { path = "../../libs/tls" }
+
+[lints]
+workspace = true

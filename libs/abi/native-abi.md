@@ -79,6 +79,7 @@ arguments, pointer and length.
 | 13 | `readdir` | fd, buf, len | bytes of `DirEntry` records, 0 at the end |
 | 14 | `flock` | fd, op (`flock::*`: `SHARED`, `EXCLUSIVE` or `UNLOCK`, maybe `NONBLOCK`) | flock(2) semantics; EWOULDBLOCK, EINTR |
 | 15 | `service` | op (`service::SET`: pid, name, len; `service::KILL`: name, len, signal) | init's service tags: SET tags one of init's children, KILL signals every tagged process and returns how many; EPERM unless the caller is pid 1 |
+| 16 | `box_tag` | name, len (at most 32 bytes: letters, digits, `-`, `_`, `.`) | tags the caller as a process of that Linux box, once: inherited on fork and exec, never changed or removed; `Box:` in /proc/PID/status; EEXIST when tagged already, EPERM outside the Slate domain |
 
 ### Paths
 
@@ -195,6 +196,16 @@ TLS variant II (the word at FS:0 points to itself).
 | 120 | `watch_open` | flags (`open::CLOEXEC`, `NONBLOCK`) | a watch descriptor; reading it gives events laid out as inotify(7)'s `struct inotify_event` |
 | 121 | `watch_add` | fd, dir, path, path length, mask (`watch::*`, inotify(7)'s values) | the watch's number |
 | 122 | `watch_remove` | fd, watch number | |
+
+### Namespaces
+
+Joined for Linux boxes, which Slate's own programs make.
+Confined apps get EPERM.
+
+| # | Call | Arguments | Result |
+|---|---|---|---|
+| 130 | `unshare` | flags (`ns::USER`, `MOUNT`, `PID`, `UTS`, `IPC`, `NET`) | unshare(2): the caller moves into new namespaces of those kinds; `PID` only affects its later children; a new user namespace needs a process of one thread |
+| 131 | `pivot_root` | new root, length, put old, length | pivot_root(2) in the caller's mount namespace: the new root (a mount point) becomes the root, the old one moves to put old |
 
 ## Structures
 

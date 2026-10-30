@@ -141,6 +141,7 @@ fn dispatch(n: u64, a: Args, frame: &mut TrapFrame) -> Result {
         nr::REBOOT => process::reboot(a),
         nr::KLOG => process::klog(a),
         nr::SERVICE => process::service(a),
+        nr::BOX_TAG => process::box_tag(a),
         nr::SETIDS_OF => process::setids_of(a),
         nr::UNLOCK => process::unlock(a),
         nr::CRYPT_OPEN => process::crypt_open(a),
@@ -196,6 +197,8 @@ fn dispatch(n: u64, a: Args, frame: &mut TrapFrame) -> Result {
         nr::WATCH_OPEN => files::watch_open(a),
         nr::WATCH_ADD => files::watch_add(a),
         nr::WATCH_REMOVE => files::watch_remove(a),
+        nr::UNSHARE => process::unshare(a),
+        nr::PIVOT_ROOT => super::linux::fs::pivot_root_at(&path(a, 0)?, &path(a, 2)?),
         _ => unimplemented(n),
     }
 }
@@ -260,7 +263,8 @@ fn path_args(n: u64) -> &'static [usize] {
         | nr::EXEC => &[1],
         nr::RENAME | nr::LINK => &[1, 4],
         nr::SYMLINK => &[0, 3],
-        nr::UMOUNT | nr::SETHOSTNAME => &[0],
+        nr::UMOUNT | nr::SETHOSTNAME | nr::BOX_TAG => &[0],
+        nr::PIVOT_ROOT => &[0, 2],
         _ => &[],
     }
 }

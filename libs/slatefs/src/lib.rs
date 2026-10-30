@@ -1029,6 +1029,59 @@ impl<D: Disk> Fs<D> {
         Ok(())
     }
 
+    /// How much of the disk subvolume `id` holds, in bytes: (all it
+    /// reaches, what is its own). A block is its own when it and every
+    /// node above it have one parent (counts in [`Free`]): deleting the
+    /// subvolume frees about that much (Linux boxes, ADR 0183's phase 6).
+    /// Commits first, so every node is on the disk.
+    pub fn usage(&mut self, id: u64) -> Result<(u64, u64)> {
+        if !self.read_only {
+            self.commit()?;
+        }
+        let root = match self.trees.get(&id).ok_or(Error::NotFound)? {
+            Child::Disk(p) => *p,
+            Child::Mem(_) => return Err(Error::Invalid),
+        };
+        let (mut all, mut own) = (0u64, 0u64);
+        let mut stack = vec![(root, true)];
+        while let Some((p, above_own)) = stack.pop() {
+            let mine = above_own && !self.free.extra.contains_key(&p.block);
+            all += 1;
+            own += u64::from(mine);
+            let node = {
+                let mut st = Store {
+                    disk: &mut self.disk,
+                    cache: &mut self.cache,
+                    unwritten: &self.unwritten,
+                    free: &mut self.free,
+                };
+                st.load(&p)?
+            };
+            match node.body {
+                Body::Internal(children) => {
+                    for (_, c) in children {
+                        if let Child::Disk(cp) = c {
+                            stack.push((cp, mine));
+                        }
+                    }
+                }
+                Body::Leaf(items) => {
+                    for (k, v) in items {
+                        if k.kind == KIND_EXTENT {
+                            let e = Extent::decode(&v)?;
+                            all += e.len();
+                            if mine {
+                                own += (e.start..e.start + e.len()).filter(|b| !self.free.extra.contains_key(b)).count()
+                                    as u64;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Ok((all * BLOCK as u64, own * BLOCK as u64))
+    }
+
     pub fn set_readonly(&mut self, id: u64, readonly: bool) -> Result<()> {
         let r = self.records.get_mut(&id).ok_or(Error::NotFound)?;
         r.readonly = readonly;

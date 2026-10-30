@@ -810,6 +810,9 @@ pub enum UserChange {
     Remove(String),
     /// `admin NAME` or `standard NAME`: in the wheel group or not.
     Admin(String, bool),
+    /// `desktop NAME` or `no-desktop NAME`: in the seat group or not,
+    /// that is, whether seatd gives them the screen and input for Strata.
+    Desktop(String, bool),
     /// `password NAME`; the password comes apart.
     Password(String),
     /// `name NAME FULL NAME...`: the account's full name (ADR 0110's
@@ -828,6 +831,7 @@ impl UserChange {
             UserChange::Add { name, .. } => name,
             UserChange::Remove(n)
             | UserChange::Admin(n, _)
+            | UserChange::Desktop(n, _)
             | UserChange::Password(n)
             | UserChange::Name(n, _)
             | UserChange::Expire(n)
@@ -871,11 +875,14 @@ pub fn parse_user_change(words: &str) -> Result<UserChange, String> {
         }
         "remove" if rest.is_empty() => Ok(UserChange::Remove(name)),
         "admin" | "standard" if rest.is_empty() => Ok(UserChange::Admin(name, op == "admin")),
+        "desktop" | "no-desktop" if rest.is_empty() => Ok(UserChange::Desktop(name, op == "desktop")),
         "password" if rest.is_empty() => Ok(UserChange::Password(name)),
         "name" => Ok(UserChange::Name(name, full(rest)?)),
         "expire" if rest.is_empty() => Ok(UserChange::Expire(name)),
         "unblock" if rest.is_empty() => Ok(UserChange::Unblock(name)),
-        _ => Err(format!("user={words}: add, remove, admin, standard, password, name, expire or unblock")),
+        _ => Err(format!(
+            "user={words}: add, remove, admin, standard, desktop, no-desktop, password, name, expire or unblock"
+        )),
     }
 }
 
@@ -893,7 +900,9 @@ fn check_user_change(c: &UserChange, caller: &[u8]) -> Result<(), String> {
         (_, Some(u)) if u.uid < people => return Err(format!("{name} is not a person's account")),
         _ => {}
     }
-    if matches!(c, UserChange::Remove(_) | UserChange::Admin(_, false)) && name.as_bytes() == caller {
+    if matches!(c, UserChange::Remove(_) | UserChange::Admin(_, false) | UserChange::Desktop(_, false))
+        && name.as_bytes() == caller
+    {
         return Err("another administrator must do that for your own account".into());
     }
     if matches!(c, UserChange::Unblock(_)) && name.as_bytes() != caller {
@@ -906,10 +915,11 @@ fn check_user_change(c: &UserChange, caller: &[u8]) -> Result<(), String> {
 fn change_user(c: &UserChange, password: &[u8]) -> Result<(), String> {
     match c {
         UserChange::Add { name, admin, full } => {
-            let mut cmd = alloc::vec!["/sbin/useradd", "-m", "-c", full.as_str()];
-            if *admin {
-                cmd.extend(["-G", "wheel"]);
-            }
+            // Everyone is in seat, so seatd gives them the screen and input
+            // (the installer's first account too, ADR 0035); administrators
+            // are in wheel.
+            let groups = if *admin { "wheel,seat" } else { "seat" };
+            let mut cmd = alloc::vec!["/sbin/useradd", "-m", "-c", full.as_str(), "-G", groups];
             cmd.push(name.as_str());
             run_action(&cmd)?;
             crate::accounts::set_password(name.as_bytes(), password)
@@ -917,6 +927,8 @@ fn change_user(c: &UserChange, password: &[u8]) -> Result<(), String> {
         UserChange::Remove(name) => run_action(&["/sbin/userdel", "-r", name]),
         UserChange::Admin(name, true) => run_action(&["/bin/gpasswd", "-a", name, "wheel"]),
         UserChange::Admin(name, false) => run_action(&["/bin/gpasswd", "-d", name, "wheel"]),
+        UserChange::Desktop(name, true) => run_action(&["/bin/gpasswd", "-a", name, "seat"]),
+        UserChange::Desktop(name, false) => run_action(&["/bin/gpasswd", "-d", name, "seat"]),
         UserChange::Password(name) => crate::accounts::set_password(name.as_bytes(), password),
         UserChange::Name(name, full) => run_action(&["/sbin/usermod", "-c", full, name]),
         UserChange::Expire(name) => run_action(&["/bin/chage", "-d", "0", name]),
@@ -2150,6 +2162,9 @@ mod tests {
         );
         assert_eq!(add("remove ada"), Ok(UserChange::Remove("ada".into())));
         assert_eq!(add("standard ada"), Ok(UserChange::Admin("ada".into(), false)));
+        assert_eq!(add("desktop bo"), Ok(UserChange::Desktop("bo".into(), true)));
+        assert_eq!(add("no-desktop bo"), Ok(UserChange::Desktop("bo".into(), false)));
+        assert!(add("desktop bo x").is_err());
         assert_eq!(add("password ada"), Ok(UserChange::Password("ada".into())));
         assert!(add("add ada root Ada").is_err());
         assert!(add("add Ada admin").is_err(), "names are lower case");

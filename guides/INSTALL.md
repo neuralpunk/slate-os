@@ -286,6 +286,7 @@ To get a root shell, run `su -` and type your own password.
 
 | Keys | What they do |
 |---|---|
+| super | the Applications menu (press it again to close it) |
 | super + enter | open a terminal |
 | super + space | the launcher: apps, and Lock screen, Log out, Restart, Power off and Roll back |
 | alt + tab | the next window |

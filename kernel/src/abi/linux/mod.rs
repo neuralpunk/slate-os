@@ -102,6 +102,7 @@ fn dispatch(nr: u64, a: Args, frame: &mut TrapFrame, traced: bool) -> Option<Res
         nr::WRITEV => io::writev(a),
         nr::IOCTL => io::ioctl(a),
         nr::SENDFILE => io::sendfile(a),
+        nr::SPLICE => io::splice(a),
         nr::EVENTFD => fs::eventfd(a),
         nr::EVENTFD2 => fs::eventfd2(a),
         nr::INOTIFY_INIT => fs::inotify_init(a),
@@ -157,6 +158,7 @@ fn dispatch(nr: u64, a: Args, frame: &mut TrapFrame, traced: bool) -> Option<Res
         nr::CHMOD => fs::chmod(a),
         nr::FCHMOD => fs::fchmod(a),
         nr::FCHMODAT => fs::fchmodat(a),
+        nr::FCHMODAT2 => fs::fchmodat2(a),
         nr::CHOWN => fs::chown(a),
         nr::FCHOWN => fs::fchown(a),
         nr::LCHOWN => fs::lchown(a),
@@ -351,6 +353,12 @@ fn dispatch(nr: u64, a: Args, frame: &mut TrapFrame, traced: bool) -> Option<Res
 
         _ => unimplemented(nr),
     };
+    // What a Linux box's programs are refused is logged (ADR 0183).
+    if let Err(e) = &r
+        && (*e == errno::EPERM || *e == errno::EACCES)
+    {
+        crate::proc::note_box_refusal(nr::name(nr).unwrap_or("?"), *e);
+    }
     if traced {
         trace::log(nr, &a, &r);
     }

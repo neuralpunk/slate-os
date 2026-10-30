@@ -1,0 +1,1009 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>SlateOS Guide</title>
+<meta name="description" content="The SlateOS guide: installing it, the Strata desktop and its apps, Settings, the command line, updates, security, networking, Linux programs and Linux software from source.">
+<meta name="theme-color" content="#121211">
+<link rel="canonical" href="https://neuralpunk.github.io/slate-os/guide.html">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="SlateOS">
+<meta property="og:title" content="The SlateOS guide">
+<meta property="og:description" content="Everything SlateOS does, and how to use it: from the USB stick to building Linux software from source.">
+<meta property="og:url" content="https://neuralpunk.github.io/slate-os/guide.html">
+<meta property="og:image" content="https://neuralpunk.github.io/slate-os/assets/og-image.jpg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,300;1,400;1,500&family=DM+Mono:ital,wght@0,300;0,400;0,500;1,400&family=Host+Grotesk:ital,wght@0,300..800;1,300..800&display=swap">
+<style>
+/* The guide: the website's graphite palette and type, set as a long manual.
+   A chapter rail on the left (a drawer on phones), the text in a reading column. */
+:root {
+  --desktop: #121211; --well: #161615; --window: #1A1A19; --overlay: #1C1C1B;
+  --header: #222221; --divider: #262625; --raised: #262625; --active: #2A2A28;
+  --border: #333331; --border-strong: #3A3A38;
+  --chalk: #E3E1DC; --focus: #A9A7A2; --text-1: #C9C7C2; --text-2: #BEBCB7; --text-3: #A3A29F;
+  --text-4: #9B9994; --muted: #85837E; --inactive: #75736F; --decor: #5F5D59;
+  --sage: #A4B38C; --sage-t: #2D2F29; --sage-b: #4A5041;
+  --moss: #8FB2A4; --moss-t: #2A2F2C; --moss-b: #434F4A;
+  --clay: #D0907E; --clay-t: #332B27; --clay-b: #5A433C;
+  --steel: #93A7BA; --steel-t: #282C30; --steel-b: #3F4851;
+  --ochre: #CFB07A; --ochre-t: #302C25; --ochre-b: #554A38;
+
+  --f-display: "Cormorant Garamond", Cormorant, Garamond, "Times New Roman", serif;
+  --f-sans: "Host Grotesk", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --f-mono: "DM Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+  --frame: 1320px;
+  --gutter-l: max(16px, env(safe-area-inset-left, 0px));
+  --gutter-r: max(16px, env(safe-area-inset-right, 0px));
+  --ease: cubic-bezier(.2, .7, .1, 1);
+  color-scheme: dark;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+html { background: var(--desktop); scroll-behavior: smooth; scroll-padding-top: 84px; }
+img { max-width: 100%; height: auto; display: block; }
+body {
+  margin: 0; background: var(--desktop); color: var(--text-2);
+  font: 400 16.5px/1.7 var(--f-sans);
+  -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; overflow-x: hidden;
+}
+::selection { background: var(--chalk); color: var(--desktop); }
+a { color: var(--chalk); text-decoration-color: var(--decor); text-underline-offset: 3px; }
+a:hover { text-decoration-color: var(--focus); }
+button { font: inherit; color: inherit; }
+:focus-visible { outline: 1px solid var(--chalk); outline-offset: 3px; border-radius: 4px; }
+h1, h2, h3, h4 { text-wrap: balance; font-weight: 400; margin: 0; color: var(--chalk); }
+p { margin: 0 0 1em; text-wrap: pretty; }
+body::after {
+  content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 100; opacity: .05;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='220' height='220'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 .9  0 0 0 0 .88  0 0 0 0 .85  0 0 0 1 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+}
+.frame { max-width: calc(var(--frame) + 64px); margin-inline: auto; padding-left: var(--gutter-l); padding-right: var(--gutter-r); }
+@media (min-width: 900px) { .frame { padding-left: max(32px, env(safe-area-inset-left, 0px)); padding-right: max(32px, env(safe-area-inset-right, 0px)); } }
+.serif { font-family: var(--f-display); font-style: italic; font-weight: 400; }
+.mono { font-family: var(--f-mono); }
+.ruled { display: flex; align-items: center; gap: 12px; font: 400 12px/1 var(--f-mono); letter-spacing: .06em; color: var(--muted); text-transform: lowercase; }
+.ruled::after { content: ""; flex: 1; height: 1px; background: var(--active); order: 1; }
+.ruled b { order: 2; font-weight: 400; color: var(--text-4); }
+
+/* ── Navigation ── */
+.nav { position: fixed; top: env(safe-area-inset-top, 0px); left: 0; right: 0; z-index: 70; background: rgba(18, 18, 17, .82); backdrop-filter: blur(14px) saturate(1.1); -webkit-backdrop-filter: blur(14px); border-bottom: 1px solid var(--divider); }
+.nav .frame { display: flex; align-items: center; gap: 22px; height: 64px; }
+.brand { display: flex; align-items: center; gap: 10px; text-decoration: none; color: var(--chalk); font: 500 15px/1 var(--f-sans); letter-spacing: -.01em; }
+.brand svg { width: 22px; height: 22px; }
+.brand small { font: 400 11.5px/1 var(--f-mono); color: var(--muted); letter-spacing: .04em; }
+.nav-links { display: flex; gap: 20px; margin-left: auto; list-style: none; padding: 0; margin-block: 0; }
+.nav-links a { text-decoration: none; font-size: 13.5px; color: var(--text-3); transition: color .2s; }
+.nav-links a:hover, .nav-links a[aria-current] { color: var(--chalk); }
+.nav-gh { display: inline-flex; align-items: center; gap: 8px; height: 31px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--border-strong); text-decoration: none; font: 400 11.5px/1 var(--f-mono); color: var(--text-1); white-space: nowrap; }
+.nav-gh svg { width: 13px; height: 13px; }
+.nav-gh:hover { border-color: var(--focus); color: var(--chalk); }
+.toc-toggle { display: none; align-items: center; gap: 8px; height: 31px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--border-strong); background: transparent; font: 400 11.5px/1 var(--f-mono); color: var(--text-1); cursor: pointer; margin-left: auto; }
+.toc-toggle svg { width: 13px; height: 13px; }
+@media (max-width: 1080px) { .nav-links { display: none; } .toc-toggle { display: inline-flex; } }
+@media (max-width: 480px) { .nav-gh span { display: none; } }
+
+/* ── Header ── */
+.head { padding-top: calc(64px + clamp(56px, 8vw, 110px)); padding-bottom: clamp(40px, 5vw, 64px); border-bottom: 1px solid var(--divider); position: relative; overflow: hidden; isolation: isolate; }
+.head::before { content: ""; position: absolute; inset: 0; z-index: -1; background: url("assets/wall-small.webp") 70% 40% / cover no-repeat; opacity: .22; mask-image: linear-gradient(180deg, #000 0%, transparent 100%); -webkit-mask-image: linear-gradient(180deg, #000 0%, transparent 100%); }
+.head h1 { font: 300 clamp(3rem, 8vw, 6.4rem)/.95 var(--f-sans); letter-spacing: -.05em; margin-top: 28px; }
+.head h1 .serif { font-weight: 300; letter-spacing: -.01em; color: var(--text-1); }
+.head .lede { margin-top: 26px; max-width: 40em; font-size: clamp(16.5px, 1.4vw, 19px); color: var(--text-3); }
+.head .lede strong { color: var(--chalk); font-weight: 500; }
+.head-meta { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 30px; }
+.chip { display: inline-flex; align-items: center; gap: 8px; height: 30px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--border); font: 400 11.5px/1 var(--f-mono); color: var(--text-4); white-space: nowrap; }
+.chip i { width: 6px; height: 6px; border-radius: 50%; background: var(--ochre); display: block; }
+.search { margin-top: 34px; max-width: 560px; position: relative; }
+.search svg { position: absolute; left: 16px; top: 50%; width: 15px; height: 15px; transform: translateY(-50%); color: var(--muted); pointer-events: none; }
+.search input { width: 100%; height: 50px; border-radius: 999px; border: 1px solid var(--border-strong); background: var(--well); color: var(--chalk); font: 400 15px var(--f-sans); padding: 0 18px 0 44px; }
+.search input::placeholder { color: var(--muted); }
+.search input:focus { outline: none; border-color: var(--focus); }
+.search-note { margin-top: 10px; font: 400 12px var(--f-mono); color: var(--muted); min-height: 1.2em; }
+
+/* ── Layout: rail and reading column ── */
+.layout { display: grid; grid-template-columns: 250px minmax(0, 1fr); gap: clamp(32px, 5vw, 72px); padding-block: clamp(40px, 6vw, 72px) 96px; }
+@media (max-width: 1080px) { .layout { grid-template-columns: minmax(0, 1fr); } }
+.rail { position: sticky; top: 88px; align-self: start; max-height: calc(100vh - 110px); overflow: auto; padding-right: 6px; scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+.rail h6 { margin: 0 0 12px; font: 400 11.5px var(--f-mono); color: var(--muted); letter-spacing: .06em; }
+.rail ol { list-style: none; margin: 0 0 22px; padding: 0; display: grid; gap: 2px; }
+.rail a { display: flex; gap: 10px; align-items: baseline; padding: 5px 10px; border-radius: 8px; text-decoration: none; font-size: 14px; color: var(--text-4); line-height: 1.35; }
+.rail a span { font: 400 11px var(--f-mono); color: var(--decor); min-width: 1.6em; }
+.rail a:hover { color: var(--chalk); background: var(--window); }
+.rail a.on { color: var(--chalk); background: var(--active); }
+.rail a.on span { color: var(--focus); }
+.rail a.dim { opacity: .35; }
+@media (max-width: 1080px) {
+  .rail { position: fixed; z-index: 60; top: 64px; left: 0; bottom: 0; width: min(320px, 86vw); align-self: auto; height: calc(100dvh - 64px); max-height: none; background: var(--window); border-right: 1px solid var(--border); padding: 22px 16px 40px; transform: translateX(-102%); transition: transform .3s var(--ease); }
+  .rail.open { transform: none; box-shadow: 30px 0 60px rgba(0,0,0,.5); }
+}
+.scrim { display: none; }
+@media (max-width: 1080px) { .scrim.open { display: block; position: fixed; inset: 64px 0 0; z-index: 55; background: rgba(0,0,0,.45); } }
+
+article { max-width: 780px; min-width: 0; }
+.part { font: 400 12px/1 var(--f-mono); letter-spacing: .08em; color: var(--muted); text-transform: lowercase; margin: 72px 0 0; display: flex; gap: 12px; align-items: center; }
+.part::after { content: ""; flex: 1; height: 1px; background: var(--active); }
+.part:first-child { margin-top: 0; }
+section.ch { padding-top: 40px; }
+section.ch[hidden], .part[hidden] { display: none; }
+.ch > h2 { font: 400 clamp(1.9rem, 3.4vw, 2.6rem)/1.1 var(--f-sans); letter-spacing: -.03em; display: flex; gap: 16px; align-items: baseline; margin-bottom: 18px; }
+.ch > h2 .n { font: 400 14px/1 var(--f-mono); color: var(--decor); letter-spacing: 0; flex: none; }
+.ch > h2 .serif { color: var(--text-1); }
+.ch h3 { font: 500 1.15rem/1.3 var(--f-sans); letter-spacing: -.01em; margin: 34px 0 10px; }
+.ch h4 { font: 500 1rem/1.3 var(--f-sans); color: var(--text-1); margin: 22px 0 8px; }
+.ch .intro { font-size: 1.08rem; color: var(--text-3); }
+.ch ul, .ch ol { padding-left: 1.3em; margin: 0 0 1.1em; }
+.ch li { margin: .35em 0; }
+.ch li::marker { color: var(--decor); }
+.ch strong { color: var(--chalk); font-weight: 500; }
+code { font: 400 .88em/1.4 var(--f-mono); color: var(--chalk); background: var(--window); border: 1px solid var(--divider); border-radius: 5px; padding: .08em .38em; overflow-wrap: anywhere; }
+kbd { font: 400 .82em/1 var(--f-mono); color: var(--chalk); background: var(--header); border: 1px solid var(--border-strong); border-bottom-width: 2px; border-radius: 5px; padding: .22em .5em; white-space: nowrap; }
+.ui { color: var(--chalk); font-weight: 500; }
+
+/* Command blocks */
+.cmd { position: relative; margin: 14px 0 20px; border: 1px solid var(--border); border-radius: 12px; background: var(--well); overflow: hidden; }
+.cmd pre { margin: 0; padding: 16px 18px; overflow-x: auto; font: 400 13.5px/1.65 var(--f-mono); color: var(--text-1); }
+.cmd pre .c { color: var(--muted); }
+.cmd pre.wrap { white-space: pre-wrap; overflow-wrap: anywhere; }
+.cmd pre .p { color: var(--decor); user-select: none; }
+.cmd .bar { display: flex; justify-content: space-between; align-items: center; padding: 7px 10px 7px 16px; border-bottom: 1px solid var(--divider); background: var(--window); font: 400 11px var(--f-mono); color: var(--muted); letter-spacing: .04em; }
+.copy { border: 1px solid var(--border); background: transparent; color: var(--text-3); border-radius: 6px; height: 24px; padding: 0 10px; font: 400 11px var(--f-mono); cursor: pointer; }
+.copy:hover { color: var(--chalk); border-color: var(--focus); }
+.copy.done { color: var(--sage); border-color: var(--sage-b); }
+
+/* Callouts: colour carries meaning, the label says it too */
+.note { margin: 18px 0 22px; padding: 14px 18px 14px 16px; border-radius: 12px; border: 1px solid var(--steel-b); background: var(--steel-t); display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 12px; font-size: 15.5px; }
+.note svg { width: 16px; height: 16px; margin-top: 4px; color: var(--steel); }
+.note p:last-child, .note ul:last-child { margin-bottom: 0; }
+.note b.k { display: block; font: 400 11px/1 var(--f-mono); letter-spacing: .08em; text-transform: lowercase; color: var(--steel); margin: 3px 0 8px; }
+.note.tip { border-color: var(--sage-b); background: var(--sage-t); } .note.tip svg, .note.tip b.k { color: var(--sage); }
+.note.warn { border-color: var(--ochre-b); background: var(--ochre-t); } .note.warn svg, .note.warn b.k { color: var(--ochre); }
+.note.danger { border-color: var(--clay-b); background: var(--clay-t); } .note.danger svg, .note.danger b.k { color: var(--clay); }
+
+/* Steps */
+ol.steps { list-style: none; padding: 0; counter-reset: s; margin: 16px 0 22px; display: grid; gap: 12px; }
+ol.steps > li { counter-increment: s; display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 14px; margin: 0; padding: 14px 16px; border: 1px solid var(--divider); border-radius: 12px; background: var(--well); }
+ol.steps > li::before { content: counter(s); width: 28px; height: 28px; border-radius: 50%; border: 1px solid var(--border-strong); display: grid; place-items: center; font: 400 12px var(--f-mono); color: var(--text-1); }
+ol.steps > li > div > :last-child { margin-bottom: 0; }
+ol.steps > li .cmd { margin-bottom: 4px; }
+
+/* Tables */
+.tbl { margin: 14px 0 22px; border: 1px solid var(--border); border-radius: 12px; overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 14.5px; }
+th { text-align: left; font: 400 11.5px var(--f-mono); color: var(--muted); letter-spacing: .05em; padding: 11px 14px; background: var(--window); border-bottom: 1px solid var(--border); white-space: nowrap; }
+td { padding: 10px 14px; border-bottom: 1px solid var(--divider); vertical-align: top; }
+tr:last-child td { border-bottom: 0; }
+td:first-child { color: var(--chalk); }
+td code, th code { white-space: nowrap; }
+
+/* App cards */
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; margin: 16px 0 24px; }
+.card { border: 1px solid var(--divider); border-radius: 12px; background: var(--well); padding: 16px 16px 14px; }
+.card h4 { margin: 0 0 6px; color: var(--chalk); }
+.card p { margin: 0; font-size: 14.5px; color: var(--text-3); line-height: 1.6; }
+
+/* Screenshots */
+figure { margin: 20px 0 26px; }
+figure img { border-radius: 12px; border: 1px solid var(--border); background: var(--window); }
+figcaption { margin-top: 10px; font: 400 12px/1.5 var(--f-mono); color: var(--muted); }
+.duo { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; align-items: start; }
+.duo.shots img { aspect-ratio: 4 / 3; object-fit: contain; background: var(--well); }
+@media (max-width: 640px) { .duo { grid-template-columns: 1fr; } }
+
+.empty { display: none; padding: 40px 0; color: var(--muted); font: 400 14px var(--f-mono); }
+.empty.show { display: block; }
+.top-link { display: inline-flex; gap: 8px; align-items: center; margin-top: 64px; font: 400 12px var(--f-mono); color: var(--muted); text-decoration: none; }
+.top-link:hover { color: var(--chalk); }
+
+footer { border-top: 1px solid var(--divider); padding-block: 40px calc(40px + env(safe-area-inset-bottom, 0px)); }
+.foot { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 18px; font: 400 12px var(--f-mono); color: var(--muted); }
+.foot a { color: var(--text-3); text-decoration: none; margin-right: 18px; }
+.foot a:hover { color: var(--chalk); }
+
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } * { transition-duration: 0s !important; } }
+@media print {
+  .nav, .rail, .search, .search-note, .copy, .top-link, body::after { display: none !important; }
+  .layout { display: block; } body { background: #fff; color: #222; } .ch > h2, .ch h3, .ch strong, code, td:first-child { color: #000; }
+}
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="mark" viewBox="0 0 32 32">
+      <polygon points="16,3 29,9.5 16,16 3,9.5" fill="currentColor"/>
+      <polygon points="3,9.5 3,12.5 16,19 16,16" fill="currentColor" opacity=".6"/>
+      <polygon points="29,9.5 29,12.5 16,19 16,16" fill="currentColor" opacity=".35"/>
+      <polyline points="3,17.5 16,24 29,17.5" fill="none" stroke="currentColor" stroke-width="1.6" opacity=".45"/>
+      <polyline points="3,23.5 16,30 29,23.5" fill="none" stroke="currentColor" stroke-width="1.6" opacity=".2"/>
+    </symbol>
+    <symbol id="i-gh" viewBox="0 0 16 16"><circle cx="4.4" cy="3.6" r="1.6" fill="none" stroke="currentColor" stroke-width="1.3"/><circle cx="4.4" cy="12.4" r="1.6" fill="none" stroke="currentColor" stroke-width="1.3"/><circle cx="11.6" cy="5.2" r="1.6" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M4.4 5.2v5.6M11.6 6.8c0 2.6-3.6 2.4-6.4 4.2" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></symbol>
+    <symbol id="i-search" viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.6" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="m10.4 10.4 3.6 3.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></symbol>
+    <symbol id="i-list" viewBox="0 0 16 16"><path d="M2.5 4h11M2.5 8h11M2.5 12h7" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></symbol>
+    <symbol id="i-info" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.2" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M8 7.2v4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><circle cx="8" cy="4.9" r=".85" fill="currentColor"/></symbol>
+    <symbol id="i-check" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.2" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M5.2 8.2 7.2 10.2 10.9 6" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-warn" viewBox="0 0 16 16"><path d="M8 1.9 14.6 13.6H1.4z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M8 6.2v3.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><circle cx="8" cy="11.7" r=".85" fill="currentColor"/></symbol>
+    <symbol id="i-up" viewBox="0 0 16 16"><path d="M8 13V3M4 7l4-4 4 4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  </defs>
+</svg>
+
+<nav class="nav" aria-label="Main">
+  <div class="frame">
+    <a class="brand" href="index.html" aria-label="SlateOS home"><svg><use href="#mark"/></svg>SlateOS <small>guide</small></a>
+    <ul class="nav-links">
+      <li><a href="index.html">Home</a></li>
+      <li><a href="#install">Install</a></li>
+      <li><a href="#desktop">Desktop</a></li>
+      <li><a href="#apps">Apps</a></li>
+      <li><a href="#settings">Settings</a></li>
+      <li><a href="#linux">Linux programs</a></li>
+      <li><a href="#source">From source</a></li>
+      <li><a href="#trouble">Help</a></li>
+    </ul>
+    <button class="toc-toggle" type="button" id="toc-toggle" aria-controls="rail" aria-expanded="false"><svg><use href="#i-list"/></svg>Chapters</button>
+    <a class="nav-gh" href="https://github.com/neuralpunk/slate-os" aria-label="SlateOS on GitHub"><svg><use href="#i-gh"/></svg><span>GitHub</span></a>
+  </div>
+</nav>
+
+<header class="head" id="top-of-guide">
+  <div class="frame">
+    <div class="ruled">the slateos guide<b>version 0.1.3</b></div>
+    <h1>How to use <span class="serif">SlateOS.</span></h1>
+    <p class="lede">Everything SlateOS does, and how to use it: from writing the USB stick to the <strong>Strata desktop</strong>, its <strong>apps</strong> and <strong>Settings</strong>, the <strong>command line</strong>, <strong>updates you can undo</strong>, <strong>security</strong>, <strong>Linux apps</strong>, and building <strong>Linux software from source</strong> right in SlateOS's own terminal.</p>
+    <div class="head-meta">
+      <span class="chip"><i></i>alpha software</span>
+      <span class="chip">26 chapters</span>
+      <span class="chip">x86-64 · UEFI or BIOS</span>
+    </div>
+    <div class="search" role="search">
+      <svg><use href="#i-search"/></svg>
+      <input id="q" type="search" placeholder="Search the guide: firewall, rollback, pacman, Bluetooth…" aria-label="Search the guide" autocomplete="off">
+    </div>
+    <div class="search-note" id="search-note" aria-live="polite"></div>
+  </div>
+</header>
+
+<div class="scrim" id="scrim"></div>
+
+<div class="frame layout">
+  <aside class="rail" id="rail" aria-label="Chapters">
+    <h6>get started</h6>
+    <ol>
+      <li><a href="#welcome"><span>01</span>Welcome</a></li>
+      <li><a href="#need"><span>02</span>What you need</a></li>
+      <li><a href="#medium"><span>03</span>The install medium</a></li>
+      <li><a href="#try"><span>04</span>Starting and trying it</a></li>
+      <li><a href="#install"><span>05</span>Installing</a></li>
+      <li><a href="#first"><span>06</span>The first start</a></li>
+    </ol>
+    <h6>everyday use</h6>
+    <ol>
+      <li><a href="#desktop"><span>07</span>The Strata desktop</a></li>
+      <li><a href="#keys"><span>08</span>Keyboard shortcuts</a></li>
+      <li><a href="#apps"><span>09</span>The apps</a></li>
+      <li><a href="#files"><span>10</span>Files and disks</a></li>
+      <li><a href="#settings"><span>11</span>Settings</a></li>
+      <li><a href="#terminal"><span>12</span>The terminal and command line</a></li>
+    </ol>
+    <h6>the system</h6>
+    <ol>
+      <li><a href="#accounts"><span>13</span>Accounts and administration</a></li>
+      <li><a href="#software"><span>14</span>Installing software</a></li>
+      <li><a href="#updates"><span>15</span>Updates and rollback</a></li>
+      <li><a href="#security"><span>16</span>Security</a></li>
+      <li><a href="#encryption"><span>17</span>Your encrypted disk</a></li>
+      <li><a href="#network"><span>18</span>Network and SSH</a></li>
+      <li><a href="#bluetooth"><span>19</span>Bluetooth</a></li>
+      <li><a href="#displays"><span>20</span>Displays and graphics</a></li>
+    </ol>
+    <h6>linux software</h6>
+    <ol>
+      <li><a href="#linux"><span>21</span>Linux programs and apps</a></li>
+      <li><a href="#flatpak"><span>22</span>Flatpak, AppImages, the web</a></li>
+      <li><a href="#source"><span>23</span>Linux software from source</a></li>
+    </ol>
+    <h6>reference</h6>
+    <ol>
+      <li><a href="#boot"><span>24</span>Several systems on one PC</a></li>
+      <li><a href="#trouble"><span>25</span>When something goes wrong</a></li>
+      <li><a href="#cheat"><span>26</span>Command cheat sheet</a></li>
+    </ol>
+  </aside>
+
+  <article id="guide">
+
+<!-- ═════════ GET STARTED ═════════ -->
+<div class="part">get started</div>
+
+<section class="ch" id="welcome">
+  <h2><span class="n">01</span>Welcome to <span class="serif">SlateOS</span></h2>
+  <p class="intro">SlateOS is an operating system for 64-bit PCs, written from scratch in Rust. Its kernel, its desktop (Strata), its shell, its tools and its apps are all its own: there is no Linux, BSD or UNIX code inside. Yet it runs Linux software unmodified, because it speaks Linux's system-call interface, implemented from the documentation.</p>
+  <p>It has two sides, and you choose how much of each you want:</p>
+  <ul>
+    <li><strong>Slate mode</strong>, the default: a signed, read-only system that changes only through its package manager and updater, with every change undoable, and programs that get only the permissions they're given.</li>
+    <li><strong>Linux compatibility</strong>, one switch away: Linux programs, desktop apps from Flathub, Firefox, and a whole Linux system of your own for building software from source, each kept apart from SlateOS.</li>
+  </ul>
+  <div class="note danger"><svg><use href="#i-warn"/></svg><div><b class="k">alpha software</b><p>SlateOS is early and changing quickly. Expect bugs, crashes, missing features and data loss, and changes between releases that break what worked before. Try it in a virtual machine or on a spare disk, and back up first. Don't use it in production.</p></div></div>
+  <h3>How this guide is organised</h3>
+  <p>The first part takes you from a USB stick to a running system. The next two parts are everyday use and the system underneath. The Linux part covers running Linux programs and building them from source. The reference part has troubleshooting and a cheat sheet. The search box at the top filters every chapter as you type.</p>
+  <p>Throughout, <kbd>super</kbd> is the key with the Windows (or ⌘) logo, a <span class="ui">bold name</span> is something you click, and <code>this</code> is something you type in a terminal.</p>
+</section>
+
+<section class="ch" id="need">
+  <h2><span class="n">02</span>What you <span class="serif">need</span></h2>
+  <ul>
+    <li><strong>A 64-bit PC</strong> (Intel or AMD) that starts in UEFI mode or legacy BIOS mode, with a disk of 2 GB or more to install on. A bigger disk is worth it if you'll use Linux apps or build software from source: your own Linux system takes about 1.2 GB.</li>
+    <li><strong>A USB stick</strong> of 512 MB or more. Everything on it is erased.</li>
+    <li><strong>A screen, keyboard and mouse</strong> for the install. Afterwards the PC can also be used without a screen, over SSH.</li>
+    <li><strong>A wired network connection</strong> to reach the internet. Most home networks need no setup.</li>
+  </ul>
+  <h3>What SlateOS runs on</h3>
+  <p>SlateOS has its own drivers, so check that your PC has what it needs:</p>
+  <div class="tbl"><table>
+    <thead><tr><th>hardware</th><th>what works</th></tr></thead>
+    <tbody>
+      <tr><td>Disks</td><td>NVMe drives, SATA drives (with the firmware's SATA mode set to AHCI), USB drives</td></tr>
+      <tr><td>Wired network</td><td>Intel I210, I211, 82576, and the 2.5 Gigabit I225 and I226 (and I220-V, I221-V); USB Ethernet adapters of the standard CDC Ethernet kind</td></tr>
+      <tr><td>Wi-Fi</td><td>Not yet. Use a cable or a USB Ethernet adapter</td></tr>
+      <tr><td>Keyboard and mouse</td><td>USB (through the PC's USB 3 controller), PS/2, and Bluetooth Low Energy mice and keyboards</td></tr>
+      <tr><td>Graphics</td><td>Any card, at the resolution the PC starts with. Some AMD Radeon graphics can run at your monitor's own resolution (<a href="#displays">full graphics</a>)</td></tr>
+      <tr><td>Bluetooth</td><td>USB adapters, and the Bluetooth half of MediaTek's MT7961, MT7922, MT7902 and MT7925 cards</td></tr>
+      <tr><td>Sound</td><td>Not yet</td></tr>
+      <tr><td>Sleep</td><td>Not yet. A short press of the power button shuts down cleanly</td></tr>
+    </tbody>
+  </table></div>
+  <div class="note tip"><svg><use href="#i-check"/></svg><div><b class="k">tip</b><p>Many PCs have built-in Ethernet that SlateOS doesn't drive yet (often Realtek's). A USB Ethernet adapter gets you online on those.</p></div></div>
+</section>
+
+<section class="ch" id="medium">
+  <h2><span class="n">03</span>The install <span class="serif">medium</span></h2>
+  <p>There are no downloads yet: the install media are built from SlateOS's source code, on Linux, with rustup, git, a C compiler and binutils.</p>
+  <div class="cmd"><div class="bar">on your Linux computer<button class="copy" type="button">copy</button></div><pre>git clone https://github.com/neuralpunk/slate-os
+cd slate-os
+make deps    <span class="c"># checks the tools, and says how to install what's missing</span>
+make usb     <span class="c"># target/slate-usb.img, for USB sticks</span>
+make iso     <span class="c"># target/slate.iso, for DVDs and virtual machines</span></pre></div>
+  <p>The first build installs the pinned Rust toolchain and takes a few minutes. <code>make</code> alone builds both images, and <code>make run</code> boots SlateOS in QEMU.</p>
+  <h3>Writing the USB stick</h3>
+  <p>The image goes onto the stick raw, byte for byte, over the whole stick. Copying the file onto the stick doesn't work.</p>
+  <h4>With dd</h4>
+  <ol class="steps">
+    <li><div><p>Run <code>lsblk</code>, plug the stick in, and run <code>lsblk</code> again. The disk that appeared (say <code>/dev/sdb</code>) is the stick. Check that its size matches.</p></div></li>
+    <li><div><p>Write the image to the whole disk (<code>sdb</code>, not <code>sdb1</code>):</p>
+      <div class="cmd"><div class="bar">replace sdX with the stick<button class="copy" type="button">copy</button></div><pre>sudo dd if=target/slate-usb.img of=/dev/sdX bs=4M status=progress conv=fsync</pre></div></div></li>
+  </ol>
+  <h4>With GNOME Disks</h4>
+  <p>Choose the stick, open the menu (⋮), choose <span class="ui">Restore Disk Image…</span> and pick <code>slate-usb.img</code>.</p>
+  <div class="note danger"><svg><use href="#i-warn"/></svg><div><b class="k">careful</b><p>Writing to the wrong disk erases it. Check the name and size twice.</p></div></div>
+</section>
+
+<section class="ch" id="try">
+  <h2><span class="n">04</span>Starting and <span class="serif">trying it</span></h2>
+  <h3>Set up the PC's firmware (once)</h3>
+  <p>Plug the stick in, turn the PC on and open its firmware setup (often <kbd>Del</kbd>, <kbd>F2</kbd>, <kbd>F10</kbd> or <kbd>Esc</kbd>). Then:</p>
+  <ul>
+    <li><strong>Secure Boot: off.</strong> SlateOS's bootloader isn't signed for Secure Boot.</li>
+    <li><strong>Boot mode: UEFI</strong> is best. Legacy BIOS (CSM) works too, but installing beside another system needs UEFI.</li>
+    <li><strong>SATA mode: AHCI</strong>, if the PC has SATA drives. In RAID or "Intel RST" mode SlateOS can't see them. If Windows is installed, changing this can stop Windows from starting; leave it alone if your disk is NVMe.</li>
+  </ul>
+  <h3>Start from the stick</h3>
+  <p>Press the boot menu key while the PC starts (often <kbd>F12</kbd>, <kbd>F11</kbd>, <kbd>F8</kbd> or <kbd>Esc</kbd>) and choose the stick. If it's listed twice, the entry starting "UEFI:" is the one to choose.</p>
+  <p>SlateOS's boot menu shows <span class="ui">Install Slate</span> for three seconds, then starts it. <span class="ui">Install Slate (text mode)</span> starts the text installer instead.</p>
+  <figure><img src="assets/shot-boot-menu.webp" alt="SlateOS's boot menu" loading="lazy" width="1280" height="800"><figcaption>slate-loader, SlateOS's own bootloader. Press e on an entry to edit its kernel command line.</figcaption></figure>
+  <h3>Try SlateOS without installing</h3>
+  <p>On the installer's welcome screen, <span class="ui">Try SlateOS</span> starts the whole Strata desktop from the stick, as the user <code>live</code> with no password. Nothing on the computer's disks changes, and everything is gone when you restart. When you're ready, <span class="ui">Install SlateOS</span> on the top bar (or in the launcher) brings the installer back.</p>
+</section>
+
+<section class="ch" id="install">
+  <h2><span class="n">05</span>Installing <span class="serif">SlateOS</span></h2>
+  <div class="note warn"><svg><use href="#i-warn"/></svg><div><b class="k">before you start</b><p>Installing erases the disk you choose, unless you install beside what's already there. Back up first.</p></div></div>
+  <p>The installer works with the mouse or the keyboard: <kbd>Tab</kbd> moves between controls, the arrow keys choose in a list, <kbd>Enter</kbd> goes on, and <kbd>Esc</kbd> offers to quit (which changes nothing until the install starts). The button at the bottom left of the welcome screen offers <span class="ui">Larger text</span> and <span class="ui">High contrast</span>.</p>
+  <ol class="steps">
+    <li><div><p><strong>Welcome.</strong> Choose English (United States) or English (United Kingdom) and press <span class="ui">Install SlateOS</span>.</p></div></li>
+    <li><div><p><strong>Time zone and keyboard.</strong> Type to narrow the lists (<code>Berlin</code>, <code>Norway</code>, <code>German</code>). Sixteen keyboard layouts are offered; the one you pick takes effect at once, so try it in the test field before you type your password. On layouts with accent keys, the accent goes on the next letter; press it then <kbd>Space</kbd> for the accent alone.</p></div></li>
+    <li><div><p><strong>Disk.</strong> Choose where to install. The stick you started from is never offered. <strong>Encrypt disk</strong> (on by default) locks SlateOS's part of the disk with your password: it's asked at every start, and without it (or a recovery key) nobody can read the disk, including you.</p></div></li>
+    <li><div><p><strong>Mode.</strong> <span class="ui">Slate mode</span> (the default, most secure) or <span class="ui">Linux compatibility</span>, which also lets Linux programs run. You can switch any time later.</p></div></li>
+    <li><div><p><strong>Desktop.</strong> The <span class="ui">Strata desktop</span> (a graphical login) or <span class="ui">Command line only</span>. With supported AMD Radeon graphics, it also asks about <a href="#displays">full graphics</a>.</p></div></li>
+    <li><div><p><strong>Network.</strong> <span class="ui">Automatic (DHCP)</span> for most networks, or a <span class="ui">Fixed address</span> such as <code>192.168.1.20/24</code> with a gateway and name servers.</p></div></li>
+    <li><div><p><strong>Account.</strong> Your name, a username, the computer's name and a password. There is no root password: you approve system changes with your own.</p></div></li>
+  </ol>
+  <p>Press <span class="ui">Install SlateOS</span>. It takes about a minute. When it says <span class="ui">SlateOS is ready</span>, remove the stick and press <span class="ui">Restart now</span>. If the PC doesn't find the new system, pick it once in the firmware's boot menu ("Slate", "UEFI OS" or the disk's name).</p>
+
+  <h3>Installing beside another system</h3>
+  <p>When the disk already has partitions (Windows, Linux or another SlateOS), the installer shows what's there and offers:</p>
+  <ul>
+    <li><strong>Install beside it</strong>: SlateOS takes the largest free space (2.1 GB at least, or 2.7 GB if it can't share the disk's EFI System Partition) and changes nothing else. Shrink the other system's partition with its own tools first (in Windows: Disk Management, "Shrink Volume").</li>
+    <li><strong>Erase disk and install SlateOS.</strong></li>
+    <li><strong>Choose partitions yourself</strong>: delete what you no longer want (nothing is deleted until the install starts; <span class="ui">Undo deletions</span> brings them back), then choose a free space and how many GB SlateOS gets.</li>
+  </ul>
+  <p>This needs a GPT disk and the installer started in UEFI mode. Afterwards SlateOS's boot menu lists the other system too (see <a href="#boot">Several systems on one PC</a>).</p>
+
+  <h3>The text installer</h3>
+  <p>It asks the same questions one after another. To confirm erasing a disk type <code>erase</code>, to confirm deleting partitions <code>delete</code>. At the disk question, <code>shell</code> gives a command line (<code>dmesg</code> shows what the system found), and <code>try</code> lets you try SlateOS at a command line as <code>live</code>.</p>
+
+  <h3>Installing without questions</h3>
+  <p>For many PCs, or one reached over a serial line: start the text installer, type <code>shell</code>, and run:</p>
+  <div class="cmd"><div class="bar">in the installer's shell<button class="copy" type="button">copy</button></div><pre>slate-install --list            <span class="c"># the disks</span>
+slate-install --map sda         <span class="c"># what a disk holds</span>
+echo 'your-password' &gt; /tmp/pw
+slate-install --disk sda --password-file /tmp/pw --yes</pre></div>
+  <p>That makes a command-line system without encryption, with the password for root. Add to it:</p>
+  <div class="tbl"><table>
+    <thead><tr><th>option</th><th>what it does</th></tr></thead>
+    <tbody>
+      <tr><td><code>--network WORDS</code></td><td>network settings, as <code>slate-network</code> takes them, e.g. <code>"* static 192.168.1.20/24 gateway 192.168.1.1"</code></td></tr>
+      <tr><td><code>--authorized-keys FILE</code></td><td>SSH keys that may log in as root</td></tr>
+      <tr><td><code>--linux-compat</code></td><td>turn on Linux compatibility</td></tr>
+      <tr><td><code>--full-graphics</code></td><td>full graphics on supported AMD Radeon graphics</td></tr>
+      <tr><td><code>--keyboard</code>, <code>--timezone</code></td><td>the keyboard layout and the time zone</td></tr>
+      <tr><td><code>--beside</code></td><td>install in the largest free space, keeping the rest (<code>--delete N</code> first, <code>--root-size G</code>)</td></tr>
+      <tr><td><code>--overwrite-medium</code></td><td>install onto the disk the installer started from (it runs from memory)</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section class="ch" id="first">
+  <h2><span class="n">06</span>The first <span class="serif">start</span></h2>
+  <h3>Unlocking the disk</h3>
+  <p>If you encrypted the disk, <span class="ui">Unlock this disk</span> comes first. Type your password and press <kbd>Enter</kbd>; a dot shows for each character. Without a working screen the console asks instead, showing nothing as you type.</p>
+  <h3>Logging in</h3>
+  <p>With Strata, the login screen lists the people on the computer: choose yourself, type your password, press <kbd>Enter</kbd>. <span class="ui">Restart</span> and <span class="ui">Power off</span> are at the bottom right.</p>
+  <div class="duo">
+    <figure><img src="assets/shot-login.webp" alt="The login screen" loading="lazy" width="1440" height="900"><figcaption>The login screen.</figcaption></figure>
+    <figure><img src="assets/shot-lock.webp" alt="The lock screen" loading="lazy" width="1440" height="900"><figcaption>The lock screen: super + l, or after a while idle.</figcaption></figure>
+  </div>
+  <p>With the command line only, the console shows a login prompt and the PC's address (<code>Network address: 192.168.1.50</code>). Log in as yourself; <code>su -</code> with your own password gives a root shell.</p>
+  <div class="note"><svg><use href="#i-info"/></svg><div><b class="k">good to know</b><p>If the login screen ever doesn't work, press <kbd>e</kbd> in the boot menu and add <code>slate.login=text</code> to the command line for a text login.</p></div></div>
+</section>
+
+<!-- ═════════ EVERYDAY USE ═════════ -->
+<div class="part">everyday use</div>
+
+<section class="ch" id="desktop">
+  <h2><span class="n">07</span>The Strata <span class="serif">desktop</span></h2>
+  <p class="intro">Strata is SlateOS's own desktop: a top bar, floating windows, four workspaces, and a quiet graphite look with colour only where it means something.</p>
+  <figure><img src="assets/shot-desktop.webp" alt="The Strata desktop with several windows" loading="lazy" width="1440" height="900"><figcaption>Strata: the top bar, windows, and the desktop's icons.</figcaption></figure>
+  <h3>The top bar</h3>
+  <ul>
+    <li><strong>Left:</strong> the <span class="ui">Applications</span> menu (or press <kbd>super</kbd> on its own) and the workspaces <span class="ui">1</span>–<span class="ui">4</span>.</li>
+    <li><strong>Middle:</strong> the open windows. Click one to bring it up, or to minimise it if it's already in front.</li>
+    <li><strong>Right:</strong> the mode (<span class="ui">slate mode</span> or Linux compatibility), the network, the clock, and the power button.</li>
+  </ul>
+  <h3>Windows</h3>
+  <p>Drag a window by its title bar and resize it from its edges. The title bar's buttons minimise, maximise and close. Drag a window to a screen edge or corner to fill that half or quarter. A terminal resizes by whole characters, showing its size as you drag.</p>
+  <p>Linux programs' windows carry a <strong>linux</strong> tag in their title bar, so you always know what's SlateOS's and what isn't.</p>
+  <figure><img src="assets/shot-desktop-linux-focused.webp" alt="A Linux app's window with its linux tag" loading="lazy" width="1440" height="900"><figcaption>A Linux app in Strata, tagged "linux" in its title bar.</figcaption></figure>
+  <h3>The Applications menu and the launcher</h3>
+  <div class="duo">
+    <figure><img src="assets/shot-appmenu.webp" alt="The Applications menu" loading="lazy" width="1280" height="800"><figcaption>Applications: point at a category, or type to search.</figcaption></figure>
+    <figure><img src="assets/shot-launcher-fuzzy.webp" alt="The launcher finding an app" loading="lazy" width="1440" height="900"><figcaption>The launcher (super + space) finds apps from a few letters.</figcaption></figure>
+  </div>
+  <p><strong>The launcher</strong> (<kbd>super</kbd> + <kbd>space</kbd>): type part of an app's name and press <kbd>Enter</kbd>. With nothing typed, it lists the apps by category, the ones you used last first. It also has <span class="ui">Lock screen</span>, <span class="ui">Log out</span>, <span class="ui">Restart</span>, <span class="ui">Power off</span> and <span class="ui">Roll back to the previous system</span>.</p>
+  <h3>The desktop's icons</h3>
+  <p>The icons are what's in your <code>~/Desktop</code> folder. Double-click to open. <span class="ui">Files</span> is there from the start; delete it from the folder and it stays gone. Drag icons anywhere (they stay put), into a folder, or onto a Files window. Select several with <kbd>ctrl</kbd> or <kbd>shift</kbd>, or by dragging a box. The right button gives <span class="ui">Open</span>, <span class="ui">Rename</span>, <span class="ui">Move to Trash</span>, and on the wallpaper <span class="ui">New Folder</span> and <span class="ui">Change Wallpaper</span>.</p>
+  <figure><img src="assets/shot-desk-icons.webp" alt="Icons on the desktop" loading="lazy" width="1280" height="800"><figcaption>The desktop is your Desktop folder.</figcaption></figure>
+  <h3>Power, lock and approvals</h3>
+  <p>The power button opens a dialog to lock, log out, restart or shut down. A restart or shut down can be set for later; the top bar counts down to it. If a window may have unsaved work, the dialog names it.</p>
+  <div class="duo">
+    <figure><img src="assets/shot-power-dialog.webp" alt="The power dialog" loading="lazy" width="1280" height="800"><figcaption>The power dialog.</figcaption></figure>
+    <figure><img src="assets/shot-approval.webp" alt="An approval dialog asking for a password" loading="lazy" width="1440" height="900"><figcaption>An approval: system changes ask for your own password.</figcaption></figure>
+  </div>
+  <p>Anything that changes the system for everyone (the time zone, the network, a package) shows an <strong>approval dialog</strong> that asks for your own password. Only Strata itself can show it, so a program can't fake one.</p>
+</section>
+
+<section class="ch" id="keys">
+  <h2><span class="n">08</span>Keyboard <span class="serif">shortcuts</span></h2>
+  <div class="tbl"><table>
+    <thead><tr><th>keys</th><th>what they do</th></tr></thead>
+    <tbody>
+      <tr><td><kbd>super</kbd></td><td>on its own: the Applications menu (again to close it)</td></tr>
+      <tr><td><kbd>super</kbd> + <kbd>space</kbd></td><td>the launcher: apps, and lock, log out, restart, power off, roll back</td></tr>
+      <tr><td><kbd>super</kbd> + <kbd>enter</kbd></td><td>open a terminal</td></tr>
+      <tr><td><kbd>alt</kbd> + <kbd>tab</kbd></td><td>the next window</td></tr>
+      <tr><td><kbd>alt</kbd> + <kbd>space</kbd></td><td>the window's title bar buttons (arrows or Tab move, Enter presses, Esc goes back)</td></tr>
+      <tr><td><kbd>super</kbd> + <kbd>←</kbd> / <kbd>→</kbd></td><td>fill the left or right half</td></tr>
+      <tr><td><kbd>super</kbd> + <kbd>↑</kbd> / <kbd>↓</kbd></td><td>from a half: its top or bottom quarter; elsewhere: maximise or minimise</td></tr>
+      <tr><td><kbd>super</kbd> + <kbd>1</kbd>–<kbd>4</kbd></td><td>switch workspace (with <kbd>shift</kbd>: send the window there)</td></tr>
+      <tr><td><kbd>super</kbd> + <kbd>q</kbd></td><td>close the focused window</td></tr>
+      <tr><td><kbd>super</kbd> + <kbd>l</kbd></td><td>lock the screen</td></tr>
+      <tr><td><kbd>super</kbd> + <kbd>shift</kbd> + <kbd>e</kbd></td><td>leave Strata for the text console</td></tr>
+    </tbody>
+  </table></div>
+  <p>The <span class="ui">Shortcuts</span> app lists these too. Restart, Power off and Roll back ask for your password first.</p>
+</section>
+
+<section class="ch" id="apps">
+  <h2><span class="n">09</span>The <span class="serif">apps</span></h2>
+  <p class="intro">SlateOS comes with a small set of its own apps, all in the Applications menu.</p>
+  <div class="cards">
+    <div class="card"><h4>Terminal</h4><p>The command line, with SlateOS's own shell, in tabs. 24-bit colour, mouse support, and text that reflows as you resize. See <a href="#terminal">chapter 12</a>.</p></div>
+    <div class="card"><h4>Files</h4><p>Your files and folders, disks and trash. See <a href="#files">chapter 10</a>.</p></div>
+    <div class="card"><h4>Text Editor</h4><p>Plain text and code, with colour for common languages, undo and redo, and search. <kbd>ctrl</kbd> + <kbd>o</kbd> opens another file.</p></div>
+    <div class="card"><h4>Image Viewer</h4><p>PNG, JPEG, GIF and BMP. The left and right arrows go through the folder; <kbd>+</kbd> and <kbd>-</kbd> zoom.</p></div>
+    <div class="card"><h4>Archive Manager</h4><p>Looks into zip, tar, tar.gz, cpio and gzip archives and extracts them. Makes zip, tar.gz and tar.</p></div>
+    <div class="card"><h4>Calculator</h4><p>Type sums as you'd write them (<code>(3+4)/2</code>, <code>2^10</code>, <code>sin 30</code>) and press Enter. <kbd>Tab</kbd> shows the scientific keys.</p></div>
+    <div class="card"><h4>Clock</h4><p>The time in other places, alarms, a timer and a stopwatch. <kbd>Tab</kbd> moves between them.</p></div>
+    <div class="card"><h4>Calendar</h4><p>Your events by month or as an agenda. Reads and writes iCalendar (.ics) files.</p></div>
+    <div class="card"><h4>Contacts</h4><p>An address book; type to search. Imports and exports vCard (.vcf).</p></div>
+    <div class="card"><h4>Help</h4><p>The guides, searchable, and <span class="ui">About this system</span>: what the PC is made of. <kbd>ctrl</kbd> + <kbd>c</kbd> there copies it for a bug report.</p></div>
+    <div class="card"><h4>Shortcuts</h4><p>Every desktop key, in one window.</p></div>
+    <div class="card"><h4>System Monitor</h4><p>What's running and what it uses: processors, memory, network, disks. A process tree and each process's details. Type to find; <kbd>Delete</kbd> ends a program.</p></div>
+    <div class="card"><h4>Disks</h4><p>Disks, partitions and what's on them. Erase, add a partition, format FAT32 or SlateFS. It never touches a disk in use. See <a href="#files">chapter 10</a>.</p></div>
+    <div class="card"><h4>Software Updater</h4><p>Updates for SlateOS and your Flatpak apps, with rollback. See <a href="#updates">chapter 15</a>.</p></div>
+    <div class="card"><h4>App Center</h4><p>Thousands of apps from Flathub, by category and search. See <a href="#flatpak">chapter 22</a>.</p></div>
+    <div class="card"><h4>Web Browser</h4><p>Firefox (or another Flathub browser), set up for you on first use. See <a href="#flatpak">chapter 22</a>.</p></div>
+    <div class="card"><h4>Solitaire</h4><p>Klondike, under Games: drag and drop or the keys, draw one or three, unlimited undo, a move count and a clock.</p></div>
+    <div class="card"><h4>Mines</h4><p>Clear the field without opening a mine. Three board sizes with best times; the first square is never a mine; flags with the right button.</p></div>
+  </div>
+  <div class="duo shots">
+    <figure><img src="assets/app-calculator-scientific.webp" alt="The Calculator with scientific keys" loading="lazy" width="640" height="540"><figcaption>Calculator, with its scientific keys.</figcaption></figure>
+    <figure><img src="assets/app-calendar-month.webp" alt="The Calendar's month view" loading="lazy" width="980" height="680"><figcaption>Calendar, a month at a time.</figcaption></figure>
+    <figure><img src="assets/app-clock-world.webp" alt="The Clock's world times" loading="lazy" width="420" height="560"><figcaption>Clock: the time in other places.</figcaption></figure>
+    <figure><img src="assets/app-monitor-resources.webp" alt="System Monitor's resources" loading="lazy" width="900" height="620"><figcaption>System Monitor's resources.</figcaption></figure>
+  </div>
+</section>
+
+<section class="ch" id="files">
+  <h2><span class="n">10</span>Files and <span class="serif">disks</span></h2>
+  <h3>Files</h3>
+  <p>Files shows your folders as a list or a grid, with thumbnails of pictures and the first lines of text files. The sidebar has your home folder's usual places, the disks and the trash.</p>
+  <ul>
+    <li><strong>Find things:</strong> typing filters the folder; <kbd>ctrl</kbd> + <kbd>f</kbd> searches under it, by name or by name and text, with results as they're found.</li>
+    <li><strong>Copy and move:</strong> drag, or copy and paste. Several copies can run at once, each sizing itself in the background.</li>
+    <li><strong>Open:</strong> pictures, archives and text open in SlateOS's apps.</li>
+    <li><strong>Trash:</strong> deleted files go to the trash of the disk they're on, and can be restored from there.</li>
+    <li><strong>USB disks:</strong> plug one in and it appears in the sidebar. To unplug safely, right-click it and choose <span class="ui">Power off</span> (or <code>slate-disk poweroff</code>).</li>
+  </ul>
+  <figure><img src="assets/files-graphite.webp" alt="Files in the Graphite theme" loading="lazy" width="900" height="600"><figcaption>Files.</figcaption></figure>
+  <h3>Disks</h3>
+  <p>Disks lists every disk, its partitions and what each holds. It can erase a disk, add a partition and format it (FAT32 to share with other computers, or SlateFS), each after asking your password. It refuses anything that's in use, so it can't pull the ground from under your running system.</p>
+</section>
+
+<section class="ch" id="settings">
+  <h2><span class="n">11</span><span class="serif">Settings</span></h2>
+  <p class="intro">Settings has its sections in a sidebar. Changes that affect everyone ask for your password first.</p>
+  <div class="tbl"><table>
+    <thead><tr><th>section</th><th>what's there</th></tr></thead>
+    <tbody>
+      <tr><td>Appearance</td><td>The theme (Graphite, Light, Copper Noir or Sediment) and the wallpaper: a built-in design or your own picture</td></tr>
+      <tr><td>Accessibility</td><td>High contrast, dimming the windows you aren't using, and less motion</td></tr>
+      <tr><td>Date and time</td><td>The computer's time zone, for everyone</td></tr>
+      <tr><td>Network</td><td>Automatic or a fixed address, for every card or each card on its own</td></tr>
+      <tr><td>Bluetooth</td><td>Devices nearby, pairing and forgetting them</td></tr>
+      <tr><td>Users</td><td>The people who can log in; see below</td></tr>
+      <tr><td>Security</td><td>Slate mode and Linux compatibility, the firewall and its open ports, the system image, disk encryption</td></tr>
+      <tr><td>Session</td><td>When the screen locks; removing the desktop if you want the command line only</td></tr>
+      <tr><td>Displays</td><td>Where each display is, its resolution, refresh rate and scale; full graphics on supported AMD Radeon graphics</td></tr>
+      <tr><td>Linux boxes</td><td>The disk space your Linux systems use, and cleaning or removing them (<a href="#source">chapter 23</a>)</td></tr>
+      <tr><td>About</td><td>This computer</td></tr>
+    </tbody>
+  </table></div>
+  <h3>Themes</h3>
+  <p>Four themes, each a whole palette: <strong>Graphite</strong> (the default, dark), <strong>Light</strong>, <strong>Copper Noir</strong> and <strong>Sediment</strong>. Linux apps from Flathub follow the theme too, light or dark, its accent and its fonts, changing as you switch.</p>
+  <div class="duo">
+    <figure><img src="assets/theme-light.webp" alt="The Light theme" loading="lazy" width="1280" height="800"><figcaption>Light.</figcaption></figure>
+    <figure><img src="assets/theme-sediment.webp" alt="The Sediment theme" loading="lazy" width="1440" height="900"><figcaption>Sediment.</figcaption></figure>
+  </div>
+  <h3>Users</h3>
+  <p>Add an account (a full name, a username and a password, and whether it's an administrator), and open one to change it:</p>
+  <ul>
+    <li><strong>Administrator</strong>: can change system settings and install software, after approval.</li>
+    <li><strong>Can use the desktop</strong>: Strata starts when they log in; without it, they get the command line only. It applies from their next login. New accounts have it.</li>
+    <li><strong>Change the password</strong>, <strong>Ask for a new password</strong> at their next login, <strong>Full name</strong>, and <strong>Remove this account</strong> (its home folder too; press Enter twice).</li>
+  </ul>
+  <p>On your own account you can change your password, your full name and your picture for the login and lock screens. Nobody can remove their own account or take away their own rights; another administrator has to.</p>
+</section>
+
+<section class="ch" id="terminal">
+  <h2><span class="n">12</span>The terminal and <span class="serif">command line</span></h2>
+  <p class="intro">The Terminal runs <strong>chalk</strong>, SlateOS's own shell, which behaves like bash for everyday use: pipes, job control, history, arrays, functions and scripts.</p>
+  <h3>Using the Terminal</h3>
+  <ul>
+    <li><strong>Tabs:</strong> the <span class="ui">+</span> after the tabs, <kbd>ctrl</kbd> + <kbd>t</kbd>, or <span class="ui">New tab</span> on the right button's menu opens a tab in the folder you're in. A tab's <span class="ui">×</span> (or the middle button on it) and <kbd>ctrl</kbd> + <kbd>shift</kbd> + <kbd>w</kbd> close it; <kbd>ctrl</kbd> + <kbd>Page Up</kbd> / <kbd>Page Down</kbd> or <kbd>ctrl</kbd> + <kbd>tab</kbd> move between them. A dot marks a tab with new output. In full-screen programs (an editor, <code>top</code>) <kbd>ctrl</kbd> + <kbd>t</kbd> is the program's own: use <kbd>ctrl</kbd> + <kbd>shift</kbd> + <kbd>t</kbd> there. Each tab has its own shell, and closing the last one closes the window.</li>
+    <li>Drag to select (double-click a word, triple-click a line). <kbd>ctrl</kbd> + <kbd>shift</kbd> + <kbd>c</kbd> copies, <kbd>ctrl</kbd> + <kbd>shift</kbd> + <kbd>v</kbd> pastes; the middle button (or <kbd>shift</kbd> + <kbd>Insert</kbd>) pastes the last selection; the right button has Copy and Paste.</li>
+    <li>The wheel and <kbd>shift</kbd> + <kbd>Page Up</kbd>/<kbd>Page Down</kbd> scroll back. Text reflows when you resize.</li>
+  </ul>
+  <h3>The tools</h3>
+  <p>The usual commands are SlateOS's own, written to match GNU's behaviour: <code>ls</code>, <code>cp</code>, <code>mv</code>, <code>grep</code>, <code>sed</code>, <code>awk</code>, <code>find</code>, <code>sort</code>, <code>tar</code>, <code>gzip</code>, <code>bzip2</code>, <code>xz</code>, <code>zstd</code>, the checksums and the rest. A few worth knowing:</p>
+  <div class="tbl"><table>
+    <thead><tr><th>command</th><th>what it does</th></tr></thead>
+    <tbody>
+      <tr><td><code>etch FILE</code></td><td>the text editor for the terminal, with syntax colour and the mouse</td></tr>
+      <tr><td><code>less FILE</code></td><td>read a file a page at a time; <code>/</code> searches</td></tr>
+      <tr><td><code>top</code></td><td>live processes; <code>V</code> the tree, <code>Z</code> colours, <code>W</code> saves the look</td></tr>
+      <tr><td><code>fetch -o FILE URL</code></td><td>download over HTTP or HTTPS (<code>-P</code> shows progress, <code>-c</code> continues). Without <code>-o</code> it writes to the terminal, like curl</td></tr>
+      <tr><td><code>free</code>, <code>df</code>, <code>ps</code>, <code>dmesg</code></td><td>memory, disks, processes, the system's log</td></tr>
+      <tr><td><code>ping</code>, <code>ip</code>, <code>ss</code></td><td>the network</td></tr>
+      <tr><td><code>lspci</code>, <code>lsusb</code></td><td>the PC's devices</td></tr>
+      <tr><td><code>chattr</code>, <code>lsattr</code></td><td>file attributes</td></tr>
+      <tr><td><code>poweroff</code>, <code>reboot</code></td><td>shut down or restart</td></tr>
+    </tbody>
+  </table></div>
+  <div class="cmd"><div class="bar">downloading a file<button class="copy" type="button">copy</button></div><pre>fetch -P -o hello-2.12.3.tar.gz https://ftp.gnu.org/gnu/hello/hello-2.12.3.tar.gz</pre></div>
+  <div class="note tip"><svg><use href="#i-check"/></svg><div><b class="k">tip</b><p>On the text console (no Strata), you can start the desktop by hand with <code>strata</code>, if your account <span class="ui">Can use the desktop</span>.</p></div></div>
+</section>
+
+<!-- ═════════ THE SYSTEM ═════════ -->
+<div class="part">the system</div>
+
+<section class="ch" id="accounts">
+  <h2><span class="n">13</span>Accounts and <span class="serif">administration</span></h2>
+  <p>SlateOS has <strong>no root password</strong>. The account made when installing is an administrator, in the <code>wheel</code> group: system changes ask for your own password.</p>
+  <ul>
+    <li><code>su -</code> with your own password gives a root shell.</li>
+    <li><code>sudo COMMAND</code> runs one command as root, after your password.</li>
+    <li><code>passwd</code> changes your password (and, on an encrypted disk, the disk's with it).</li>
+    <li><code>useradd -m -G wheel,seat NAME</code> and <code>passwd NAME</code> add an administrator who can use the desktop, from the command line. <code>usermod</code>, <code>userdel</code>, <code>chage</code> and <code>gpasswd</code> do the rest. Settings › Users does it all with the mouse.</li>
+  </ul>
+  <div class="note"><svg><use href="#i-info"/></svg><div><b class="k">why the system resists root</b><p>The system's own files (<code>/bin</code>, <code>/usr</code>, <code>/boot</code> and the rest) are a signed, read-only image that even root can't change, except through the package manager and the updater. A mistake or a malicious script can't quietly damage it, and every change it does go through is one you can undo.</p></div></div>
+  <p>The <code>seat</code> group decides who may use the screen and input for the desktop; the <code>wheel</code> group decides who administers. Settings › Users shows both as switches.</p>
+</section>
+
+<section class="ch" id="software">
+  <h2><span class="n">14</span>Installing <span class="serif">software</span></h2>
+  <p>SlateOS has three ways to add software, for three kinds of software:</p>
+  <div class="tbl"><table>
+    <thead><tr><th>what</th><th>how</th><th>see</th></tr></thead>
+    <tbody>
+      <tr><td>SlateOS's own packages</td><td><code>quarry</code>, the package manager</td><td>below</td></tr>
+      <tr><td>Desktop apps from Flathub</td><td>App Center, or <code>slate-flatpak</code></td><td><a href="#flatpak">22</a></td></tr>
+      <tr><td>Linux software from source</td><td>your own Linux system, from the terminal</td><td><a href="#source">23</a></td></tr>
+    </tbody>
+  </table></div>
+  <h3>quarry</h3>
+  <p>quarry installs signed packages. On a SlateFS system, each change is made to a snapshot of the system first, so the system before it is kept to fall back on.</p>
+  <div class="cmd"><div class="bar">as root (su -) or with sudo<button class="copy" type="button">copy</button></div><pre>quarry update            <span class="c"># fetch and verify the repository indexes</span>
+quarry search TERM       <span class="c"># find packages</span>
+quarry info NAME         <span class="c"># about a package</span>
+quarry install NAME      <span class="c"># install it, with what it needs</span>
+quarry remove NAME
+quarry list              <span class="c"># what is installed</span>
+quarry upgrades          <span class="c"># what an upgrade would install</span>
+quarry upgrade           <span class="c"># install it</span></pre></div>
+</section>
+
+<section class="ch" id="updates">
+  <h2><span class="n">15</span>Updates and <span class="serif">rollback</span></h2>
+  <p class="intro">An update never changes the running system. It installs a new version beside it, which starts the next time the computer starts. The version before is kept.</p>
+  <figure><img src="assets/app-updater-updates.webp" alt="The Software Updater" loading="lazy" width="680" height="640"><figcaption>The Software Updater.</figcaption></figure>
+  <ul>
+    <li><strong>The Software Updater</strong> checks every six hours (the top bar says "N updates"), shows what's new, and installs it. A restart for an installed update needs no password.</li>
+    <li><strong>If the new version fails to start</strong>, the computer goes back to the one before by itself.</li>
+    <li><strong>Going back by hand:</strong> <span class="ui">Roll back to the previous system</span> in the launcher, or <code>slate-update rollback</code> as root. It takes effect at the next start.</li>
+    <li><code>slate-update status</code> shows the system's versions and which one starts next.</li>
+  </ul>
+  <p>Your settings in <code>/etc</code> are carried across updates. Your Flatpak apps update in the background too (see <a href="#flatpak">chapter 22</a>).</p>
+</section>
+
+<section class="ch" id="security">
+  <h2><span class="n">16</span><span class="serif">Security</span></h2>
+  <h3>Slate mode and Linux compatibility</h3>
+  <p>Every program runs in one of two domains: <strong>Slate</strong> (SlateOS's own signed programs) or <strong>Linux</strong> (everything else). In <strong>Slate mode</strong>, the default, Linux programs don't run at all. Turn on <strong>Linux compatibility</strong> to let them, kept apart:</p>
+  <ul>
+    <li>A Linux program can't change SlateOS's system files, or see or signal SlateOS's own programs.</li>
+    <li>Once a process is in the Linux domain, it stays there, along with everything it starts.</li>
+  </ul>
+  <div class="cmd"><div class="bar">as root, or Settings › Security<button class="copy" type="button">copy</button></div><pre>slate-compat status
+slate-compat on
+slate-compat off</pre></div>
+  <h3>Signed and read-only</h3>
+  <p>Every SlateOS program is signed, and the kernel runs it as SlateOS's only if the signature checks. The system image is read-only to everyone, root included, except the package manager and the updater.</p>
+  <h3>Per-app permissions</h3>
+  <p>Apps installed with quarry get only the permissions their package declares; anything undeclared is refused. Linux apps from Flathub run in Flatpak's sandbox, and Linux software built from source runs in a box of its own.</p>
+  <h3>The firewall</h3>
+  <p>Incoming connections are refused unless allowed. Out of the box only SSH is let in.</p>
+  <div class="cmd"><div class="bar">as root, or Settings › Security<button class="copy" type="button">copy</button></div><pre>slate-firewall allow tcp 8080
+slate-firewall deny tcp 8080</pre></div>
+  <h3>Under the hood</h3>
+  <p>Address-space layout randomisation for programs and the kernel, strict write-xor-execute memory, a hardened allocator, and control-flow integrity in the kernel.</p>
+</section>
+
+<section class="ch" id="encryption">
+  <h2><span class="n">17</span>Your encrypted <span class="serif">disk</span></h2>
+  <p>The disk's password is your account's password: change one with <code>passwd</code> and the other follows.</p>
+  <div class="note warn"><svg><use href="#i-warn"/></svg><div><b class="k">make a recovery key</b><p>If the password is forgotten and there's no recovery key, the data can't be recovered by anyone. Make one now and keep it somewhere safe.</p></div></div>
+  <div class="cmd"><div class="bar">as root (su -)<button class="copy" type="button">copy</button></div><pre>slate-crypt add-recovery-key root   <span class="c"># prints the key: write it down</span>
+slate-crypt status root             <span class="c"># the disk's key slots</span></pre></div>
+  <p>Type the recovery key wherever the password is asked; capitals, dashes and spaces don't matter. <code>slate-crypt</code> also adds and removes passwords, checks which slot a password opens, repairs a damaged header from its backup (<code>repair</code>), and creates and opens other encrypted partitions (<code>format</code>, <code>open</code>, <code>close</code>).</p>
+</section>
+
+<section class="ch" id="network">
+  <h2><span class="n">18</span>Network and <span class="serif">SSH</span></h2>
+  <p>SlateOS gets its address automatically (DHCP), using the first port with a cable plugged in, and follows the cable if you move it. IPv4 and IPv6 both work, with a DNS cache and the clock set over NTP.</p>
+  <h3>A fixed address</h3>
+  <p>Settings › Network, or <code>slate-network</code> (it asks for your password):</p>
+  <div class="cmd"><div class="bar">slate-network<button class="copy" type="button">copy</button></div><pre>slate-network                                   <span class="c"># the settings, and each card's state</span>
+slate-network '*' static 192.168.1.20/24 gateway 192.168.1.1 dns 9.9.9.9
+slate-network eth1 dhcp                         <span class="c"># one card back to automatic</span></pre></div>
+  <p>For one start only, press <kbd>e</kbd> in the boot menu and add <code>slate.ip=192.168.1.20/24,192.168.1.1,9.9.9.9</code>.</p>
+  <h3>Logging in from another computer</h3>
+  <p>SlateOS's SSH server is on from the start (with sftp and scp):</p>
+  <div class="cmd"><div class="bar">from another computer<button class="copy" type="button">copy</button></div><pre>ssh ada@192.168.1.50
+<span class="c"># log in with a key instead of the password:</span>
+ssh ada@192.168.1.50 'mkdir -p .ssh &amp;&amp; cat &gt;&gt; .ssh/authorized_keys' &lt; ~/.ssh/id_ed25519.pub</pre></div>
+  <p>The first time, compare the host key's fingerprint with the one the PC's console printed when the SSH server started (<code>sshd: listening on port 22, host key SHA256:…</code>).</p>
+</section>
+
+<section class="ch" id="bluetooth">
+  <h2><span class="n">19</span><span class="serif">Bluetooth</span></h2>
+  <p>Settings › Bluetooth lists devices nearby. Choose one to pair: compare the number both show, then press <kbd>Enter</kbd>. Paired devices reconnect by themselves whenever they're in range.</p>
+  <ul>
+    <li><strong>Mice and keyboards</strong> using Bluetooth Low Energy work, with their pairings kept.</li>
+    <li><strong>A mouse pairs by itself</strong>: put it in pairing mode and the pointer appears, even in "Try SlateOS". A device paired this way can move and click but never type; pair it from Settings to give it everything. <code>/etc/slate/bluetooth</code> sets <code>autopair=always</code> (default), <code>auto</code> or <code>never</code>.</li>
+    <li><strong>Pairings made while trying SlateOS</strong> carry over to the installed system.</li>
+    <li>Headphones and other audio can't be used yet (no sound support).</li>
+  </ul>
+  <div class="cmd"><div class="bar">slate-bt<button class="copy" type="button">copy</button></div><pre>slate-bt status
+slate-bt scan
+slate-bt pair ADDR
+slate-bt connect ADDR
+slate-bt remove ADDR</pre></div>
+</section>
+
+<section class="ch" id="displays">
+  <h2><span class="n">20</span>Displays and <span class="serif">graphics</span></h2>
+  <p>SlateOS drives every graphics card itself, at your monitor's native resolution when the PC's firmware offers it. <strong>Settings › Displays</strong> places each display (right, left, above or below the main one), and sets its resolution, refresh rate and scale.</p>
+  <figure><img src="assets/gfx-settings.webp" alt="Settings › Displays" loading="lazy" width="900" height="660"><figcaption>Settings › Displays.</figcaption></figure>
+  <h3>Full graphics on AMD Radeon</h3>
+  <p>On the graphics built into some recent AMD Ryzen processors, SlateOS's own AMD driver can do more: your monitor at its own resolution, smoother updates, and windows composited on the GPU. It needs AMD's firmware, which you opt into:</p>
+  <ul>
+    <li>The installer's Desktop step offers <span class="ui">SlateOS only</span> (default) or <span class="ui">Full graphics</span>. Settings › Displays switches it later.</li>
+    <li>After switching on, the next start asks <span class="ui">Keep full graphics?</span> with a 20-second countdown. If you choose <span class="ui">Revert</span>, press <kbd>Esc</kbd> or don't answer (say, because the screen is blank), SlateOS goes back to standard graphics by itself.</li>
+    <li>The boot menu's <span class="ui">Slate (standard graphics)</span> starts without it, any time.</li>
+  </ul>
+</section>
+
+<!-- ═════════ LINUX SOFTWARE ═════════ -->
+<div class="part">linux software</div>
+
+<section class="ch" id="linux">
+  <h2><span class="n">21</span>Linux programs and <span class="serif">apps</span></h2>
+  <p class="intro">SlateOS runs Linux programs unmodified once Linux compatibility is on. There are three ways to bring them in, each kept apart from SlateOS in its own way.</p>
+  <div class="tbl"><table>
+    <thead><tr><th>you want</th><th>use</th><th>it lives in</th></tr></thead>
+    <tbody>
+      <tr><td>A desktop app (GIMP, LibreOffice, a game…)</td><td>App Center / <code>slate-flatpak</code></td><td>Flatpak's sandbox</td></tr>
+      <tr><td>A web browser</td><td>Web Browser</td><td>Flatpak's sandbox</td></tr>
+      <tr><td>A program you have as source code</td><td>SlateOS's terminal: <code>./configure</code>, <code>make</code></td><td>your own Linux system (a box)</td></tr>
+      <tr><td>Graphical programs from Alpine Linux</td><td><code>slate-linux</code></td><td>the Linux runtime</td></tr>
+    </tbody>
+  </table></div>
+  <h3>The Linux runtime</h3>
+  <p>The runtime is an Alpine Linux system kept apart in <code>/var/lib/slate/linux</code>. Flatpak, the browser and App Center run inside it, and it sets itself up the first time one of them needs it. To set it up by hand, as root:</p>
+  <div class="cmd"><div class="bar">as root (su -)<button class="copy" type="button">copy</button></div><pre>slate-compat on
+slate-linux setup            <span class="c"># Alpine's base (checked), Sway, Xwayland, Firefox, a font</span>
+slate-linux setup foot       <span class="c"># or name other Alpine packages</span>
+slate-linux upgrade          <span class="c"># keep it up to date (a failed upgrade is undone)</span>
+slate-linux rollback         <span class="c"># back to before the last upgrade</span></pre></div>
+  <p>Its programs show in the launcher. From a terminal, <code>slate-linux-app firefox</code> opens one in a window, and <code>slate-linux run PROGRAM</code> runs one without a window. Copy and paste work between Linux programs and SlateOS's own. They see only your home folder.</p>
+</section>
+
+<section class="ch" id="flatpak">
+  <h2><span class="n">22</span>Flatpak, AppImages and <span class="serif">the web</span></h2>
+  <h3>The Web Browser</h3>
+  <p>SlateOS has no browser engine of its own. The first time you open <span class="ui">Web Browser</span>, it offers Firefox from Flathub, as Mozilla publishes it, after checking that Flathub's signing key is the one SlateOS trusts. One click sets up everything it needs, with one password approval and a progress bar ("Fetching Firefox from Flathub (2 of 2): 42%").</p>
+  <ul>
+    <li><code>web-browser --get</code> does the same from a terminal.</li>
+    <li><code>web-browser --use com.example.Browser</code> makes another Flathub browser the one Web Browser opens.</li>
+    <li>If the browser doesn't appear, <code>~/.cache/slate/browser.log</code> says why.</li>
+  </ul>
+  <h3>App Center</h3>
+  <p>App Center browses and searches Flathub's catalog by category, with icons, and installs, opens and removes apps, showing how far an install has got. Apps are yours, kept in your home folder, so installing needs no password. Each runs in Flatpak's sandbox with only the access its makers asked for, and follows Strata's theme, fonts and accent.</p>
+  <h3>From the terminal</h3>
+  <div class="cmd"><div class="bar">slate-flatpak<button class="copy" type="button">copy</button></div><pre>slate-flatpak install org.gnome.Calculator
+slate-flatpak run org.gnome.Calculator
+slate-flatpak updates                       <span class="c"># what is newer on Flathub</span>
+slate-flatpak update                        <span class="c"># update them all (the old versions kept)</span>
+slate-flatpak rollback org.gnome.Calculator <span class="c"># back to the version before</span>
+slate-flatpak list
+slate-flatpak remove org.gnome.Calculator
+slate-flatpak --system install org.gnome.Calculator   <span class="c"># for every account (asks for your password)</span></pre></div>
+  <p>Strata updates your apps in the background every six hours or so. The Software Updater shows when that last happened, turns it off and on, and has <span class="ui">Update apps</span> and <span class="ui">Roll back</span>.</p>
+  <h3>AppImages</h3>
+  <div class="cmd"><div class="bar">slate-appimage<button class="copy" type="button">copy</button></div><pre>slate-appimage FILE.AppImage           <span class="c"># run it (unpacked once; no FUSE needed)</span>
+slate-appimage --add FILE.AppImage     <span class="c"># put it in the launcher</span>
+slate-appimage --list                  <span class="c"># the unpacked ones and their sizes</span>
+slate-appimage --remove FILE.AppImage
+slate-appimage --clean                 <span class="c"># those whose file is gone</span></pre></div>
+</section>
+
+<section class="ch" id="source">
+  <h2><span class="n">23</span>Linux software <span class="serif">from source</span></h2>
+  <p class="intro">Some programs are published only as source code, built with <code>./configure</code>, <code>make</code> and <code>sudo make install</code>. SlateOS builds and runs them with Linux's own tools, <strong>right in its own terminal</strong>, as if they were SlateOS's commands. Behind the scenes they run in your own Linux system, kept apart from SlateOS.</p>
+  <h3>Before you start</h3>
+  <ul>
+    <li><strong>Linux compatibility must be on</strong>: <code>slate-compat status</code>, and <code>sudo slate-compat on</code> if not.</li>
+    <li><strong>Use your own account, not root.</strong> Each person gets their own Linux system; root doesn't have one.</li>
+    <li>About 1.6 GB free disk space and an internet connection the first time.</li>
+  </ul>
+  <h3>Walkthrough: GNU hello</h3>
+  <ol class="steps">
+    <li><div><p><strong>Get the source</strong> with SlateOS's own tools:</p>
+      <div class="cmd"><div class="bar">in Terminal<button class="copy" type="button">copy</button></div><pre>mkdir -p ~/src &amp;&amp; cd ~/src
+fetch -P -o hello-2.12.3.tar.gz https://ftp.gnu.org/gnu/hello/hello-2.12.3.tar.gz
+tar xf hello-2.12.3.tar.gz
+cd hello-2.12.3</pre></div></div></li>
+    <li><div><p><strong>Configure it:</strong> <code>./configure</code>. SlateOS sees the folder holds source code and asks once:</p>
+      <div class="cmd"><pre class="wrap">/home/you/src/hello-2.12.3 has source code. Build and run it with Linux tools, in your Linux system (apart from SlateOS)? [Y/n]</pre></div>
+      <p>Press <kbd>Enter</kbd>. The first time only, it sets up your Linux system: <em>setting up your Linux system (once)…</em>, then it downloads Arch Linux (about 400 MB), checks it against Arch's own signing key, and installs its build tools. That takes several minutes and ends with <em>NNN Linux commands are ready in SlateOS's terminal</em>. Then <code>./configure</code> runs as usual.</p></div></li>
+    <li><div><p><strong>Build it:</strong> <code>make</code>. While a Linux program runs, the window's title bar shows the <strong>linux</strong> tag. That's the only sign.</p></div></li>
+    <li><div><p><strong>Install it:</strong> <code>sudo make install</code>. It installs into your Linux system, never into SlateOS, and ends with <em>hello is now a command</em>.</p></div></li>
+    <li><div><p><strong>Run it:</strong> <code>hello</code>, by name, from any folder: <em>Hello, world!</em></p></div></li>
+  </ol>
+  <h3>How it works</h3>
+  <ul>
+    <li><strong>Your own Linux system</strong> is Arch Linux, with GCC, make, CMake, Meson, pkg-config and the rest. Autotools, CMake, Meson, Cargo and Python projects all build.</li>
+    <li><strong>Its programs are SlateOS commands.</strong> <code>make</code>, <code>gcc</code>, <code>pacman</code>, and whatever you install, run by name in the folder you're in, on your files there. SlateOS's own commands always come first.</li>
+    <li><strong>Install more tools</strong> the Arch way: <code>sudo pacman -S cmake</code>. New commands are announced: <em>cmake is now a command</em>.</li>
+    <li><strong>Source folders</strong> are remembered. <code>slate-box here</code> marks the folder you're in as Linux source, and <code>slate-box not-here</code> keeps it SlateOS's.</li>
+  </ul>
+  <h3>Kept apart</h3>
+  <p>Your Linux system is yours alone. Its root has no power over SlateOS: it has IDs of its own that no SlateOS account has. It can't see SlateOS's programs, write SlateOS's system, or reach other people's Linux systems. It sees your files only in the folder you run a command from.</p>
+  <div class="cmd"><div class="bar">what it may reach<button class="copy" type="button">copy</button></div><pre>slate-box show                     <span class="c"># what your Linux system may reach</span>
+slate-box share ~/Documents        <span class="c"># share a folder of your home for good</span>
+slate-box unshare ~/Documents
+slate-box network off              <span class="c"># cut it off the network (on to undo)</span></pre></div>
+  <p>Anything a box's program is refused is noted in SlateOS's log, so a misbehaving build script shows up. The box talks to SlateOS only over one private, encrypted channel per session, for a few named requests such as making an install receipt.</p>
+  <h3>Install receipts: undo any install</h3>
+  <p>Every <code>sudo make install</code> or <code>sudo pacman -S</code> is recorded as a receipt: exactly which files it added, changed or removed.</p>
+  <div class="cmd"><div class="bar">receipts<button class="copy" type="button">copy</button></div><pre>slate-box installs                   <span class="c"># list them</span>
+slate-box undo hello-2.12.3          <span class="c"># remove exactly what that install added, restore what it changed</span>
+slate-box rollback hello-2.12.3      <span class="c"># the whole Linux system back to before it (and every install since)</span></pre></div>
+  <p><code>undo</code> refuses if a later install touched the same files, so it can't break something that came after.</p>
+  <h3>Disk space</h3>
+  <p><strong>Settings › Linux boxes</strong> shows how much each Linux system and each downloaded base takes (counting only what each holds of its own), warns when the disk is getting full, and clears package caches or removes a box. From the terminal:</p>
+  <div class="cmd"><div class="bar">space<button class="copy" type="button">copy</button></div><pre>slate-box list            <span class="c"># each box, and its size</span>
+slate-box clean           <span class="c"># empty its package cache</span>
+slate-box remove NAME
+slate-box remove-base arch</pre></div>
+  <h3>More boxes, and a Linux shell</h3>
+  <p><code>slate-box enter linux</code> opens a shell inside your Linux system (the prompt says <code>[box linux]</code>; <code>exit</code> comes back). <code>slate-box create NAME</code> makes another, separate Linux system, and <code>slate-box run NAME -- COMMAND</code> runs a command in it.</p>
+  <div class="note"><svg><use href="#i-info"/></svg><div><b class="k">for now</b><p>Linux boxes are for command-line programs. Graphical programs from source and services that run in the background aren't supported yet; use App Center for desktop apps.</p></div></div>
+</section>
+
+<!-- ═════════ REFERENCE ═════════ -->
+<div class="part">reference</div>
+
+<section class="ch" id="boot">
+  <h2><span class="n">24</span>Several systems on <span class="serif">one PC</span></h2>
+  <p>When SlateOS is installed beside another system, its boot menu lists both: choose with the arrow keys and <kbd>Enter</kbd> within three seconds. From SlateOS you can choose the system for the next start only, as root:</p>
+  <div class="cmd"><div class="bar">as root<button class="copy" type="button">copy</button></div><pre>slate-update next                          <span class="c"># the menu's entries</span>
+slate-update next 'Windows Boot Manager'   <span class="c"># start it next time</span></pre></div>
+  <p>In the boot menu, <kbd>e</kbd> edits an entry's kernel command line for one start: <code>slate.login=text</code> for a text login, <code>slate.ip=…</code> for a fixed address.</p>
+</section>
+
+<section class="ch" id="trouble">
+  <h2><span class="n">25</span>When something <span class="serif">goes wrong</span></h2>
+  <div class="tbl"><table>
+    <thead><tr><th>problem</th><th>what to try</th></tr></thead>
+    <tbody>
+      <tr><td>The stick doesn't start</td><td>Secure Boot off; try the stick's other entry in the firmware's boot menu (with or without "UEFI:")</td></tr>
+      <tr><td>"No disk to install on was found"</td><td>SATA mode AHCI; a disk of 2 GB or more; <code>shell</code> then <code>dmesg</code> in the text installer</td></tr>
+      <tr><td>The keyboard does nothing</td><td>Plug it straight into the PC, not through a separate USB hub</td></tr>
+      <tr><td>Network address "none yet"</td><td>Check the cable and that the port is supported; a USB Ethernet adapter gets around it</td></tr>
+      <tr><td>The graphical installer looks wrong</td><td>Restart and choose <span class="ui">Install Slate (text mode)</span></td></tr>
+      <tr><td>Dark screen after choosing full graphics</td><td>Wait 20 seconds, or choose <span class="ui">Slate (standard graphics)</span> in the boot menu</td></tr>
+      <tr><td>An update won't start</td><td>It goes back by itself; or <span class="ui">Roll back</span> in the launcher, <code>slate-update rollback</code></td></tr>
+      <tr><td>"this account may not use the desktop"</td><td>An administrator turns on <span class="ui">Can use the desktop</span> in Settings › Users (or <code>sudo gpasswd -a NAME seat</code>), then log in again</td></tr>
+      <tr><td>A Linux program won't run</td><td><code>slate-compat status</code>; turn it on with <code>sudo slate-compat on</code></td></tr>
+      <tr><td>"Linux boxes are for people's own accounts"</td><td>Log in as your own account rather than root</td></tr>
+      <tr><td>The browser doesn't appear</td><td><code>~/.cache/slate/browser.log</code></td></tr>
+      <tr><td>Anything else</td><td><code>dmesg</code> (the system's log), <code>/var/log/install.log</code>; a photo of the screen helps a bug report</td></tr>
+    </tbody>
+  </table></div>
+  <h3>Trying SlateOS in a virtual machine</h3>
+  <ul>
+    <li><strong>QEMU and virt-manager:</strong> a q35 machine with UEFI firmware (Secure Boot off), a virtio disk, network card and graphics, started from <code>slate.iso</code>.</li>
+    <li><strong>GNOME Boxes:</strong> works from <code>slate.iso</code>; for speed, switch the machine to UEFI with virtio disk and network (<code>virsh --connect qemu:///session edit NAME</code>). Give it 4 GiB of memory or more for Firefox.</li>
+    <li><strong>From a source checkout:</strong> <code>cargo xtask try-install</code> runs the installer in a QEMU window on a kept virtual disk, and <code>cargo xtask try-install --disk</code> starts the installed system (<code>ssh -p 2222 USER@localhost</code> works too). <code>make run</code> boots a ready-made system.</li>
+  </ul>
+</section>
+
+<section class="ch" id="cheat">
+  <h2><span class="n">26</span>Command <span class="serif">cheat sheet</span></h2>
+  <div class="tbl"><table>
+    <thead><tr><th>command</th><th>what it does</th></tr></thead>
+    <tbody>
+      <tr><td><code>su -</code> · <code>sudo CMD</code></td><td>a root shell · one command as root (your own password)</td></tr>
+      <tr><td><code>slate-compat on|off|status</code></td><td>Linux compatibility</td></tr>
+      <tr><td><code>quarry install|remove|search|list NAME</code></td><td>SlateOS's packages</td></tr>
+      <tr><td><code>quarry upgrade</code> · <code>slate-update status|rollback</code></td><td>updates, and going back</td></tr>
+      <tr><td><code>slate-update next TITLE</code></td><td>start another system next time</td></tr>
+      <tr><td><code>slate-network</code></td><td>network settings</td></tr>
+      <tr><td><code>slate-firewall allow|deny tcp PORT</code></td><td>open or close a port</td></tr>
+      <tr><td><code>slate-crypt add-recovery-key root</code></td><td>a recovery key for the encrypted disk</td></tr>
+      <tr><td><code>slate-bt scan|pair|connect ADDR</code></td><td>Bluetooth</td></tr>
+      <tr><td><code>slate-disk poweroff</code></td><td>stop a USB disk before unplugging</td></tr>
+      <tr><td><code>slate-linux setup|upgrade|rollback</code></td><td>the Linux runtime</td></tr>
+      <tr><td><code>web-browser --get</code></td><td>Firefox from Flathub</td></tr>
+      <tr><td><code>slate-flatpak install|run|update|rollback|remove ID</code></td><td>Flatpak apps</td></tr>
+      <tr><td><code>slate-appimage FILE</code></td><td>run an AppImage</td></tr>
+      <tr><td><code>slate-box setup</code></td><td>set up your Linux system ahead of time</td></tr>
+      <tr><td><code>slate-box installs|undo|rollback</code></td><td>install receipts</td></tr>
+      <tr><td><code>slate-box show|share|unshare|network</code></td><td>what your Linux system may reach</td></tr>
+      <tr><td><code>slate-box list|clean|remove</code></td><td>its disk space</td></tr>
+      <tr><td><code>slate-box enter linux</code></td><td>a shell in your Linux system</td></tr>
+      <tr><td><code>fetch -P -o FILE URL</code></td><td>download a file</td></tr>
+      <tr><td><code>dmesg</code> · <code>top</code> · <code>free</code> · <code>df</code></td><td>log, processes, memory, disks</td></tr>
+      <tr><td><code>strata</code></td><td>start the desktop from the text console</td></tr>
+      <tr><td><code>poweroff</code> · <code>reboot</code></td><td>shut down · restart</td></tr>
+    </tbody>
+  </table></div>
+  <a class="top-link" href="#top-of-guide"><svg width="13" height="13"><use href="#i-up"/></svg>back to the top</a>
+</section>
+
+    <div class="empty" id="empty">Nothing in the guide matches that. Try a shorter word.</div>
+  </article>
+</div>
+
+<footer>
+  <div class="frame foot">
+    <span><a href="index.html">SlateOS home</a><a href="https://github.com/neuralpunk/slate-os">Source on GitHub</a><a href="https://github.com/neuralpunk/slate-os/blob/main/CHANGELOG.md">Changelog</a></span>
+    <span>SlateOS 0.1.3 · alpha · MIT or Apache-2.0</span>
+  </div>
+</footer>
+
+<script>
+(() => {
+  'use strict';
+  const $ = (s, r = document) => r.querySelector(s);
+  const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
+
+  // Copy buttons: the block's text, without its comments.
+  $$('.cmd').forEach(block => {
+    const btn = $('.copy', block);
+    if (!btn) return;
+    btn.addEventListener('click', async () => {
+      const pre = $('pre', block).cloneNode(true);
+      $$('.c, .p', pre).forEach(c => c.remove());
+      const text = pre.textContent.split('\n').map(l => l.replace(/\s+$/, '')).join('\n').trim();
+      try { await navigator.clipboard.writeText(text); btn.textContent = 'copied'; btn.classList.add('done'); }
+      catch (e) { btn.textContent = 'select it'; }
+      setTimeout(() => { btn.textContent = 'copy'; btn.classList.remove('done'); }, 1600);
+    });
+  });
+
+  // The chapter rail: the chapter on screen is marked.
+  const links = $$('.rail a');
+  const byId = new Map(links.map(a => [a.getAttribute('href').slice(1), a]));
+  const mark = id => links.forEach(a => a.classList.toggle('on', a === byId.get(id)));
+  if ('IntersectionObserver' in window) {
+    const io = new IntersectionObserver(es => es.forEach(e => { if (e.isIntersecting) mark(e.target.id); }), { rootMargin: '-30% 0px -65% 0px' });
+    $$('section.ch').forEach(s => io.observe(s));
+  }
+
+  // The drawer on narrow screens.
+  const rail = $('#rail'), scrim = $('#scrim'), toggle = $('#toc-toggle');
+  const setOpen = open => { rail.classList.toggle('open', open); scrim.classList.toggle('open', open); toggle.setAttribute('aria-expanded', String(open)); };
+  toggle.addEventListener('click', () => setOpen(!rail.classList.contains('open')));
+  scrim.addEventListener('click', () => setOpen(false));
+  links.forEach(a => a.addEventListener('click', () => setOpen(false)));
+  addEventListener('keydown', e => { if (e.key === 'Escape') setOpen(false); });
+
+  // Search: chapters that don't hold every word are hidden.
+  const q = $('#q'), note = $('#search-note'), empty = $('#empty');
+  const chapters = $$('section.ch').map(s => ({ s, text: s.textContent.toLowerCase(), link: byId.get(s.id) }));
+  const parts = $$('.part');
+  q.addEventListener('input', () => {
+    const words = q.value.toLowerCase().split(/\s+/).filter(Boolean);
+    let shown = 0;
+    chapters.forEach(c => {
+      const hit = words.every(w => c.text.includes(w));
+      c.s.hidden = !hit; c.link.classList.toggle('dim', !hit);
+      if (hit) shown++;
+    });
+    parts.forEach(p => p.hidden = words.length > 0);
+    empty.classList.toggle('show', shown === 0);
+    note.textContent = words.length ? `${shown} of ${chapters.length} chapters mention “${q.value.trim()}”` : '';
+  });
+  addEventListener('keydown', e => {
+    if (e.key === '/' && document.activeElement !== q && !e.ctrlKey && !e.metaKey) { e.preventDefault(); q.focus(); }
+  });
+})();
+</script>
+</body>
+</html>

@@ -69,10 +69,11 @@ pub enum Section {
     Security,
     Session,
     Displays,
+    Boxes,
     About,
 }
 
-pub const SECTIONS: [Section; 10] = [
+pub const SECTIONS: [Section; 11] = [
     Section::Appearance,
     Section::Accessibility,
     Section::DateTime,
@@ -82,6 +83,7 @@ pub const SECTIONS: [Section; 10] = [
     Section::Security,
     Section::Session,
     Section::Displays,
+    Section::Boxes,
     Section::About,
 ];
 
@@ -97,6 +99,7 @@ impl Section {
             Section::Security => "Security",
             Section::Session => "Session",
             Section::Displays => "Displays",
+            Section::Boxes => "Linux boxes",
             Section::About => "About",
         }
     }
@@ -112,6 +115,7 @@ impl Section {
             Section::Security => "How Slate keeps programs apart, and the system intact.",
             Section::Session => "Locking the screen, and the desktop itself.",
             Section::Displays => "Where each display is, its resolution and refresh rate, and the scale.",
+            Section::Boxes => "Your Linux systems for software built from source, and the disk they take.",
             Section::About => "This computer.",
         }
     }
@@ -127,6 +131,7 @@ impl Section {
             Section::Security => Icon::Shield,
             Section::Session => Icon::Lock,
             Section::Displays => Icon::Display,
+            Section::Boxes => Icon::SplitPane,
             Section::About => Icon::Info,
         }
     }
@@ -138,6 +143,9 @@ pub struct Account {
     pub name: String,
     pub full: String,
     pub admin: bool,
+    /// In the seat group: seatd gives them the screen and input, so
+    /// Strata starts at their login.
+    pub desktop: bool,
     pub uid: u32,
 }
 
@@ -148,16 +156,31 @@ impl Account {
     }
 }
 
+/// What an account is, as its lines say: administrator or standard, and
+/// "command line only" without the desktop.
+fn kind(a: &Account) -> &'static str {
+    match (a.admin, a.desktop) {
+        (true, true) => "administrator",
+        (false, true) => "standard",
+        (true, false) => "administrator · command line only",
+        (false, false) => "standard · command line only",
+    }
+}
+
 /// The people's accounts in passwd(5) and group(5) text: UIDs from 1000
 /// (not nobody's) with a shell to log in with; administrators are in
-/// wheel (ADR 0035).
+/// wheel (ADR 0035), and those who may use the desktop in seat.
 pub fn accounts(passwd: &str, group: &str) -> Vec<Account> {
-    let wheel: Vec<&str> = group
-        .lines()
-        .find_map(|l| l.strip_prefix("wheel:"))
-        .and_then(|r| r.splitn(3, ':').nth(2))
-        .map(|m| m.split(',').filter(|s| !s.is_empty()).collect())
-        .unwrap_or_default();
+    let members = |g: &str| -> Vec<&str> {
+        let head = alloc::format!("{g}:");
+        group
+            .lines()
+            .find_map(|l| l.strip_prefix(head.as_str()))
+            .and_then(|r| r.splitn(3, ':').nth(2))
+            .map(|m| m.split(',').filter(|s| !s.is_empty()).collect())
+            .unwrap_or_default()
+    };
+    let (wheel, seat) = (members("wheel"), members("seat"));
     passwd
         .lines()
         .filter_map(|l| {
@@ -168,7 +191,7 @@ pub fn accounts(passwd: &str, group: &str) -> Vec<Account> {
                 return None;
             }
             let full = String::from(gecos.split(',').next().unwrap_or("").trim());
-            Some(Account { name: name.into(), full, admin: wheel.contains(&name), uid })
+            Some(Account { name: name.into(), full, admin: wheel.contains(&name), desktop: seat.contains(&name), uid })
         })
         .collect()
 }
@@ -367,6 +390,7 @@ const ROW_REMOVE: usize = 2;
 const ROW_NAME: usize = 3;
 const ROW_FACE: usize = 4;
 const ROW_EXPIRE: usize = 5;
+const ROW_DESKTOP: usize = 6;
 
 /// What a key or click asks the program to do.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -400,6 +424,9 @@ pub enum Effect {
     Firewall(String),
     /// Ask the Bluetooth daemon (ADR 0113): its request's words.
     Bluetooth(String),
+    /// Run `slate-box` with these words (ADR 0183: `remove NAME`, `clean
+    /// NAME`, `remove-base DISTRO`).
+    Boxes(String),
     /// Make the picture at this path the wallpaper.
     Wallpaper(String),
     /// Make the picture at this path one's own account's (empty: none).
@@ -501,6 +528,83 @@ pub struct View {
     pub picture: Option<slate_image::Image>,
     /// The accounts' pictures, by login.
     pub faces: Vec<(String, slate_image::Image)>,
+    /// What slate-boxd says of the person's Linux boxes (ADR 0183; None:
+    /// it isn't running).
+    pub boxes: Option<Boxes>,
+}
+
+/// The person's Linux boxes and their disk, as slate-boxd's `usage`
+/// answers (ADR 0183's phase 6).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Boxes {
+    /// (name, distribution, bytes of its own).
+    pub boxes: Vec<(String, String, u64)>,
+    /// (name, title, bytes of its own, how many boxes share it).
+    pub bases: Vec<(String, String, u64, usize)>,
+    /// The disk's free bytes and size.
+    pub free: u64,
+    pub size: u64,
+}
+
+impl Boxes {
+    /// From `usage`'s answer lines (`is\tbox\t...`).
+    pub fn parse(lines: &str) -> Boxes {
+        let mut b = Boxes::default();
+        for l in lines.lines() {
+            let f: Vec<&str> = l.split('\t').collect();
+            match f.as_slice() {
+                ["is", "box", name, title, own, _] => {
+                    b.boxes.push((String::from(*name), String::from(*title), own.parse().unwrap_or(0)))
+                }
+                ["is", "base", name, title, own, _, users] => b.bases.push((
+                    String::from(*name),
+                    String::from(*title),
+                    own.parse().unwrap_or(0),
+                    users.parse().unwrap_or(0),
+                )),
+                ["is", "disk", free, size] => {
+                    b.free = free.parse().unwrap_or(0);
+                    b.size = size.parse().unwrap_or(0);
+                }
+                _ => {}
+            }
+        }
+        b
+    }
+
+    /// Ask slate-boxd (its socket; `None` when it doesn't answer).
+    pub fn read() -> Option<Boxes> {
+        let fd = slate_rt::net::connect_path(b"/run/slate-boxd.sock").ok()?;
+        let _ = slate_rt::io::write_all(fd, b"usage\n");
+        let mut text = alloc::vec::Vec::new();
+        let mut buf = [0u8; 4096];
+        while let Ok(n) = slate_rt::io::read(fd, &mut buf) {
+            if n == 0 {
+                break;
+            }
+            text.extend_from_slice(&buf[..n]);
+            if text.ends_with(b"ok\n") || text.windows(6).any(|w| w == b"error\t") {
+                break;
+            }
+        }
+        let _ = slate_rt::io::close(fd);
+        let text = String::from(slate_rt::lossy(&text));
+        text.lines().any(|l| l == "ok").then(|| Boxes::parse(&text))
+    }
+
+    /// Under a tenth of the disk is free.
+    pub fn low(&self) -> bool {
+        self.size > 0 && self.free < self.size / 10
+    }
+}
+
+/// Bytes for people: `1.2 GB`, `350 MB`, `12 KB`.
+pub fn human(b: u64) -> String {
+    match b {
+        b if b >= 1 << 30 => alloc::format!("{}.{} GB", b >> 30, ((b & ((1 << 30) - 1)) * 10) >> 30),
+        b if b >= 1 << 20 => alloc::format!("{} MB", b >> 20),
+        b => alloc::format!("{} KB", b.div_ceil(1024)),
+    }
 }
 
 /// The zones whose names hold every word of `query`, ignoring case, with
@@ -587,6 +691,7 @@ impl View {
             bluetooth: None,
             picture: None,
             faces: Vec::new(),
+            boxes: None,
         }
     }
 
@@ -637,6 +742,8 @@ impl View {
             // Each display, then the scale, then full graphics where
             // there is an AMD card.
             Section::Displays => self.displays.displays.len() + 1 + usize::from(self.graphics.is_some()),
+            // Each box (remove, then empty its cache), then each base.
+            Section::Boxes => self.boxes.as_ref().map_or(0, |b| b.boxes.len() * 2 + b.bases.len()),
             Section::About => 0,
         }
     }
@@ -647,7 +754,7 @@ impl View {
         if name == self.me {
             &[ROW_PASSWORD, ROW_NAME, ROW_FACE]
         } else {
-            &[ROW_ADMIN, ROW_PASSWORD, ROW_EXPIRE, ROW_NAME, ROW_REMOVE]
+            &[ROW_ADMIN, ROW_DESKTOP, ROW_PASSWORD, ROW_EXPIRE, ROW_NAME, ROW_REMOVE]
         }
     }
 
@@ -717,7 +824,11 @@ impl View {
         // forgets it).
         let port_row =
             section == Section::Security && row > self.security.compat_rows() && row < self.security.rows() - 1;
-        if !(section == Section::Session && row == 1) && !(section == Section::Bluetooth && row > 0) && !port_row {
+        if !(section == Section::Session && row == 1)
+            && !(section == Section::Bluetooth && row > 0)
+            && !(section == Section::Boxes && self.row == row)
+            && !port_row
+        {
             self.removing = false;
         }
         let s = &mut self.settings;
@@ -862,6 +973,50 @@ impl View {
                 }
                 self.removing = true;
                 self.say("Press Enter again to remove Strata.", true);
+                return Effect::Redraw;
+            }
+            Section::Boxes => {
+                let Some(b) = self.boxes.clone() else { return Effect::None };
+                let n = b.boxes.len();
+                if row < n * 2 {
+                    let (name, _, own) = &b.boxes[row / 2];
+                    if row % 2 == 1 {
+                        return Effect::Boxes(alloc::format!("clean {name}"));
+                    }
+                    if self.removing {
+                        self.removing = false;
+                        return Effect::Boxes(alloc::format!("remove {name} --yes"));
+                    }
+                    self.removing = true;
+                    self.say(
+                        &alloc::format!(
+                            "Press Enter again to remove {name} and everything in it (about {} comes back).",
+                            human(*own)
+                        ),
+                        true,
+                    );
+                    return Effect::Redraw;
+                }
+                let Some((name, title, own, users)) = b.bases.get(row - n * 2) else { return Effect::None };
+                if *users > 0 {
+                    self.say(
+                        &alloc::format!("{users} boxes are made from the {title} base: remove them first."),
+                        false,
+                    );
+                    return Effect::Redraw;
+                }
+                if self.removing {
+                    self.removing = false;
+                    return Effect::Boxes(alloc::format!("remove-base {name}"));
+                }
+                self.removing = true;
+                self.say(
+                    &alloc::format!(
+                        "Press Enter again to remove the {title} base (about {}; it comes back from its makers when a box needs it).",
+                        human(*own)
+                    ),
+                    true,
+                );
                 return Effect::Redraw;
             }
             Section::About => return Effect::None,
@@ -1291,10 +1446,14 @@ impl View {
     fn account_action(&mut self, name: &str) -> Effect {
         let acc = self.accounts.iter().find(|a| a.name == name);
         let admin = acc.is_some_and(|a| a.admin);
+        let desktop = acc.is_some_and(|a| a.desktop);
         let full = acc.map(|a| a.full.clone()).unwrap_or_default();
         match self.row {
             ROW_ADMIN => {
                 Effect::User(alloc::format!("{} {name}", if admin { "standard" } else { "admin" }), String::new())
+            }
+            ROW_DESKTOP => {
+                Effect::User(alloc::format!("{} {name}", if desktop { "no-desktop" } else { "desktop" }), String::new())
             }
             ROW_NAME => {
                 let mut field = LineEdit::new(&full).with_max(64);
@@ -2003,8 +2162,7 @@ fn main_page(
                 }
                 avatar(p, pal, f, x, y + 11.0, acc.shown(), v.face(&acc.name));
                 p.line(&st.name, x + 48.0, y + 9.0, 20.0, acc.shown());
-                let kind = if acc.admin { "administrator" } else { "standard" };
-                let line = alloc::format!("{} · {kind}", acc.name);
+                let line = alloc::format!("{} · {}", acc.name, kind(acc));
                 let lw = p.line(&st.desc, x + 48.0, y + 30.0, 18.0, &line);
                 if acc.name == v.me {
                     let tag = p.style(&f.mono, 10.5, pal.text_4);
@@ -2151,6 +2309,72 @@ fn main_page(
                     "SlateOS only, or full graphics with AMD's firmware.",
                 );
                 value(p, a, g.words(v.removing), false);
+            }
+        }
+        Section::Boxes => {
+            let Some(b) = &v.boxes else {
+                p.line(&st.desc, x, y, 18.0, "slate-boxd isn't answering (service slate-boxd status).");
+                return;
+            };
+            // The disk, and a warning in ochre (with its word) when it runs
+            // low (STRATA_COLORS.md: a warning, never colour alone).
+            let disk = alloc::format!("Free on their disk: {} of {}", human(b.free), human(b.size));
+            p.line(&st.label, x, y, 18.0, &disk);
+            y += 26.0;
+            if b.low() {
+                let ochre = pal.accents.ochre;
+                let a = Area::new(x - 12.0, y, w + 24.0, 34.0);
+                p.fill(a, 6.0, ochre.tint);
+                p.border(a, 6.0, 1.0, ochre.border);
+                let warn = p.style(&f.medium, 13.0, ochre.text);
+                p.line(&warn, x, y + 8.0, 18.0, "Low space: under a tenth of this disk is free. Removing a box, or emptying its cache, frees space.");
+                y += 46.0;
+            }
+            if b.boxes.is_empty() {
+                p.line(
+                    &st.desc,
+                    x,
+                    y,
+                    18.0,
+                    "No Linux boxes yet: one is made the first time a Linux program is built or run.",
+                );
+                y += 30.0;
+            }
+            for (i, (name, title, own)) in b.boxes.iter().enumerate() {
+                let desc = if name == "linux" {
+                    alloc::format!("Your Linux system · {title} · {} of its own", human(*own))
+                } else {
+                    alloc::format!("{title} · {} of its own", human(*own))
+                };
+                let a = row(p, hits, i * 2, y, name, &desc);
+                let right = if v.removing && v.row == i * 2 { "enter to remove" } else { "remove" };
+                value(p, a, right, false);
+                y += ROW_H + 4.0;
+                let a = row(
+                    p,
+                    hits,
+                    i * 2 + 1,
+                    y,
+                    "Empty its package cache",
+                    "Downloaded packages, kept in case they're needed again.",
+                );
+                value(p, a, "clean", false);
+                y += ROW_H + 12.0;
+            }
+            for (j, (_, title, own, users)) in b.bases.iter().enumerate() {
+                let i = b.boxes.len() * 2 + j;
+                let name = alloc::format!("{title} (the base)");
+                let desc = alloc::format!("{} · shared by {users} boxes", human(*own));
+                let a = row(p, hits, i, y, &name, &desc);
+                let right = if *users > 0 {
+                    ""
+                } else if v.removing && v.row == i {
+                    "enter to remove"
+                } else {
+                    "remove"
+                };
+                value(p, a, right, false);
+                y += ROW_H + 4.0;
             }
         }
         Section::About => {
@@ -2480,14 +2704,9 @@ fn account_page(
     let mut y = c.y + 64.0;
     let acc = v.accounts.iter().find(|a| a.name == name);
     let admin = acc.is_some_and(|a| a.admin);
+    let desktop = acc.is_some_and(|a| a.desktop);
     avatar(p, pal, f, x, y, acc.map_or(name, Account::shown), v.face(name));
-    p.line(
-        &st.desc,
-        x + 48.0,
-        y + 9.0,
-        18.0,
-        &alloc::format!("{name} · {}", if admin { "administrator" } else { "standard" }),
-    );
+    p.line(&st.desc, x + 48.0, y + 9.0, 18.0, &alloc::format!("{name} · {}", acc.map_or("standard", kind)));
     y += 56.0;
     let keyed = v.focus_visible;
     for &i in v.account_rows(name) {
@@ -2497,6 +2716,10 @@ fn account_page(
         }
         let (n, d) = match i {
             ROW_ADMIN => ("Administrator", "Can change system settings and install software, after approval."),
+            ROW_DESKTOP => (
+                "Can use the desktop",
+                "Strata starts when they log in; otherwise the command line. From their next login.",
+            ),
             ROW_PASSWORD => ("Change the password", "The password to log in with, and to approve changes."),
             ROW_NAME => ("Full name", "The name shown on the login and lock screens."),
             ROW_FACE => ("Picture", "Shown beside your name on the login and lock screens."),
@@ -2510,6 +2733,7 @@ fn account_page(
         p.line(&st.desc, x, y + 30.0, 18.0, d);
         match i {
             ROW_ADMIN => switch(p, pal, a.right() - 12.0 - 36.0, a.y + 19.0, admin),
+            ROW_DESKTOP => switch(p, pal, a.right() - 12.0 - 36.0, a.y + 19.0, desktop),
             ROW_PASSWORD | ROW_NAME | ROW_FACE => {
                 p.icon(Icon::ChevronRight, a.right() - 28.0, a.y + 21.0, 16.0, pal.text_4)
             }
@@ -2651,6 +2875,37 @@ fn system_accounts() -> Vec<Account> {
     accounts(&read(b"/etc/passwd"), &read(b"/etc/group"))
 }
 
+/// Run `slate-box WORDS` (ADR 0183): whether it succeeded, and its last
+/// line.
+fn slate_box(words: &str) -> (bool, String) {
+    let mut argv: Vec<Vec<u8>> = alloc::vec![b"/bin/slate-box".to_vec()];
+    argv.extend(words.split(' ').map(|w| w.as_bytes().to_vec()));
+    let Ok((r, w)) = slate_rt::process::pipe(slate_rt::fs::O_CLOEXEC) else { return (false, String::from("No pipe.")) };
+    let env: Vec<Vec<u8>> = slate_rt::env::vars().to_vec();
+    match slate_rt::process::fork() {
+        Ok(0) => {
+            let _ = slate_rt::process::dup2(w, 1);
+            let _ = slate_rt::process::dup2(w, 2);
+            if let Ok(null) = slate_rt::fs::open(b"/dev/null", slate_rt::fs::O_RDONLY, 0) {
+                let _ = slate_rt::process::dup2(null, 0);
+            }
+            let _ = slate_rt::process::execve(b"/bin/slate-box", &argv, &env);
+            slate_rt::process::exit_now(127)
+        }
+        Ok(pid) => {
+            let _ = slate_rt::io::close(w);
+            let out = slate_rt::io::read_to_end(r).unwrap_or_default();
+            let _ = slate_rt::io::close(r);
+            let st = slate_rt::process::wait(pid, 0).map(|(_, s)| s).unwrap_or(1);
+            let text = String::from(slate_rt::lossy(&out));
+            let last = text.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("").trim();
+            let last = String::from(last.strip_prefix("slate-box: ").unwrap_or(last));
+            (st == 0, last)
+        }
+        Err(e) => (false, alloc::format!("{e}")),
+    }
+}
+
 /// Ask slate-btd (ADR 0113), keep what it says now, and say on stderr
 /// what changed: devices found, a pairing's question, an outcome.
 fn bluetooth(v: &mut View, words: &str) {
@@ -2740,6 +2995,7 @@ pub fn main() -> i32 {
         v.graphics = Graphics::now();
         v.displays = crate::displays::Now::load();
         let mut bt_open = false;
+        let mut boxes_open = false;
         let paint = |v: &View, win: &Window, cache: &mut GlyphCache| -> (Canvas, Hits) {
             let pal = v.settings.palette();
             let mut canvas = win.canvas(pal.window);
@@ -2954,6 +3210,17 @@ pub fn main() -> i32 {
                     slate_rt::eprintln!("strata-settings: bluetooth: asked: {words}");
                     bluetooth(&mut v, &words);
                 }
+                Effect::Boxes(words) => {
+                    waiting(&mut v, &mut win, &mut conn, &mut cache)?;
+                    let before = v.boxes.as_ref().map_or(0, |b| b.free);
+                    let (ok, said) = slate_box(&words);
+                    v.boxes = Boxes::read();
+                    let freed = v.boxes.as_ref().map_or(0, |b| b.free).saturating_sub(before);
+                    slate_rt::eprintln!("strata-settings: boxes: {words}: {}", if ok { "done" } else { "failed" });
+                    let text = if ok { alloc::format!("Done: {} freed.", human(freed)) } else { said };
+                    v.row = v.row.min(v.rows().saturating_sub(1));
+                    v.say(&text, !ok);
+                }
                 Effect::Wallpaper(path) => match crate::faces::set_wallpaper(&path) {
                     Ok(()) => {
                         v.settings.picture = true;
@@ -3011,6 +3278,13 @@ pub fn main() -> i32 {
                 Effect::Paste => conn.paste(&win, slate_strata_client::clipboard::CLIPBOARD)?,
                 Effect::None | Effect::Redraw => {}
             }
+            // The Linux boxes page reads slate-boxd when it opens.
+            let boxes_page = v.current() == Section::Boxes;
+            if boxes_page && !boxes_open {
+                v.boxes = Boxes::read();
+                v.row = v.row.min(v.rows().saturating_sub(1));
+            }
+            boxes_open = boxes_page;
             // The Bluetooth page follows the daemon each second, keeps the
             // computer visible, and looks for devices when it opens.
             let on_page = v.current() == Section::Bluetooth;
@@ -3220,7 +3494,7 @@ mod tests {
 
     const PASSWD: &str = "root:x:0:0:root:/root:/bin/sh\nada:x:1000:1000:Ada Lovelace,,,:/home/ada:/bin/sh\n\
         bo:x:1001:1001::/home/bo:/bin/sh\nsvc:x:1002:1002::/:/sbin/nologin\n";
-    const GROUP: &str = "root:x:0:\nwheel:x:10:root,ada\nada:x:1000:\n";
+    const GROUP: &str = "root:x:0:\nwheel:x:10:root,ada\nseat:x:64:greeter,ada\nada:x:1000:\n";
 
     #[test]
     fn the_accounts() {
@@ -3228,8 +3502,8 @@ mod tests {
         assert_eq!(
             a,
             [
-                Account { name: "ada".into(), full: "Ada Lovelace".into(), admin: true, uid: 1000 },
-                Account { name: "bo".into(), full: String::new(), admin: false, uid: 1001 },
+                Account { name: "ada".into(), full: "Ada Lovelace".into(), admin: true, desktop: true, uid: 1000 },
+                Account { name: "bo".into(), full: String::new(), admin: false, desktop: false, uid: 1001 },
             ]
         );
         assert_eq!(a[1].shown(), "bo");
@@ -3295,6 +3569,10 @@ mod tests {
         v.key(KEY_ENTER, None, 0, &n);
         assert_eq!(v.page, Page::Account { name: "bo".into() });
         assert_eq!(v.key(KEY_SPACE, None, 0, &n), Effect::User("admin bo".into(), String::new()));
+        // The desktop: bo isn't in seat, so the switch turns it on.
+        v.key(KEY_DOWN, None, 0, &n);
+        assert_eq!(v.key(KEY_ENTER, None, 0, &n), Effect::User("desktop bo".into(), String::new()));
+        assert_eq!(kind(&v.accounts[1]), "standard · command line only");
         v.key(KEY_DOWN, None, 0, &n);
         v.key(KEY_ENTER, None, 0, &n);
         assert!(matches!(v.page, Page::Password { .. }));
@@ -3448,6 +3726,45 @@ mod tests {
              device 11:22:33:44:55:66 found near headphones Studio Headphones\n",
         ));
         v
+    }
+
+    /// Linux boxes (ADR 0183's phase 6): the disk and what each takes;
+    /// removing asks for Enter twice; a base boxes use stays.
+    pub fn boxes_view() -> View {
+        let mut v = View::new(Settings::default(), "UTC");
+        v.boxes = Some(Boxes::parse(
+            "is\tbox\tlinux\tArch Linux\t1288490189\t9000000000\n\
+             is\tbox\tdev\tArch Linux\t52428800\t9000000000\n\
+             is\tbase\tarch\tArch Linux\t1610612736\t1610612736\t2\n\
+             is\tdisk\t3221225472\t68719476736\nok\n",
+        ));
+        v
+    }
+
+    #[test]
+    fn boxes() {
+        let n = names();
+        let mut v = boxes_view();
+        let b = v.boxes.clone().unwrap();
+        assert_eq!(b.boxes[0], ("linux".into(), "Arch Linux".into(), 1288490189));
+        assert_eq!(b.bases[0].3, 2);
+        assert!(b.low(), "3 GB free of 64");
+        assert_eq!(human(b.boxes[0].2), "1.2 GB");
+        section(&mut v, Section::Boxes, &n);
+        assert_eq!(v.rows(), 5);
+        // Remove: Enter twice.
+        assert_eq!(v.key(KEY_ENTER, None, 0, &n), Effect::Redraw);
+        assert!(v.status.contains("about 1.2 GB comes back"), "{}", v.status);
+        assert_eq!(v.key(KEY_ENTER, None, 0, &n), Effect::Boxes("remove linux --yes".into()));
+        // Its cache: one Enter.
+        v.key(KEY_DOWN, None, 0, &n);
+        assert_eq!(v.key(KEY_ENTER, None, 0, &n), Effect::Boxes("clean linux".into()));
+        // The base two boxes use stays.
+        for _ in 0..3 {
+            v.key(KEY_DOWN, None, 0, &n);
+        }
+        assert_eq!(v.key(KEY_ENTER, None, 0, &n), Effect::Redraw);
+        assert!(v.status.contains("2 boxes are made from"), "{}", v.status);
     }
 
     #[test]

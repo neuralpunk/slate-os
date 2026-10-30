@@ -50,6 +50,12 @@ impl Seat {
             match s.next(5000)? {
                 (SERVER_SEAT_OPENED, _) => opened = true,
                 (SERVER_ENABLE_SEAT, _) => enabled = true,
+                (SERVER_ERROR, b) if errno(&b) == slate_rt::Errno::EACCES.0 => {
+                    return Err(String::from(
+                        "this account may not use the desktop: an administrator can allow it in Settings › \
+                         Users (\"Can use the desktop\"), or with `gpasswd -a NAME seat`",
+                    ));
+                }
                 (SERVER_ERROR, b) => return Err(format!("seatd refused the seat (error {})", errno(&b))),
                 _ => {}
             }

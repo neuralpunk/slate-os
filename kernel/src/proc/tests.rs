@@ -46,6 +46,7 @@ pub const TESTS: &[Test] = &[
     Test { name: "user::events", run: events },
     Test { name: "user::block", run: block },
     Test { name: "user::alpine_dynamic", run: alpine },
+    Test { name: "user::linux_runtime", run: linux_runtime },
     Test { name: "user::ext4", run: ext4 },
     Test { name: "user::net", run: net },
     Test { name: "user::tcp", run: tcp },
@@ -217,6 +218,12 @@ fn shell_script() -> Result<(), &'static str> {
 
 fn alpine() -> Result<(), &'static str> {
     ensure(sh(b"/test/alpine.sh")? == wait_status_exited(0), "Alpine (dynamic linking) checks failed")
+}
+
+/// tests/shell/linuxrt.sh: entering a Linux runtime, and its budget
+/// (M31 phase 1).
+fn linux_runtime() -> Result<(), &'static str> {
+    ensure(sh(b"/test/linuxrt.sh")? == wait_status_exited(0), "Linux runtime checks failed")
 }
 
 fn net() -> Result<(), &'static str> {

@@ -35,8 +35,14 @@
 //!                                                 Sway on Slate in QEMU (M18a; needs the internet once);
 //!                                                 --accept runs only M18a's acceptance
 //! cargo xtask linuxapp [--fresh]                  a Linux GUI program on Strata (M18d; needs the internet once)
-//! cargo xtask flatpak  [--fresh] [--accept]       Flatpak on Slate (ADR 0114; the internet): SLATE_FLATPAK_TRY=FILE
-//!                                                 runs FILE's commands; --accept runs only its acceptance
+//! cargo xtask flatpak  [--fresh] [--accept] [--measure]  Flatpak on Slate (ADR 0114; the internet): SLATE_FLATPAK_TRY=FILE
+//!                                                 runs FILE's commands; --accept runs only its acceptance; --measure
+//!                                                 times Linux apps' start-up, frames, keys and installs (M31);
+//!                                                 --browser: Firefox in one click on a fresh system (M31);
+//!                                                 --themed: a GTK app following Strata's theme (M31)
+//! cargo xtask box      [--fresh] [--probe]        Linux boxes (M33, ADR 0183; the internet): the workbench (an Arch box);
+//!                                                 SLATE_BOX_TRY=FILE runs FILE's commands on it; SLATE_BOX_PROBE=FILE
+//!                                                 with --probe runs them beside Arch Linux's bootstrap root
 //! cargo xtask unicode                             the terminal's character widths from the UCD in $SLATE_UCD
 //! cargo xtask keymaps                             the keyboard layouts from xkeyboard-config ($SLATE_XKB)
 //! cargo xtask zones                               the time zone table from the tz database ($SLATE_TZDIR)
@@ -51,6 +57,7 @@ mod apps;
 mod basepkg;
 mod bench;
 mod bluetooth;
+mod boxes;
 mod btfw;
 mod btredir;
 mod busybox;
@@ -88,6 +95,7 @@ mod unicode;
 mod user;
 mod userland;
 mod vnc;
+mod wlmeasure;
 mod zones;
 
 use std::path::{Path, PathBuf};
@@ -129,6 +137,14 @@ struct Opts {
     seat: Option<String>,
     /// `desktop`, `flatpak`: run the acceptance only.
     accept: bool,
+    /// `flatpak`: measure Linux apps' start-up, frames and installs (M31).
+    measure: bool,
+    /// `flatpak`: Firefox in one click on a fresh system (M31).
+    browser: bool,
+    /// `flatpak`: a GTK app themed by Strata (M31).
+    themed: bool,
+    /// `box`: run SLATE_BOX_PROBE's commands beside Arch's root (M33).
+    probe: bool,
     /// `try-install`: boot the virtual disk, not the install media.
     disk_only: bool,
     /// `try-install`: start from an empty virtual disk.
@@ -166,6 +182,10 @@ fn parse(args: &[String]) -> Result<(String, Opts)> {
             "--test-load" => o.test_load = true,
             "--fresh" => o.fresh = true,
             "--accept" => o.accept = true,
+            "--measure" => o.measure = true,
+            "--probe" => o.probe = true,
+            "--browser" => o.browser = true,
+            "--themed" => o.themed = true,
             "--disk" => o.disk_only = true,
             "--new-disk" => o.new_disk = true,
             "--give-back" => o.give_back = true,
@@ -230,7 +250,13 @@ fn main() -> ExitCode {
         "desktop" => desktop::run(o.fresh, o.seat.as_deref().unwrap_or("seatd")),
         "linuxapp" => linuxapp::run(o.fresh),
         "flatpak" if o.accept => flatpak::accept(),
+        "flatpak" if o.measure => wlmeasure::measure(o.fresh),
+        "flatpak" if o.browser => flatpak::browser_fresh(),
+        "flatpak" if o.themed => flatpak::themed(),
         "flatpak" => flatpak::run(o.fresh),
+        "box" if o.probe => boxes::probe(),
+        "box" if o.accept => boxes::accept(),
+        "box" => boxes::run(o.fresh),
         "unicode" => unicode::generate(),
         "keymaps" => keymaps::generate(),
         "zones" => zones::generate(),

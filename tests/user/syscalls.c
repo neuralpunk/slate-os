@@ -191,5 +191,77 @@ int main(int argc, char **argv, char **envp) {
     check("ioprio_bad_which", syscall(SYS_ioprio_get, 4, 0) == -1 && errno == EINVAL);
     check("ioprio_missing", syscall(SYS_ioprio_get, 1, 999999) == -1 && errno == ESRCH);
     check("ioprio_reset", syscall(SYS_ioprio_set, 1, 0, 0) == 0 && syscall(SYS_ioprio_get, 1, 0) == 0);
+
+    /* fchmodat2(2) (452, Linux 6.6; ADR 0183: coreutils' chmod in Arch
+       uses it): a file by name, through a link unless AT_SYMLINK_NOFOLLOW
+       (then EOPNOTSUPP on the link), the descriptor's with AT_EMPTY_PATH,
+       unknown flags EINVAL. */
+    {
+        struct stat st;
+        int fd = open("/tmp/fchmodat2", O_CREAT | O_WRONLY | O_TRUNC, 0644);
+        unlink("/tmp/fchmodat2-link");
+        int ok = fd >= 0 && symlink("/tmp/fchmodat2", "/tmp/fchmodat2-link") == 0;
+        check("fchmodat2_name", ok && syscall(452, AT_FDCWD, "/tmp/fchmodat2", 0600, 0) == 0 &&
+                                    stat("/tmp/fchmodat2", &st) == 0 && (st.st_mode & 07777) == 0600);
+        check("fchmodat2_follow", syscall(452, AT_FDCWD, "/tmp/fchmodat2-link", 0640, 0) == 0 &&
+                                      stat("/tmp/fchmodat2", &st) == 0 && (st.st_mode & 07777) == 0640);
+        check("fchmodat2_nofollow_link",
+              syscall(452, AT_FDCWD, "/tmp/fchmodat2-link", 0600, AT_SYMLINK_NOFOLLOW) == -1 && errno == EOPNOTSUPP);
+        check("fchmodat2_nofollow_file", syscall(452, AT_FDCWD, "/tmp/fchmodat2", 0604, AT_SYMLINK_NOFOLLOW) == 0);
+        check("fchmodat2_empty_path", syscall(452, fd, "", 0611, AT_EMPTY_PATH) == 0 &&
+                                          fstat(fd, &st) == 0 && (st.st_mode & 07777) == 0611);
+        check("fchmodat2_bad_flags", syscall(452, AT_FDCWD, "/tmp/fchmodat2", 0600, 1) == -1 && errno == EINVAL);
+        close(fd);
+        unlink("/tmp/fchmodat2-link");
+        unlink("/tmp/fchmodat2");
+    }
+
+    /* splice(2) (ADR 0183): a file into a pipe from an offset (updated,
+       the file's own offset untouched), the pipe out to a file; neither
+       end a pipe is EINVAL, an offset on a pipe ESPIPE, an empty pipe
+       with SPLICE_F_NONBLOCK EAGAIN. */
+    {
+        int p[2], ok = pipe(p) == 0;
+        int src = open("/tmp/splice-src", O_CREAT | O_RDWR | O_TRUNC, 0644);
+        int dst = open("/tmp/splice-dst", O_CREAT | O_RDWR | O_TRUNC, 0644);
+        ok = ok && src >= 0 && dst >= 0 && write(src, "0123456789", 10) == 10;
+        loff_t off = 2;
+        check("splice_file_to_pipe", ok && splice(src, &off, p[1], NULL, 5, 0) == 5 && off == 7 &&
+                                         lseek(src, 0, SEEK_CUR) == 10);
+        char buf[16] = {0};
+        check("splice_pipe_to_file", splice(p[0], NULL, dst, NULL, 16, 0) == 5 && pread(dst, buf, 16, 0) == 5 &&
+                                         memcmp(buf, "23456", 5) == 0);
+        check("splice_no_pipe", splice(src, NULL, dst, NULL, 4, 0) == -1 && errno == EINVAL);
+        check("splice_pipe_offset", splice(p[0], &off, dst, NULL, 4, 0) == -1 && errno == ESPIPE);
+        check("splice_nonblock_empty", splice(p[0], NULL, dst, NULL, 4, SPLICE_F_NONBLOCK) == -1 && errno == EAGAIN);
+        close(p[0]);
+        close(p[1]);
+        close(src);
+        close(dst);
+        unlink("/tmp/splice-src");
+        unlink("/tmp/splice-dst");
+    }
+
+    /* statx(2)'s STATX_MNT_ID (0x1000) and STATX_MNT_ID_UNIQUE (0x4000;
+       ADR 0183: systemd's path lookups need them): / has the mount ID
+       /proc/self/mountinfo gives it. stx_mnt_id is at byte 144. */
+    {
+        unsigned char sx[256] = {0};
+        long r = syscall(SYS_statx, AT_FDCWD, "/", 0, 0x1000 | 0x4000, sx);
+        uint32_t mask;
+        uint64_t mnt;
+        memcpy(&mask, sx, 4);
+        memcpy(&mnt, sx + 144, 8);
+        unsigned long want = 0;
+        FILE *mi = fopen("/proc/self/mountinfo", "r");
+        char line[512];
+        while (mi && fgets(line, sizeof line, mi)) {
+            unsigned long id, parent;
+            char point[256];
+            if (sscanf(line, "%lu %lu %*s %*s %255s", &id, &parent, point) == 3 && strcmp(point, "/") == 0) want = id;
+        }
+        if (mi) fclose(mi);
+        check("statx_mnt_id", r == 0 && (mask & 0x5000) == 0x5000 && want != 0 && mnt == want);
+    }
     return failures;
 }

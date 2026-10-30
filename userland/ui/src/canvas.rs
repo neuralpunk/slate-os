@@ -277,6 +277,23 @@ impl Canvas {
         }
     }
 
+    /// Copy an opaque image at (x, y): its pixels' fourth byte means
+    /// nothing (XRGB8888), so it is made opaque on the way.
+    pub fn copy_opaque(&mut self, x: i32, y: i32, w: i32, h: i32, data: &[u32]) {
+        let area = Rect::new(x, y, w, h).intersect(&self.clip);
+        if area.is_empty() {
+            return;
+        }
+        let n = area.w as usize;
+        for py in area.y..area.bottom() {
+            let src = &data[((py - y) * w + (area.x - x)) as usize..][..n];
+            let dst = &mut self.pixels[(py * self.width + area.x) as usize..][..n];
+            for (d, &s) in dst.iter_mut().zip(src) {
+                *d = s | 0xFF00_0000;
+            }
+        }
+    }
+
     /// Composite an image (0xAARRGGBB, not premultiplied) at (x, y).
     pub fn draw_image(&mut self, x: i32, y: i32, w: i32, h: i32, data: &[u32]) {
         let area = Rect::new(x, y, w, h).intersect(&self.clip);
@@ -364,6 +381,20 @@ fn opaque(row: &[u32]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn opaque_images_are_copied_whatever_their_fourth_byte() {
+        let mut c = Canvas::new(4, 2, Color::rgb(0x111111));
+        c.set_clip(Rect::new(0, 0, 3, 2));
+        // XRGB8888 with nothing (or anything) in the fourth byte.
+        c.copy_opaque(1, 0, 3, 1, &[0x0012_3456, 0x7F65_4321, 0x00AB_CDEF]);
+        assert_eq!(c.pixel(0, 0), 0xFF11_1111);
+        assert_eq!(c.pixel(1, 0), 0xFF12_3456);
+        assert_eq!(c.pixel(2, 0), 0xFF65_4321);
+        // Outside the clip.
+        assert_eq!(c.pixel(3, 0), 0xFF11_1111);
+        assert_eq!(c.pixel(1, 1), 0xFF11_1111);
+    }
 
     #[test]
     fn clipping() {

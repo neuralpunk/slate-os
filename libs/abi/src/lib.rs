@@ -134,6 +134,10 @@ pub mod nr {
     /// only; ADR 0060). `SET` (pid, name, len): tag init's child `pid`;
     /// `KILL` (name, len, signal) → how many processes were signalled.
     pub const SERVICE: u64 = 15;
+    /// (name, len): tag the caller as a process of the Linux box `name`
+    /// (ADR 0183), once: inherited on fork and exec, never changed or
+    /// removed; `Box:` in /proc/PID/status. EEXIST when tagged already.
+    pub const BOX_TAG: u64 = 16;
 
     // Paths. `dir` is an open directory or `CWD`; paths are (ptr, len).
     /// (dir, path, len, flags: `open::*`, mode) → fd
@@ -366,6 +370,14 @@ pub mod nr {
     /// (fd, watch number)
     pub const WATCH_REMOVE: u64 = 122;
 
+    // Namespaces (ADR 0183: Linux boxes are made by Slate's own programs).
+    /// (flags: `ns::*`): move the caller into new namespaces (unshare(2));
+    /// `PID` only affects its later children.
+    pub const UNSHARE: u64 = 130;
+    /// (new root, len, put old, len): pivot_root(2) in the caller's mount
+    /// namespace.
+    pub const PIVOT_ROOT: u64 = 131;
+
     /// Every call's number and name, for tracing and documentation.
     pub const ALL: &[(u64, &str)] = &[
         (READ, "read"),
@@ -384,6 +396,7 @@ pub mod nr {
         (READDIR, "readdir"),
         (FLOCK, "flock"),
         (SERVICE, "service"),
+        (BOX_TAG, "box_tag"),
         (OPEN, "open"),
         (STAT, "stat"),
         (MKDIR, "mkdir"),
@@ -471,6 +484,8 @@ pub mod nr {
         (WATCH_OPEN, "watch_open"),
         (WATCH_ADD, "watch_add"),
         (WATCH_REMOVE, "watch_remove"),
+        (UNSHARE, "unshare"),
+        (PIVOT_ROOT, "pivot_root"),
     ];
 
     /// The name of call `n`.
@@ -700,6 +715,22 @@ pub mod reboot {
 }
 
 /// `service` operations (ADR 0060).
+/// `unshare`'s namespace kinds (ADR 0183).
+pub mod ns {
+    pub const USER: u32 = 1;
+    pub const MOUNT: u32 = 2;
+    pub const PID: u32 = 4;
+    pub const UTS: u32 = 8;
+    pub const IPC: u32 = 16;
+    pub const NET: u32 = 32;
+}
+
+/// `box_tag` (ADR 0183).
+pub mod box_tag {
+    /// The longest box name.
+    pub const NAME_MAX: usize = 32;
+}
+
 pub mod service {
     /// (pid, name, len): put init's child `pid` in service `name`.
     pub const SET: u32 = 1;

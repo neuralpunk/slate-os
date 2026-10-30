@@ -15,8 +15,16 @@ path = "src/main.rs"
 test = false
 bench = false
 
+# A Wayland test client for the measurements and tests (M31 phase 1).
+[[bin]]
+name = "wl-probe"
+path = "src/probe_main.rs"
+test = false
+bench = false
+
 [dependencies]
 slate-rt = { path = "../rt" }
+slate-abi = { path = "../../libs/abi" }
 slate-ui = { path = "../ui" }
 slate-display = { path = "../display" }
 slate-term = { path = "../../libs/term" }

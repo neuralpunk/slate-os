@@ -17,6 +17,7 @@ slate-qpkg = { path = "../../libs/qpkg" }
 slate-elfsign = { path = "../../libs/elfsign" }
 slate-hash = { path = "../../libs/hash" }
 slate-dns = { path = "../../libs/dns" }
+slate-pgp = { path = "../../libs/pgp" }
 
 [lints]
 workspace = true

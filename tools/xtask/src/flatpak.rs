@@ -413,6 +413,220 @@ fn browser_checks(con: &mut Console, out: &mut Vec<(&'static str, bool)>) -> Res
     Ok(())
 }
 
+/// M31's "Firefox in one click" (ADR 0155; part of `cargo xtask accept`,
+/// or `cargo xtask flatpak --browser`): on a system with no Linux runtime
+/// (an empty disk where it goes) and Linux compatibility on, as root in
+/// Strata: the Web Browser opened, one key on "Get Firefox", one on the
+/// approval if one is asked (root's isn't), and nothing else. The runtime is set up, Firefox fetched
+/// with its progress shown as a percentage, and opened on a page whose
+/// title comes back through strata-wl. The time from the click to the
+/// page goes to target/flatpak/browser.txt.
+pub fn browser_fresh() -> Result {
+    let started = Instant::now();
+    println!("xtask: accept: Firefox in one click on a system without a Linux runtime (M31)");
+    let disk = dir().join("fresh.img");
+    let _ = std::fs::remove_file(&disk);
+    std::fs::create_dir_all(dir()).map_err(|e| e.to_string())?;
+    run_cmd(Command::new("mkfs.ext4").args(["-q", "-F", "-b", "4096", "-L", "linux"]).arg(&disk).arg("24G"))?;
+    let mon = dir().join("browser-monitor.sock");
+    let _ = std::fs::remove_file(&mon);
+    let mut con = crate::desktop::boot(&disk, Some(&mon), false)?;
+    let mut checks: Vec<(&str, bool)> = Vec::new();
+    let mut took = None;
+    let r = (|| -> Result {
+        con.login()?;
+        con.run(MOUNT, "mounted2", 30)?;
+        con.run("mkdir -p /mnt/workbench/fphome /home/fp && mount -o bind /mnt/workbench/fphome /home/fp && echo bound$((1+1))", "bound2", 30)?;
+        con.run("ls /var/lib/slate/linux | wc -l | sed 's/^ */entries-/'", "entries-0", 10)?;
+        con.run("strata > /tmp/strata.log 2>&1 & sleep 3", "", 30)?;
+        con.run("HOME=/home/fp SLATE_APPS_TRACE=1 web-browser https://example.com/ > /tmp/wb.log 2>&1 &", "", 10)?;
+        let offered = con.run(
+            "for i in $(seq 100); do grep -q 'web-browser: offering' /tmp/wb.log && break; sleep 0.2; done; grep -a 'web-browser: offering' /tmp/wb.log",
+            "(set up: needed, fetch: needed)",
+            40,
+        );
+        checks.push(("offered", offered.is_ok()));
+        offered?;
+        std::thread::sleep(std::time::Duration::from_millis(1500));
+        // The one click: Enter on "Get Firefox".
+        crate::qemu::monitor(&mon, &["sendkey ret"])?;
+        let clicked = Instant::now();
+        // Root's request is granted without a dialog (the broker asks only
+        // other people, ADR 0035); one that comes is answered.
+        std::thread::sleep(std::time::Duration::from_millis(3000));
+        if con
+            .run("grep -ac 'strata: approval: browser=setup' /tmp/strata.log | sed 's/^/asked-/'", "asked-1", 10)
+            .is_ok()
+        {
+            crate::qemu::monitor(&mon, &["sendkey ret"])?;
+        }
+        let _ = std::fs::write(dir().join("browser.log"), crate::qemu::strip_ansi(&con.log));
+        // Set up, fetched with a percentage, and the page: its title.
+        let page = con.run(
+            "for i in $(seq 3600); do grep -q 'strata-wl: title \"Example Domain' /tmp/wb.log /home/fp/.cache/slate/browser.log 2>/dev/null && break; sleep 0.5; done; \
+             grep -ac 'strata-wl: title \"Example Domain' /home/fp/.cache/slate/browser.log | sed 's/^/pa''ge-/'",
+            "page-",
+            1900,
+        );
+        took = Some(clicked.elapsed().as_secs_f64());
+        // What the Web Browser said besides setup's steps, for the transcript.
+        con.run("grep -av 'web-browser: setup:' /tmp/wb.log | tail -n 40", "", 30)?;
+        let shown = con.output(
+            "grep -a 'web-browser: setup:\\|web-browser: fetching\\|web-browser: starting' /tmp/wb.log | tail -n 40",
+            30,
+        )?;
+        let setup_seen = shown.iter().filter(|l| l.contains("web-browser: setup:")).count();
+        let pcts: Vec<u32> = shown
+            .iter()
+            .filter_map(|l| l.split("web-browser: fetching ").nth(1)?.split('%').next()?.parse().ok())
+            .collect();
+        println!("xtask: accept: setup said {setup_seen} steps; fetching said {pcts:?}");
+        checks.push(("setup-progress", setup_seen >= 3));
+        checks.push(("fetch-percentages", pcts.len() >= 3 && pcts.windows(2).all(|w| w[0] <= w[1])));
+        checks.push(("started", shown.iter().any(|l| l.contains("web-browser: starting org.mozilla.firefox"))));
+        // No more than one question was asked.
+        let asked = con.output("grep -ac 'strata: approval:' /tmp/strata.log", 10)?;
+        checks.push(("at-most-one-approval", asked.iter().any(|l| l.trim() == "0" || l.trim() == "1")));
+        checks.push(("page-loads", page.is_ok() && con.last_line_with("page-").is_some_and(|l| l != "page-0")));
+        kernel_notes(&mut con)?;
+        con.poweroff()
+    })();
+    std::fs::write(dir().join("browser.log"), crate::qemu::strip_ansi(&con.log)).map_err(|e| e.to_string())?;
+    let _ = std::fs::remove_file(&disk);
+    if let Some(t) = took {
+        let _ = std::fs::write(dir().join("browser.txt"), format!("click to page: {t:.0} s\n"));
+        println!("xtask: accept: from the click to the page: {t:.0} s");
+    }
+    for (name, ok) in &checks {
+        println!("ACCEPT: {} m31::browser::{name}", if *ok { "PASS" } else { "FAIL" });
+    }
+    if let Err(e) = r {
+        con.kill();
+        return Err(format!("flatpak --browser: {e} (transcript in target/flatpak/browser.log)"));
+    }
+    let failed: Vec<&str> = checks.iter().filter(|c| !c.1).map(|c| c.0).collect();
+    if !failed.is_empty() {
+        return Err(format!(
+            "M31's browser checks failed: {} (transcript in target/flatpak/browser.log)",
+            failed.join(", ")
+        ));
+    }
+    println!("xtask: accept: Firefox in one click passed ({:.0}s)", started.elapsed().as_secs_f64());
+    Ok(())
+}
+
+/// The mean brightness (0 to 1) of the screenshot `shot` in the
+/// rectangle (x, y, w, h), every fourth pixel.
+fn brightness(shot: &std::path::Path, (x, y, w, h): (usize, usize, usize, usize)) -> Result<f64> {
+    let (mut sum, mut n) = (0.0, 0.0);
+    for py in (y..y + h).step_by(4) {
+        for px in (x..x + w).step_by(4) {
+            let [r, g, b] = crate::qemu::ppm_pixel(shot, px, py)?;
+            sum += (0.2126 * f64::from(r) + 0.7152 * f64::from(g) + 0.0722 * f64::from(b)) / 255.0;
+            n += 1.0;
+        }
+    }
+    Ok(if n > 0.0 { sum / n } else { 0.0 })
+}
+
+/// M31's theming (ADR 0182; part of `cargo xtask accept`, or `cargo xtask
+/// flatpak --themed`): GNOME's Calculator (GTK 4 and libadwaita) from
+/// Flathub, in root's Strata on the workbench. With Graphite it is dark;
+/// with Strata's theme changed to Light, while it runs, it turns light
+/// (the Settings portal's `SettingChanged`); its window has its own name
+/// and icon; Strata's fonts are inside its sandbox.
+pub fn themed() -> Result {
+    const CALC: &str = "org.gnome.Calculator";
+    let started = Instant::now();
+    println!("xtask: accept: a GTK app themed by Strata (M31)");
+    let wb = workbench(false)?;
+    let disk = scratch_copy(&wb, "themed.img")?;
+    let mon = dir().join("themed-monitor.sock");
+    let _ = std::fs::remove_file(&mon);
+    let mut con = crate::desktop::boot(&disk, Some(&mon), false)?;
+    let mut checks: Vec<(&str, bool)> = Vec::new();
+    let r = (|| -> Result {
+        con.login()?;
+        con.run(MOUNT, "mounted2", 30)?;
+        con.run(HOME, "bound2", 30)?;
+        // Strata's fonts go into a runtime as it is set up (again).
+        con.run("slate-linux setup flatpak > /tmp/setup.log 2>&1; echo setup-$?", "setup-0", 900)?;
+        con.run("mkdir -p /home/fp/.config/strata && echo theme=graphite > /home/fp/.config/strata/settings", "", 10)?;
+        con.run("HOME=/home/fp strata > /tmp/strata.log 2>&1 & sleep 3", "", 30)?;
+        con.run(
+            &format!("HOME=/home/fp slate-flatpak install {CALC} > /tmp/install.log 2>&1; echo inst-$?"),
+            "inst-0",
+            2400,
+        )?;
+        // Flathub's catalog, fetched after the install in the background,
+        // has the icon GNOME's apps export only as SVG.
+        con.run(
+            "for i in $(seq 240); do [ -e /home/fp/.local/share/flatpak/appstream/flathub/x86_64/active/appstream.xml.gz ] && break; sleep 0.5; done; echo catalog-done",
+            "catalog-done",
+            150,
+        )?;
+        con.run(&format!("HOME=/home/fp slate-flatpak run {CALC} > /tmp/calc.log 2>&1 & app=$!"), "", 10)?;
+        con.run(
+            "for i in $(seq 300); do grep -q 'strata-wl: timing' /tmp/calc.log && break; sleep 0.2; done; grep -a 'strata-wl: timing' /tmp/calc.log",
+            "first frame",
+            90,
+        )?;
+        std::thread::sleep(std::time::Duration::from_secs(5));
+        let lines = con.output("grep -a 'from pid\\|own icon\\|placed at' /tmp/strata.log | tail -n 6", 20)?;
+        checks.push(("own-name-and-icon", lines.iter().any(|l| l.contains("\"Calculator\" has its own icon"))));
+        let at = lines
+            .iter()
+            .rev()
+            .find_map(|l| {
+                let v: Vec<f64> = l.split(" placed at ").nth(1)?.split(' ').filter_map(|n| n.parse().ok()).collect();
+                (v.len() == 4).then(|| (v[0], v[1], v[2], v[3]))
+            })
+            .ok_or("no window placed")?;
+        // The window's content, away from its edges and the title bar.
+        let area =
+            ((at.0 + at.2 * 0.15) as usize, (at.1 + 60.0) as usize, (at.2 * 0.7) as usize, (at.3 * 0.6) as usize);
+        let dark = brightness(&crate::qemu::screendump(&mon, "themed-dark.ppm")?, area)?;
+        con.run("echo theme=light > /home/fp/.config/strata/settings; sleep 4", "", 30)?;
+        let light = brightness(&crate::qemu::screendump(&mon, "themed-light.ppm")?, area)?;
+        println!("xtask: accept: the Calculator's brightness: {dark:.2} with Graphite, {light:.2} with Light");
+        checks.push(("dark-with-graphite", dark < 0.4));
+        checks.push(("light-when-changed", light > 0.6));
+        let portal = con.output("grep -a 'slate-portal' /tmp/calc.log", 10)?;
+        checks.push(("portal", portal.iter().any(|l| l.contains("org.freedesktop.portal.Desktop"))));
+        checks.push(("setting-changed", portal.iter().any(|l| l.contains("color-scheme changed"))));
+        con.run(
+            "for p in /proc/[0-9]*; do [ \"$(cat $p/comm 2>/dev/null)\" = sway ] && kill ${p#/proc/}; done; sleep 2",
+            "",
+            30,
+        )?;
+        let fonts = con.output(
+            &format!("HOME=/home/fp slate-linux-app /usr/bin/flatpak run --command=fc-list {CALC} 2>/dev/null | grep -c 'Host Grotesk'"),
+            120,
+        )?;
+        checks.push(("strata-fonts-inside", fonts.iter().any(|l| l.trim().parse::<u32>().is_ok_and(|n| n > 0))));
+        kernel_notes(&mut con)?;
+        con.poweroff()
+    })();
+    std::fs::write(dir().join("themed.log"), crate::qemu::strip_ansi(&con.log)).map_err(|e| e.to_string())?;
+    let _ = std::fs::remove_file(&disk);
+    for (name, ok) in &checks {
+        println!("ACCEPT: {} m31::themed::{name}", if *ok { "PASS" } else { "FAIL" });
+    }
+    if let Err(e) = r {
+        con.kill();
+        return Err(format!("flatpak --themed: {e} (transcript in target/flatpak/themed.log)"));
+    }
+    let failed: Vec<&str> = checks.iter().filter(|c| !c.1).map(|c| c.0).collect();
+    if !failed.is_empty() {
+        return Err(format!(
+            "M31's theming checks failed: {} (transcript in target/flatpak/themed.log)",
+            failed.join(", ")
+        ));
+    }
+    println!("xtask: accept: a GTK app themed by Strata passed ({:.0}s)", started.elapsed().as_secs_f64());
+    Ok(())
+}
+
 /// M28 phase 7's acceptance (part of `cargo xtask accept`; ADR 0114).
 pub fn accept() -> Result {
     let started = Instant::now();

@@ -1877,6 +1877,9 @@ fn per_process(
             if let Some(svc) = p.service.lock().clone() {
                 let _ = writeln!(s, "Service:\t{svc}");
             }
+            if let Some(b) = p.box_tag.lock().clone() {
+                let _ = writeln!(s, "Box:\t{b}");
+            }
             if let Some(perms) = crate::proc::apps::describe(p.app()) {
                 let _ = writeln!(s, "Permissions:\t{perms}");
             }

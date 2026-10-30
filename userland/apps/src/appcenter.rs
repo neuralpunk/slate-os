@@ -746,8 +746,14 @@ impl App for Center {
                 let ew = p.line(&meta, x + tw + 10.0, y + 2.0, 16.0, &el);
                 if let Some(said) = &self.said {
                     let sx = x + tw + 10.0 + ew + 12.0;
+                    let shown = said.strip_prefix("slate-flatpak: ").unwrap_or(said);
                     if sx < a.right() - 80.0 {
-                        p.line(&meta, sx, y + 2.0, 16.0, &kit::fit(p, &meta, said, a.right() - sx - 20.0));
+                        p.line(&meta, sx, y + 2.0, 16.0, &kit::fit(p, &meta, shown, a.right() - sx - 20.0));
+                    }
+                    // How far, when slate-flatpak says so (M31 phase 3).
+                    if let Some(f) = kit::flatpak_fraction(said) {
+                        let bar = Area::new(x, y - 12.0, (a.right() - x - 20.0).max(40.0), 4.0);
+                        kit::progress_bar(p, pal, bar, Some(f), self.now);
                     }
                 }
             }

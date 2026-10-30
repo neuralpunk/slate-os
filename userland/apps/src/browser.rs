@@ -132,6 +132,10 @@ pub struct Browser {
     /// How far setting the runtime up is, and what Flatpak last said.
     pub setup: Option<kit::SetupProgress>,
     pub said: Option<String>,
+    /// How far fetching is (slate-flatpak's percentage lines, M31 phase 3),
+    /// and the steps first use has (1 or 2: the runtime, the browser).
+    pub fetched: Option<f32>,
+    steps: usize,
     /// The monotonic clock, as last ticked (ms).
     pub now: i64,
 }
@@ -152,6 +156,8 @@ impl Browser {
             done: false,
             setup: None,
             said: None,
+            fetched: None,
+            steps: usize::from(needs.setup) + usize::from(needs.fetch),
         }
     }
 
@@ -181,6 +187,7 @@ impl Browser {
                 self.since = self.now;
                 self.setup = None;
                 self.said = None;
+                self.fetched = None;
             }
             Err(e) => self.stage = Stage::Failed(alloc::format!("Couldn't start: {e}")),
         }
@@ -408,10 +415,23 @@ impl App for Browser {
         y += 6.0;
         match &self.stage {
             Stage::SettingUp | Stage::Fetching => {
-                let what = if self.stage == Stage::SettingUp {
-                    String::from("Setting up the Linux runtime…")
+                // One step of two when both are needed, and how far it is.
+                let (step, pct) = if self.stage == Stage::SettingUp {
+                    (1, self.setup.as_ref().map(|s| s.fraction()))
                 } else {
-                    alloc::format!("Fetching {name} from Flathub…")
+                    (self.steps, self.fetched)
+                };
+                let mut what = if self.stage == Stage::SettingUp {
+                    String::from("Setting up the Linux runtime")
+                } else {
+                    alloc::format!("Fetching {name} from Flathub")
+                };
+                if self.steps > 1 {
+                    what = alloc::format!("{what} ({step} of {})", self.steps);
+                }
+                let what = match pct {
+                    Some(f) => alloc::format!("{what}: {}%", (f * 100.0) as u32),
+                    None => alloc::format!("{what}…"),
                 };
                 // A spinner, what is under way and how long it has taken,
                 // a bar (how far setup is; sliding while fetching), and
@@ -423,13 +443,13 @@ impl App for Browser {
                 let fraction = if self.stage == Stage::SettingUp {
                     Some(self.setup.as_ref().map_or(0.0, |s| s.fraction()))
                 } else {
-                    None
+                    self.fetched
                 };
                 kit::progress_bar(p, pal, Area::new(x, y + 34.0, w, 6.0), fraction, self.now);
                 let detail = match (&self.stage, &self.setup, &self.said) {
                     (Stage::SettingUp, Some(s), _) => s.say(),
                     (Stage::SettingUp, None, _) => String::from("Waiting for approval…"),
-                    (_, _, Some(said)) => said.clone(),
+                    (_, _, Some(said)) => String::from(said.strip_prefix("slate-flatpak: ").unwrap_or(said)),
                     _ => String::from("the browser opens by itself"),
                 };
                 p.line(&meta, x, y + 50.0, 16.0, &kit::fit(p, &meta, &detail, w));
@@ -517,6 +537,13 @@ impl App for Browser {
                 return true;
             }
             if let Some(t) = &j.progress {
+                // How far, when slate-flatpak says so; said at each tenth.
+                if let Some(f) = kit::flatpak_fraction(t) {
+                    if self.fetched.is_none_or(|was| (was * 10.0) as u32 != (f * 10.0) as u32) {
+                        crate::trace!("web-browser: fetching {}%: {t}", (f * 100.0) as u32);
+                    }
+                    self.fetched = Some(f);
+                }
                 self.said = Some(t.clone());
             }
         }
@@ -666,6 +693,15 @@ pub mod tests {
         b.finished(Err("no network".into()));
         assert_eq!(b.stage, Stage::Failed("Firefox wasn't fetched: no network".into()));
         assert!(!b.done);
+    }
+
+    #[test]
+    fn progress() {
+        assert_eq!(kit::flatpak_fraction("slate-flatpak: 42% of 173.8 MB: org.mozilla.firefox (2 of 2)"), Some(0.42));
+        assert_eq!(kit::flatpak_fraction("Installing app/org.mozilla.firefox/x86_64/stable"), None);
+        let b = Browser::new(FIREFOX, Needs { setup: true, fetch: true }, Vec::new());
+        assert_eq!(b.steps, 2);
+        assert_eq!(Browser::new(FIREFOX, Needs { setup: false, fetch: true }, Vec::new()).steps, 1);
     }
 
     #[test]

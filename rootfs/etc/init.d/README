@@ -15,11 +15,12 @@ restart and status, and carries an LSB header:
 
 slinit starts and stops scripts in the order these headers imply.
 `service NAME start|stop|restart|status` asks slinit to do so by hand.
-Slate ships eight services: sshd, its own SSH server (ADR 0030),
+Slate ships nine services: sshd, its own SSH server (ADR 0030),
 slate-brokerd, the privilege broker (ADR 0032), devd, the device
 database, seatd, the seat daemon (ADR 0033), netd, the network daemon
 (ADR 0048), logd, the system log (ADR 0060), slate-btd, Bluetooth
-(ADR 0113), and fstrim, the weekly trim (ADR 0122).
+(ADR 0113), slate-boxd, Linux boxes (ADR 0183), and fstrim, the weekly
+trim (ADR 0122).
 
 A service's output (and that of everything it starts) goes to
 /var/log/services/NAME.log; `service NAME log` shows it. Its processes

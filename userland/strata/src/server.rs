@@ -22,6 +22,9 @@ use strata_proto::{Event, Next, Request};
 
 use crate::wm::{WinId, Wm};
 
+/// A Flatpak app's name and icon, as looked up by its ID.
+type Known = (String, Option<alloc::rc::Rc<slate_image::Image>>);
+
 /// A client's window.
 #[derive(Debug)]
 pub struct ClientWindow {
@@ -47,6 +50,8 @@ pub struct Buffer {
     /// Which buffer this is, never reused (for what keeps a buffer's
     /// pixels by where they are: the card's 2D images).
     pub serial: u64,
+    /// Its pixels' fourth byte means nothing (`strata_proto::buffer::OPAQUE`).
+    pub opaque: bool,
 }
 
 /// The next buffer's serial.
@@ -83,6 +88,12 @@ fn status_field(pid: i32, field: &str) -> Option<String> {
 /// status; absent outside Slate).
 fn linux_domain(pid: i32) -> bool {
     status_field(pid, "Domain").as_deref() == Some("linux")
+}
+
+/// The Linux box `pid` runs in, by the kernel's tag (`Box:`, ADR 0183),
+/// which no Linux program can set or take off.
+fn linux_box(pid: i32) -> Option<String> {
+    status_field(pid, "Box")
 }
 
 /// Whether `pid` runs inside a Linux runtime's sandbox (ADR 0038): in
@@ -156,6 +167,8 @@ pub struct Server {
     /// Files an app is dragging out of its window (ADR 0156): the window
     /// and the paths, until the session sees the button come up.
     pub drag: Option<(WinId, Vec<String>)>,
+    /// Flatpak apps' names and icons by ID, as looked up (M31 phase 4).
+    flatpaks: alloc::collections::BTreeMap<String, Option<Known>>,
 }
 
 impl Server {
@@ -170,6 +183,7 @@ impl Server {
             mods: 0,
             icons: Vec::new(),
             drag: None,
+            flatpaks: alloc::collections::BTreeMap::new(),
         })
     }
 
@@ -259,7 +273,11 @@ impl Server {
                 if c.windows.iter().any(|w| w.cwin == win) {
                     return Err(format!("window {win} exists"));
                 }
-                let id = wm.add(&app, path(p).as_deref(), c.linux);
+                let (linux, sandboxed) = (c.linux, c.sandboxed);
+                let known = self.flatpak(linux, sandboxed, &app, true);
+                let c = &mut self.clients[i];
+                let shown = known.as_ref().map_or(app.as_str(), |k| k.0.as_str());
+                let id = wm.add(shown, path(p).as_deref(), c.linux);
                 // The glyph of the app whose program the client runs, as
                 // the kernel names it (never what the client says).
                 let exe = fs::readlink(format!("/proc/{}/exe", c.pid).as_bytes()).ok();
@@ -268,6 +286,14 @@ impl Server {
                     w.sandboxed = c.sandboxed;
                     w.icon = entry.map(|(_, i, _)| *i);
                     w.accent = entry.and_then(|(.., a)| *a);
+                    w.image = known.and_then(|k| k.1);
+                    if w.image.is_some() {
+                        slate_rt::eprintln!("strata: window {id} \"{}\" has its own icon", w.app);
+                    }
+                }
+                // Where it went, for the scenarios that look at it.
+                if let Some(a) = wm.frame(id) {
+                    slate_rt::eprintln!("strata: window {id} placed at {} {} {} {}", a.x, a.y, a.w, a.h);
                 }
                 slate_rt::eprintln!(
                     "strata: window {id} \"{app}\" from pid {} ({})",
@@ -290,30 +316,43 @@ impl Server {
                 Ok(Changes::windows())
             }
             Request::Title { win, app, path: p, pid } => {
+                // A Flatpak app's ID shows as its name.
+                let (linux, sandboxed) = (c.linux, c.sandboxed);
+                let app = self.flatpak(linux, sandboxed, &app, false).map_or(app, |k| k.0);
+                let c = &mut self.clients[i];
                 let Some(w) = c.windows.iter().find(|w| w.cwin == win) else { return Ok(Changes::default()) };
                 // The domain shown is the named process's if it is the
                 // client's own descendant, else the client's.
                 let named = pid as i32;
-                let linux = if named > 0 && descends_from(named, c.pid) { linux_domain(named) } else { c.linux };
+                let mine = named > 0 && descends_from(named, c.pid);
+                let linux = if mine { linux_domain(named) } else { c.linux };
+                let boxed = if mine && linux { linux_box(named) } else { None };
                 if let Some(mw) = wm.get_mut(w.id) {
                     // Logged when the program shown or its domain changes.
-                    if mw.linux != linux || mw.app != app {
+                    if mw.linux != linux || mw.app != app || mw.linux_box != boxed {
                         slate_rt::eprintln!(
                             "strata: window {} shows \"{app}\" ({})",
                             w.id,
-                            if linux { "linux" } else { "slate" }
+                            match &boxed {
+                                Some(b) => format!("linux box {b}"),
+                                None => String::from(if linux { "linux" } else { "slate" }),
+                            }
                         );
                     }
                     mw.app = app;
                     mw.path = path(p);
                     mw.linux = linux;
+                    mw.linux_box = boxed;
                 }
                 Ok(Changes::windows())
             }
-            Request::Buffer { win, width, height, index } => {
+            Request::Buffer { win, width, height, index, flags } => {
                 let fd = c.fds.pop_front().ok_or("a buffer without its descriptor")?;
                 let len = (width as usize).saturating_mul(height as usize).saturating_mul(4);
-                let map = if len == 0 || width > 16384 || height > 16384 {
+                // A file shorter than the pixels would fault when read past
+                // its end.
+                let short = fs::fstat(fd).is_ok_and(|st| (st.size.max(0) as usize) < len);
+                let map = if len == 0 || width > 16384 || height > 16384 || short {
                     Err(slate_rt::Errno::EINVAL)
                 } else {
                     Mapping::shared(fd, len, 0)
@@ -324,7 +363,8 @@ impl Server {
                     && let Some(slot) = w.buffers.get_mut(usize::from(index))
                 {
                     let serial = SERIAL.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
-                    *slot = Some(Buffer { map, width, height, serial });
+                    let opaque = flags & strata_proto::buffer::OPAQUE != 0;
+                    *slot = Some(Buffer { map, width, height, serial, opaque });
                 }
                 Ok(Changes::default())
             }
@@ -422,6 +462,22 @@ impl Server {
                 Ok(Changes::default())
             }
         }
+    }
+
+    /// A sandboxed Linux window's app, when it names a Flatpak app by ID
+    /// (slate-linux-app does): its name and icon. The window keeps its
+    /// Linux mark whatever it names.
+    /// Looked up again when `fresh` (a new window) if it had no icon last
+    /// time: the catalog that has it may have come since.
+    fn flatpak(&mut self, linux: bool, sandboxed: bool, app: &str, fresh: bool) -> Option<Known> {
+        if !(linux && sandboxed) {
+            return None;
+        }
+        let stale = fresh && self.flatpaks.get(app).is_none_or(|k| k.as_ref().is_none_or(|k| k.1.is_none()));
+        if stale {
+            self.flatpaks.insert(String::from(app), crate::appicons::flatpak_app(app));
+        }
+        self.flatpaks.get(app).cloned().flatten()
     }
 
     /// The client and window index owning `id`.
@@ -525,6 +581,17 @@ impl Server {
         stuck
     }
 
+    /// The new contents of windows `ids` are on the screen (or won't be
+    /// drawn): their apps may draw the next.
+    pub fn frames_shown(&mut self, ids: &[WinId]) {
+        for &id in ids {
+            if let Some((ci, wi)) = self.find(id) {
+                let win = self.clients[ci].windows[wi].cwin;
+                self.send(ci, &Event::Frame { win });
+            }
+        }
+    }
+
     /// Whether a window's app keeps the screen from locking by itself.
     pub fn inhibited(&self) -> bool {
         self.clients.iter().any(|c| c.windows.iter().any(|w| w.inhibit))
@@ -618,6 +685,63 @@ mod tests {
         assert!(server.clients.is_empty());
         assert!(wm.windows.is_empty());
         assert!(!server.inhibited(), "its window has gone");
+    }
+
+    /// An app gives Strata its own opaque buffer (as strata-wl does with
+    /// the one its compositor writes), shows it with two rectangles, and
+    /// hears when the frame showing them is out.
+    #[test]
+    fn a_given_opaque_buffer_and_its_frame() {
+        let name = format!("strata-given-{}", std::process::id()).into_bytes();
+        let mut server = Server::listen(&name).unwrap();
+        let mut wm = Wm::new(1280.0, 800.0);
+        let n = name.clone();
+        let client = std::thread::spawn(move || {
+            let mut conn = Connection::connect_to(&n).unwrap();
+            let win = conn.create("given", None).unwrap();
+            let (w, h) = (win.width, win.height);
+            let path = format!("/tmp/.strata-given-{}", std::process::id());
+            let fd = fs::open(path.as_bytes(), fs::O_RDWR | fs::O_CREAT | fs::O_CLOEXEC, 0o600).unwrap();
+            let _ = fs::unlink(path.as_bytes());
+            fs::ftruncate(fd, u64::from(w * h * 4)).unwrap();
+            let mut map = Mapping::shared(fd, (w * h * 4) as usize, 0).unwrap();
+            // XRGB8888: nothing in the fourth byte.
+            map.words_mut().fill(0x0012_3456);
+            conn.give(&win, 1, fd, w, h, true).unwrap();
+            conn.show(&win, 1, &[(0, 0, 10, 10), (20, 20, 5, 5)]).unwrap();
+            assert!(conn.held(&win, 1));
+            for _ in 0..300 {
+                conn.poll(10).unwrap();
+                if conn.frames(&win) > 0 {
+                    return true;
+                }
+            }
+            false
+        });
+        let mut seen = None;
+        for _ in 0..500 {
+            let mut fds = server.poll_fds();
+            let _ = io::poll(&mut fds, 10);
+            let changes = server.handle(&fds, &mut wm);
+            if let Some(w) = wm.focused() {
+                server.configure(&[(w.id, 300, 200)], Some(w.id), 1.0);
+            }
+            if !changes.contents.is_empty() {
+                let id = changes.contents[0].0;
+                let rects: Vec<_> = changes.contents.iter().map(|c| c.1).collect();
+                let b = server.buffer(id).unwrap();
+                seen = Some((b.opaque, b.pixels()[0], rects));
+                server.frames_shown(&[id]);
+            }
+            if client.is_finished() {
+                break;
+            }
+        }
+        assert!(client.join().unwrap(), "the frame was heard of");
+        let (opaque, pixel, rects) = seen.unwrap();
+        assert!(opaque);
+        assert_eq!(pixel, 0x0012_3456, "kept as given; drawn opaque");
+        assert_eq!(rects, [slate_ui::Rect::new(0, 0, 10, 10), slate_ui::Rect::new(20, 20, 5, 5)]);
     }
 
     /// An app that says nothing after being asked to close loses its

@@ -355,6 +355,65 @@ pub fn sendfile(a: Args) -> Result {
     Ok(done as u64)
 }
 
+/// splice(2): move up to `len` bytes between two descriptors, one of them
+/// a pipe, as a read and a write here (no pages are moved): one read of
+/// what the input has (a pipe's waits for data unless SPLICE_F_NONBLOCK or
+/// the pipe is non-blocking), all of it written. Offsets only for the end
+/// that isn't a pipe (ESPIPE otherwise), read and updated as pread and
+/// pwrite would. (ADR 0183: coreutils in Arch's boxes use it.)
+pub fn splice(a: Args) -> Result {
+    use crate::fs::vfs::{S_IFIFO, S_IFMT};
+    // SPLICE_F_MOVE 1, NONBLOCK 2, MORE 4, GIFT 8 (splice(2)).
+    const SPLICE_F_NONBLOCK: u64 = 2;
+    let (inp, out) = (file(a.fd(0))?, file(a.fd(2))?);
+    let (off_in, off_out, len, flags) = (a.0[1], a.0[3], a.0[4] as usize, a.0[5]);
+    if flags & !0xF != 0 {
+        return Err(EINVAL);
+    }
+    let pipe = |f: &alloc::sync::Arc<dyn crate::fs::File>| f.stat().is_ok_and(|m| m.mode & S_IFMT == S_IFIFO);
+    let (in_pipe, out_pipe) = (pipe(&inp), pipe(&out));
+    if !in_pipe && !out_pipe {
+        return Err(EINVAL);
+    }
+    if (in_pipe && off_in != 0) || (out_pipe && off_out != 0) {
+        return Err(crate::abi::linux::errno::ESPIPE);
+    }
+    if len == 0 {
+        return Ok(0);
+    }
+    let read_off: Option<u64> = if off_in != 0 { Some(read_user(off_in).map_err(|_| EFAULT)?) } else { None };
+    let write_off: Option<u64> = if off_out != 0 { Some(read_user(off_out).map_err(|_| EFAULT)?) } else { None };
+    let mut k = vec![0u8; len.min(CHUNK)];
+    // POLLIN (poll(2)): nothing to read yet from a pipe asked not to wait.
+    if flags & SPLICE_F_NONBLOCK != 0 && in_pipe && inp.poll() & 1 == 0 {
+        return Err(crate::abi::linux::errno::EAGAIN);
+    }
+    let n = match read_off {
+        Some(o) => inp.pread(o, &mut k),
+        None => inp.read(&mut k),
+    }?;
+    let mut done = 0;
+    while done < n {
+        let w = match write_off {
+            Some(o) => out.pwrite(o + done as u64, &k[done..n]),
+            None => out.write(&k[done..n]),
+        };
+        match w {
+            Ok(0) => break,
+            Ok(w) => done += w,
+            Err(_) if done > 0 => break,
+            Err(e) => return Err(e),
+        }
+    }
+    if let Some(o) = read_off {
+        crate::arch::uaccess::write_user(off_in, &(o + n as u64)).map_err(|_| EFAULT)?;
+    }
+    if let Some(o) = write_off {
+        crate::arch::uaccess::write_user(off_out, &(o + done as u64)).map_err(|_| EFAULT)?;
+    }
+    Ok(done as u64)
+}
+
 /// copy_file_range(2): copy `len` bytes between two regular files, from
 /// and to their offsets (or the pointed-to ones, which are updated), as
 /// many reads and writes (ADR 0114: OSTree and GLib copy files so).

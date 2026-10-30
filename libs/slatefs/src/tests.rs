@@ -797,3 +797,34 @@ fn snapshots_at_random(seed: u64, each: bool) {
     let fs = Fs::mount(fs.into_disk(), false).unwrap();
     assert_eq!(fs.totals().free, free, "free space differs from a fresh count");
 }
+
+/// A subvolume's usage: all it reaches and what is its own, shared
+/// blocks counted out as a snapshot diverges (ADR 0183's phase 6).
+#[test]
+fn usage_of_snapshots() {
+    let mut fs = new_fs(8192);
+    let f = fs.create(SV, ROOT_INO, b"file", 0o644, 0, 0, 0).unwrap();
+    fs.write(SV, f, 0, &std::vec![1u8; 400_000]).unwrap();
+    let (all, own) = fs.usage(SV).unwrap();
+    assert!(all >= 400_000 && own == all, "{all} {own}");
+    // A snapshot shares everything: neither has much of its own.
+    let snap = fs.snapshot(SV, "snap", false).unwrap();
+    let (a2, o2) = fs.usage(SV).unwrap();
+    let (sa, so) = fs.usage(snap).unwrap();
+    assert_eq!(a2, all);
+    assert_eq!(sa, all);
+    assert!(o2 < 4 * 4096 && so < 4 * 4096, "{o2} {so}");
+    // A new file in the snapshot is its own.
+    let g = fs.create(snap, ROOT_INO, b"new", 0o644, 0, 0, 0).unwrap();
+    fs.write(snap, g, 0, &std::vec![2u8; 200_000]).unwrap();
+    let (_, so2) = fs.usage(snap).unwrap();
+    assert!(so2 >= 200_000, "{so2}");
+    // Deleting it frees about what it said was its own.
+    let before = fs.totals().free;
+    fs.delete_subvolume(snap).unwrap();
+    fs.commit().unwrap();
+    let freed = (fs.totals().free - before) * 4096;
+    assert!(freed + 8 * 4096 >= so2 && freed <= so2 + 8 * 4096, "freed {freed}, said {so2}");
+    assert_eq!(fs.usage(snap), Err(Error::NotFound));
+    assert_clean(&mut fs);
+}

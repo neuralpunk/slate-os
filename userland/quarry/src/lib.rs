@@ -421,8 +421,9 @@ fn sha256_of(path: &str) -> Option<String> {
 const AGENT: &str = concat!("quarry/", env!("CARGO_PKG_VERSION"));
 
 /// Where repository files come from: `http://`, `https://`, `file://` or
-/// a plain path. `sink` gets the bytes as they arrive.
-fn fetch_into(url: &str, sink: &mut dyn FnMut(&[u8]) -> Res) -> Res {
+/// a plain path. `sink` gets the bytes as they arrive, with no size limit
+/// (slate-boxd fetches distributions with it, ADR 0183).
+pub fn fetch_into(url: &str, sink: &mut dyn FnMut(&[u8]) -> Res) -> Res {
     let local = url.strip_prefix("file://").or_else(|| (!url.contains("://")).then_some(url));
     if let Some(path) = local {
         let fd = fs::open(path.as_bytes(), fs::O_RDONLY | fs::O_CLOEXEC, 0).map_err(|e| format!("{path}: {e}"))?;

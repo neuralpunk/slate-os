@@ -512,6 +512,9 @@ fn scenes() -> Vec<(&'static str, Canvas)> {
         c.said = Some(String::from("Installing runtime/org.freedesktop.Platform/x86_64/25.08"));
         c.now = 83_250;
         out.push(("appcenter-installing", window(&mut c, 980, 680, &g)));
+        // ... and how far, from slate-flatpak's line (M31 phase 3).
+        c.said = Some(String::from("slate-flatpak: 42% of 412.6 MB: org.freedesktop.Platform (2 of 4)"));
+        out.push(("appcenter-installing-progress", window(&mut c, 980, 680, &g)));
         // Setting the runtime up: how far, from slate-linux setup's file.
         let mut setup = crate::appcenter::Center::new("/nonexistent", false);
         setup.work.push(crate::appcenter::Work::SettingUp);
@@ -571,6 +574,12 @@ fn scenes() -> Vec<(&'static str, Canvas)> {
         s.stage = Stage::SettingUp;
         s.setup = crate::kit::SetupProgress::parse("packages 120 159 xwayland");
         out.push(("browser-setting-up", window(&mut s, 600, 440, &g)));
+        // Fetching after setting up, how far it is (M31 phase 3).
+        s.stage = Stage::Fetching;
+        s.fetched = Some(0.42);
+        s.said = Some(String::from("slate-flatpak: 42% of 173.8 MB: org.mozilla.firefox (2 of 2)"));
+        s.now = 61_000;
+        out.push(("browser-fetching-progress", window(&mut s, 600, 440, &g)));
         b.stage = Stage::Failed("Firefox wasn't fetched: couldn't fetch Flathub's description".into());
         out.push(("browser-failed-light", window(&mut b, 600, 440, &Palette::DAY)));
         // Installed, but it didn't start: the window comes back to say so.

@@ -25,6 +25,9 @@ extern crate alloc;
 extern crate std;
 
 pub mod app;
+pub mod conn;
 pub mod keymap;
 pub mod pixels;
+pub mod probe;
+pub mod stats;
 pub mod wire;

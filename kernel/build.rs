@@ -37,10 +37,11 @@ fn trusted_keys(out: &Path) {
 /// offsets must equal its addresses, so the kernel can map the file as is.
 fn build_vdso(dir: &Path, out: &Path) {
     let vdso = dir.join("vdso");
-    for f in ["Cargo.toml", "vdso.lds", "src/lib.rs"] {
+    for f in ["Cargo.toml", "vdso.lds", "layout.lds", "src/lib.rs"] {
         println!("cargo:rerun-if-changed={}", vdso.join(f).display());
     }
     let script = vdso.join("vdso.lds");
+    let layout = vdso.join("layout.lds");
     let target_dir = out.join("vdso-target");
     let mut c = Command::new(std::env::var("CARGO").unwrap_or_else(|_| "cargo".into()));
     // Nothing from the kernel's own build may leak into this one.
@@ -55,9 +56,11 @@ fn build_vdso(dir: &Path, out: &Path) {
         "-nostdlib".to_string(),
         "-Wl,-soname=linux-vdso.so.1".into(),
         format!("-Wl,--version-script={}", script.display()),
+        // One read-only, executable segment, the dynamic section in it
+        // (its DYNAMIC header read-only: glibc relocates a writable one).
+        format!("-Wl,-T,{}", layout.display()),
         "-Wl,--hash-style=both".into(),
         "-Wl,-z,max-page-size=4096".into(),
-        "-Wl,-z,separate-loadable-segments".into(),
         "-Wl,-z,norelro".into(),
         "-Wl,--no-rosegment".into(),
         "-Wl,--build-id=none".into(),

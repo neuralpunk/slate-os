@@ -214,6 +214,10 @@ fn populate_test_load(
     for (name, path) in user {
         w.file(&format!("test/{name}"), 0o755, &std::fs::read(path).map_err(|e| e.to_string())?)?;
     }
+    // Slate's own test programs (wl-probe).
+    for p in crate::userland::build()?.iter().filter(|p| p.dir == "test") {
+        w.file(&format!("test/{}", p.name), p.mode, &std::fs::read(&p.path).map_err(|e| e.to_string())?)?;
+    }
     // A signed copy of a native test program (ADR 0090): it runs in the
     // Slate domain from /test, where the unsigned one runs in the Linux
     // domain.

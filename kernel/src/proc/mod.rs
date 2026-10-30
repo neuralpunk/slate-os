@@ -94,6 +94,12 @@ pub struct Process {
     /// The service it belongs to (set by init, inherited on fork, kept
     /// across exec; ADR 0060).
     pub service: IrqSpinLock<Option<Arc<str>>>,
+    /// The Linux box it runs in (ADR 0183): set once by `box_tag`,
+    /// inherited on fork, kept across exec.
+    pub box_tag: IrqSpinLock<Option<Arc<str>>>,
+    /// How many of its refusals have been logged (a box's process; ADR
+    /// 0183's phase 5).
+    pub box_refusals: core::sync::atomic::AtomicU32,
     /// seccomp mode and filters.
     pub seccomp: IrqSpinLock<seccomp::Seccomp>,
     /// clone(CLONE_VFORK | CLONE_FILES): the parent, blocked until this
@@ -288,6 +294,8 @@ impl Process {
             app: AtomicU32::new(0),
             keyslots: AtomicBool::new(false),
             service: IrqSpinLock::new(None),
+            box_tag: IrqSpinLock::new(None),
+            box_refusals: core::sync::atomic::AtomicU32::new(0),
             seccomp: IrqSpinLock::new(seccomp::Seccomp::default()),
             files_back: IrqSpinLock::new(None),
             aspace_lender: IrqSpinLock::new(None),
@@ -867,6 +875,7 @@ pub fn fork_with(
     child.app.store(parent.app.load(Ordering::Relaxed), Ordering::Relaxed);
     child.keyslots.store(parent.keyslots.load(Ordering::Relaxed), Ordering::Relaxed);
     *child.service.lock() = parent.service.lock().clone();
+    *child.box_tag.lock() = parent.box_tag.lock().clone();
     *child.seccomp.lock() = parent.seccomp.lock().clone();
     *child.limits.lock() = parent.limits.lock().clone();
     for i in 0..2 {
@@ -1883,4 +1892,26 @@ fn finish_process(p: Arc<Process>, status: i32) {
 pub fn must_exit() -> bool {
     let t = sched::current();
     t.exit_requested.load(Ordering::Acquire) || t.process.as_ref().is_some_and(|p| p.exiting().is_some())
+}
+
+/// The most refusals logged for one process of a Linux box.
+const BOX_REFUSALS_LOGGED: u32 = 16;
+
+/// A system call `call` refused (`e`, EPERM or EACCES) to the calling
+/// process: logged with its box when it runs in one (ADR 0183's phase 5:
+/// what a box's programs try and are refused is on the record), the first
+/// few of each process.
+pub fn note_box_refusal(call: &str, e: crate::abi::linux::errno::Errno) {
+    let Some(p) = current() else { return };
+    let Some(tag) = p.box_tag.lock().clone() else { return };
+    let n = p.box_refusals.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+    if n >= BOX_REFUSALS_LOGGED {
+        return;
+    }
+    let name = p.name.lock().clone();
+    let what = if e == crate::abi::linux::errno::EPERM { "EPERM" } else { "EACCES" };
+    crate::log_warn!("box {tag}: {name} (pid {}) refused {call} ({what})", p.pid);
+    if n + 1 == BOX_REFUSALS_LOGGED {
+        crate::log_warn!("box {tag}: pid {}: its further refusals aren't logged", p.pid);
+    }
 }

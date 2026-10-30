@@ -47,8 +47,10 @@ const KEY_CAPSLOCK: u16 = 58;
 pub const KEY_KPENTER: u16 = 96;
 const KEY_RIGHTCTRL: u16 = 97;
 const KEY_RIGHTALT: u16 = 100;
-const KEY_LEFTMETA: u16 = 125;
-const KEY_RIGHTMETA: u16 = 126;
+/// The logo ("super") keys: pressed and released alone, they come out as
+/// a key of their own (see [`Input::Key`]).
+pub const KEY_LEFTMETA: u16 = 125;
+pub const KEY_RIGHTMETA: u16 = 126;
 /// The keys 1 to 4 and Q, E (Strata's shortcuts).
 pub const KEY_1: u16 = 2;
 pub const KEY_4: u16 = 5;
@@ -103,6 +105,10 @@ pub enum Input {
     /// A key press, or its repeat: the evdev code, what it means to the
     /// installer (none with Ctrl, Alt or the logo key), the character it
     /// types under the layout whatever the modifiers, and the modifiers.
+    /// A logo key pressed and released with nothing else pressed between
+    /// (no key, no button, no wheel) is a press of its own code, at its
+    /// release, with no meaning and no character: Strata opens its
+    /// Applications menu for it.
     Key {
         code: u16,
         key: Option<Key>,
@@ -251,6 +257,8 @@ pub struct Inputs {
     moved: bool,
     /// The key being held for repeat, and when it repeats next (ns).
     held: Option<(u16, i64)>,
+    /// A logo key is down and nothing else has been pressed since.
+    logo_alone: bool,
     last_scan: i64,
     /// How often to look for new devices (ns; a second by default).
     pub rescan_ns: i64,
@@ -316,6 +324,7 @@ impl Inputs {
             pointer_seen: false,
             moved: false,
             held: None,
+            logo_alone: false,
             last_scan: 0,
             rescan_ns: 1_000_000_000,
             seat,
@@ -499,6 +508,10 @@ impl Inputs {
     }
 
     fn event(&mut self, dev: usize, ty: u16, code: u16, value: i32, out: &mut Vec<Input>) {
+        // A button or the wheel with the logo key down makes it no tap.
+        if matches!((ty, code), (EV_KEY, BTN_LEFT | BTN_TOUCH | BTN_MIDDLE | BTN_RIGHT) | (EV_REL, REL_WHEEL)) {
+            self.logo_alone = false;
+        }
         match (ty, code) {
             (EV_KEY, BTN_LEFT | BTN_TOUCH) => {
                 let (x, y) = self.pointer;
@@ -572,6 +585,17 @@ impl Inputs {
             _ => {}
         }
         self.mods.shift = self.shifts[0] || self.shifts[1];
+        match (code, value) {
+            (KEY_LEFTMETA | KEY_RIGHTMETA, 1) => self.logo_alone = true,
+            (KEY_LEFTMETA | KEY_RIGHTMETA, 0) => {
+                if core::mem::take(&mut self.logo_alone) {
+                    out.push(Input::Key { code, key: None, ch: None, mods: self.mods });
+                }
+            }
+            // Any other key pressed while it is down (a shortcut).
+            (_, 1) => self.logo_alone = false,
+            _ => {}
+        }
         if is_modifier(code) {
             return;
         }
@@ -589,6 +613,33 @@ impl Inputs {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The logo key alone is a key of its own at its release; with
+    /// another key, a button or the wheel between, it is only a modifier.
+    #[test]
+    fn logo_key_alone() {
+        let mut i = Inputs::new(100, 100);
+        let mut out = Vec::new();
+        i.key(KEY_LEFTMETA, 1, &mut out);
+        assert!(out.is_empty());
+        i.key(KEY_LEFTMETA, 2, &mut out);
+        i.key(KEY_LEFTMETA, 0, &mut out);
+        assert!(matches!(out[..], [Input::Key { code: KEY_LEFTMETA, key: None, ch: None, mods }] if !mods.logo));
+        // super + space: the space, then nothing at the release.
+        out.clear();
+        i.key(KEY_RIGHTMETA, 1, &mut out);
+        i.key(KEY_SPACE, 1, &mut out);
+        i.key(KEY_SPACE, 0, &mut out);
+        i.key(KEY_RIGHTMETA, 0, &mut out);
+        assert!(matches!(out[..], [Input::Key { code: KEY_SPACE, mods, .. }] if mods.logo));
+        // A click while it is down.
+        out.clear();
+        i.key(KEY_LEFTMETA, 1, &mut out);
+        i.event(0, EV_KEY, BTN_LEFT, 1, &mut out);
+        i.event(0, EV_KEY, BTN_LEFT, 0, &mut out);
+        i.key(KEY_LEFTMETA, 0, &mut out);
+        assert!(!out.iter().any(|e| matches!(e, Input::Key { .. })));
+    }
 
     /// German's dead acute: a press that types nothing, then é; then ´
     /// and q, the accent as a press of no key (ADR 0117).

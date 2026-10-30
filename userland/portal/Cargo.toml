@@ -1,0 +1,24 @@
+[package]
+name = "slate-portal"
+description = "slate-portal, the Settings portal Slate gives the Linux runtime's apps (M31)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "slate-portal"
+path = "src/main.rs"
+test = false
+bench = false
+
+[dependencies]
+slate-rt = { path = "../rt" }
+slate-ui = { path = "../ui" }
+slate-abi = { path = "../../libs/abi" }
+
+[lints]
+workspace = true

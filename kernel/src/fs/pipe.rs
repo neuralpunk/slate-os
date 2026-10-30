@@ -38,6 +38,10 @@ pub struct Pipe {
     inner: IrqSpinLock<Inner>,
     wq: WaitQueue,
     ino: u64,
+    /// Who made it (its creator's file-system IDs, as pipefs owns a pipe):
+    /// reopening it through /proc/PID/fd checks them (ADR 0183: a box's
+    /// root has none of Slate's IDs).
+    owner: (u32, u32),
     /// Readiness events, for edge-triggered epoll.
     events: core::sync::atomic::AtomicU64,
 }
@@ -74,6 +78,10 @@ fn new_pipe(readers: usize, writers: usize) -> Arc<Pipe> {
         }),
         wq: WaitQueue::new(),
         ino: NEXT_INO.fetch_add(1, Ordering::Relaxed),
+        owner: {
+            let c = crate::proc::cred::current();
+            (c.fsuid, c.fsgid)
+        },
         events: core::sync::atomic::AtomicU64::new(1),
     })
 }
@@ -258,7 +266,16 @@ impl File for PipeEnd {
         if let Some(d) = &self.dentry {
             return Ok(d.metadata());
         }
-        Ok(Metadata { mode: S_IFIFO | 0o600, nlink: 1, ino: self.pipe.ino, dev: 0xFFFF, ..Default::default() })
+        let (uid, gid) = self.pipe.owner;
+        Ok(Metadata {
+            mode: S_IFIFO | 0o600,
+            nlink: 1,
+            ino: self.pipe.ino,
+            dev: 0xFFFF,
+            uid,
+            gid,
+            ..Default::default()
+        })
     }
 
     fn dentry(&self) -> Option<Arc<Dentry>> {

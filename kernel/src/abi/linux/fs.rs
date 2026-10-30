@@ -761,16 +761,26 @@ struct Statx {
 /// statx(2)'s STATX_DIOALIGN (`<linux/stat.h>` per the manual page).
 const STATX_DIOALIGN: u32 = 0x2000;
 
+/// statx(2)'s STATX_MNT_ID and STATX_MNT_ID_UNIQUE (Slate's mount IDs
+/// are never reused, so one ID is both; systemd's path lookups ask for
+/// them, ADR 0183).
+const STATX_MNT_ID: u32 = 0x1000;
+const STATX_MNT_ID_UNIQUE: u32 = 0x4000;
+
+/// The file statx(2) asked about, when it has a name.
+fn statx_dentry(dirfd: i32, path: &str, follow: bool, empty_path: bool) -> Option<alloc::sync::Arc<vfs::Dentry>> {
+    if path.is_empty() && empty_path {
+        me().ok().and_then(|p| p.files.lock().get(dirfd).ok()).and_then(|f| f.dentry())
+    } else {
+        me().ok().and_then(|p| vfs::resolve(&dir_for(&p, dirfd, path).ok()?, path, follow).ok())
+    }
+}
+
 /// O_DIRECT's alignment for what statx(2) asked about (ADR 0162): a
 /// block device's sectors, a file system's own (`Inode::direct_align`),
 /// else none.
 fn dio_align(dirfd: i32, path: &str, follow: bool, empty_path: bool) -> u32 {
-    let d = if path.is_empty() && empty_path {
-        me().ok().and_then(|p| p.files.lock().get(dirfd).ok()).and_then(|f| f.dentry())
-    } else {
-        me().ok().and_then(|p| vfs::resolve(&dir_for(&p, dirfd, path).ok()?, path, follow).ok())
-    };
-    let Some(d) = d else { return 0 };
+    let Some(d) = statx_dentry(dirfd, path, follow, empty_path) else { return 0 };
     match d.metadata().file_type() {
         vfs::FileType::BlockDevice => 512,
         vfs::FileType::Regular => d.inode.direct_align().unwrap_or(0),
@@ -796,11 +806,22 @@ pub fn statx(a: Args) -> Result {
     } else {
         0
     };
+    let want = a.0[3] as u32;
+    let mnt = if want & (STATX_MNT_ID | STATX_MNT_ID_UNIQUE) != 0 {
+        statx_dentry(a.fd(0), &path, flags & AT_SYMLINK_NOFOLLOW == 0, flags & AT_EMPTY_PATH != 0)
+            .and_then(|d| vfs::mount_id_of(&d))
+    } else {
+        None
+    };
     let t = |ts: Timespec| StatxTime { sec: ts.sec, nsec: ts.nsec as u32, _reserved: 0 };
     let c = crate::proc::cred::current();
     let sx = Statx {
-        // STATX_BASIC_STATS, and STATX_DIOALIGN when asked for.
-        mask: 0x7FF | if a.0[3] as u32 & STATX_DIOALIGN != 0 { STATX_DIOALIGN } else { 0 },
+        // STATX_BASIC_STATS, and STATX_DIOALIGN and the mount's ID when
+        // asked for.
+        mask: 0x7FF
+            | if want & STATX_DIOALIGN != 0 { STATX_DIOALIGN } else { 0 }
+            | if mnt.is_some() { want & (STATX_MNT_ID | STATX_MNT_ID_UNIQUE) } else { 0 },
+        mnt_id: mnt.unwrap_or(0),
         dio_mem_align: dio,
         dio_offset_align: dio,
         blksize: 4096,
@@ -899,6 +920,27 @@ pub fn fchmodat(a: Args) -> Result {
 
 pub fn chmod(a: Args) -> Result {
     fchmodat(Args([AT_FDCWD as u64, a.0[0], a.0[1], 0, 0, 0]))
+}
+
+/// fchmodat2(2) (Linux 6.6, fchmodat(2)): fchmodat with flags.
+/// AT_EMPTY_PATH changes the descriptor's file; AT_SYMLINK_NOFOLLOW
+/// changes a file that isn't a link, and on a link fails with
+/// EOPNOTSUPP (a link's mode means nothing).
+pub fn fchmodat2(a: Args) -> Result {
+    let flags = a.0[3];
+    if flags & !(AT_SYMLINK_NOFOLLOW | AT_EMPTY_PATH) != 0 {
+        return Err(EINVAL);
+    }
+    let p = me()?;
+    let path = user_path(a.0[1])?;
+    if path.is_empty() && flags & AT_EMPTY_PATH != 0 {
+        return fchmod(Args([a.0[0], a.0[2], 0, 0, 0, 0]));
+    }
+    let d = vfs::resolve(&dir_for(&p, a.fd(0), &path)?, &path, flags & AT_SYMLINK_NOFOLLOW == 0)?;
+    if d.metadata().mode & vfs::S_IFMT == vfs::S_IFLNK {
+        return Err(EOPNOTSUPP);
+    }
+    do_chmod(&d, a.0[2] as u32)
 }
 
 /// fchmod(2). Files with no name (sockets, pipes) have no mode kept
@@ -1662,7 +1704,18 @@ pub(crate) fn mount_at(
         }
         "proc" => (fs::procfs::new(), "proc"),
         "devtmpfs" => (fs::devfs_root(), "devtmpfs"),
-        "devpts" => (fs::devpts::new(), "devpts"),
+        // pts(4)'s newinstance: a devpts of its own; `allow=N` (Slate's,
+        // ADR 0183) shows pseudo-terminal N of another instance in it too.
+        "devpts" => {
+            let opts = data()?;
+            let words: Vec<&str> = opts.split(',').map(str::trim).collect();
+            if words.contains(&"newinstance") {
+                let allow = words.iter().filter_map(|w| w.strip_prefix("allow=")?.parse().ok()).collect();
+                (fs::devpts::new_instance(allow), "devpts")
+            } else {
+                (fs::devpts::new(), "devpts")
+            }
+        }
         "sysfs" => (fs::sysfs_root(), "sysfs"),
         "efivarfs" => (fs::efivarfs::new()?, "efivarfs"),
         "cgroup2" => (fs::cgroup::new(), "cgroup2"),
@@ -1713,14 +1766,19 @@ const UMOUNT_NOFOLLOW: u64 = 8;
 /// and put the old root at `put_old`; processes whose root or working
 /// directory was the old root move to the new one.
 pub fn pivot_root(a: Args) -> Result {
+    pivot_root_at(&user_path(a.0[0])?, &user_path(a.0[1])?)
+}
+
+/// [`pivot_root`]'s core, also the native call's (ADR 0183).
+pub(crate) fn pivot_root_at(new_root: &str, put_old: &str) -> Result {
     crate::proc::apps::unconfined()?;
     let p = me()?;
     if !mount_capable(&p) {
         return Err(EPERM);
     }
     let cwd = p.cwd();
-    let new_root = vfs::resolve(&cwd, &user_path(a.0[0])?, true)?;
-    let put_old = vfs::resolve(&cwd, &user_path(a.0[1])?, true)?;
+    let new_root = vfs::resolve(&cwd, new_root, true)?;
+    let put_old = vfs::resolve(&cwd, put_old, true)?;
     if !new_root.is_dir() || !put_old.is_dir() {
         return Err(ENOTDIR);
     }

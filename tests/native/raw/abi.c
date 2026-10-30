@@ -53,6 +53,7 @@ enum {
     NR_READDIR = 13,
     NR_FLOCK = 14,
     NR_SERVICE = 15,
+    NR_BOX_TAG = 16,
     NR_OPEN = 20,
     NR_STAT = 21,
     NR_MKDIR = 22,
@@ -118,6 +119,8 @@ enum {
     NR_WATCH_OPEN = 120,
     NR_WATCH_ADD = 121,
     NR_WATCH_REMOVE = 122,
+    NR_UNSHARE = 130,
+    NR_PIVOT_ROOT = 131,
 };
 #define CWD (-100L)
 #define O_WRITE_ONLY 1
@@ -434,6 +437,21 @@ static void processes(char **envp, u64 envc) {
         SYS(NR_EXIT, ok ? 0 : 1);
     }
     check("setids_all_or_nothing", SYS(NR_WAIT, pid, &ws, 0) == pid && ws.kind == W_EXITED && ws.code == 0);
+
+    // box_tag (ADR 0183) is for Slate-domain programs (Slate's own
+    // slate-box), and this test runs in the Linux domain; the boxes
+    // scenario checks tagging itself.
+    check("box_tag_linux_refused", SYS(NR_BOX_TAG, "abi-box", 7) == -EPERM);
+
+    // unshare and pivot_root (ADR 0183): a user namespace of one's own;
+    // unknown kinds refused; pivot_root needs a mount point.
+    pid = SYS(NR_FORK);
+    if (pid == 0) {
+        int ok = SYS(NR_UNSHARE, 1 << 10) == -EINVAL && SYS(NR_UNSHARE, 1 | 2) == 0 &&
+                 SYS(NR_PIVOT_ROOT, P("/nonexistent"), P("/nonexistent/old")) == -ENOENT;
+        SYS(NR_EXIT, ok ? 0 : 1);
+    }
+    check("unshare_native", SYS(NR_WAIT, pid, &ws, 0) == pid && ws.kind == W_EXITED && ws.code == 0);
 
     // exec with counted argument and environment vectors.
     struct str argv[2] = {{(u64)self, len(self)}, {(u64) "child-and-junk", 5}};

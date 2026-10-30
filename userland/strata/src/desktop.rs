@@ -270,7 +270,9 @@ pub fn desktop(
             path: win.path.as_deref(),
             linux: win.linux,
             sandboxed: win.sandboxed,
+            linux_box: win.linux_box.as_deref(),
             icon: win.icon,
+            image: win.image.as_deref(),
             accent: win.accent,
             focus: look.focus,
             flush,
@@ -342,6 +344,7 @@ pub fn desktop(
         power: extras.power,
         linux: wm.focused().is_some_and(|w| w.linux),
         sandboxed: wm.focused().is_some_and(|w| w.sandboxed),
+        linux_box: wm.focused().and_then(|w| w.linux_box.as_deref()),
         network: status.network,
         battery: status.battery,
         updates: status.updates,
@@ -362,7 +365,8 @@ pub fn desktop(
 }
 
 /// The shortcuts, as the "keys" app lists them.
-pub const SHORTCUTS: [(&str, &str); 10] = [
+pub const SHORTCUTS: [(&str, &str); 11] = [
+    ("super", "the Applications menu"),
     ("super + enter", "open a terminal"),
     ("super + space", "the launcher"),
     ("alt + tab", "the next window"),

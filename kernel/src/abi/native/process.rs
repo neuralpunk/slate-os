@@ -235,6 +235,53 @@ pub(super) fn service(a: Args) -> Result {
     }
 }
 
+/// unshare(flags): Slate's namespace kinds, as unshare(2)'s.
+pub(super) fn unshare(a: Args) -> Result {
+    use slate_abi::ns as n;
+    // clone(2)'s CLONE_NEW* bits (kernel/src/proc/ns.rs, from musl's sched.h).
+    use crate::proc::ns as k;
+    let flags = translate(
+        a.0[0] as u32,
+        &[
+            (n::USER, k::CLONE_NEWUSER),
+            (n::MOUNT, k::CLONE_NEWNS),
+            (n::PID, k::CLONE_NEWPID),
+            (n::UTS, k::CLONE_NEWUTS),
+            (n::IPC, k::CLONE_NEWIPC),
+            (n::NET, k::CLONE_NEWNET),
+        ],
+    )?;
+    lp::unshare(Args([flags, 0, 0, 0, 0, 0]))
+}
+
+/// box_tag(name, len): the caller is a process of Linux box `name` (ADR
+/// 0183). Set once and inherited; Slate-domain callers only (any program
+/// with Slate's note makes native calls, whatever its domain), so no
+/// Linux program can tag or untag itself.
+pub(super) fn box_tag(a: Args) -> Result {
+    let me = proc::current().ok_or(ESRCH)?;
+    if me.domain() != crate::proc::domain::Domain::Slate {
+        crate::log_info!("box_tag: refused to pid {} (not in the Slate domain)", me.pid);
+        return Err(EPERM);
+    }
+    let len = a.0[1] as usize;
+    if len == 0 || len > slate_abi::box_tag::NAME_MAX {
+        return Err(EINVAL);
+    }
+    let mut b = alloc::vec![0u8; len];
+    crate::arch::uaccess::copy_from_user(&mut b, a.0[0]).map_err(|_| EFAULT)?;
+    if !b.iter().all(|c| c.is_ascii_alphanumeric() || b"-_.".contains(c)) {
+        return Err(EINVAL);
+    }
+    let name = core::str::from_utf8(&b).map_err(|_| EINVAL)?;
+    let mut tag = me.box_tag.lock();
+    if tag.is_some() {
+        return Err(EEXIST);
+    }
+    *tag = Some(alloc::sync::Arc::from(name));
+    Ok(0)
+}
+
 /// Native protections (the same bits as Linux's PROT_*, mmap(2)).
 fn prot(p: u64) -> core::result::Result<u64, Errno> {
     if p & !7 != 0 { Err(EINVAL) } else { Ok(p) }

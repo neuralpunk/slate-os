@@ -88,6 +88,11 @@ pub fn build(o: &Opts, cmdline: &str, name: &str, root: Root) -> Result<PathBuf>
         if name == crate::refpc::IMAGE {
             crate::refpc::stage_firmware(&stage)?;
         }
+        // The boxes scenario's image describes a test distribution (ADR
+        // 0183; its key is a test key, never in other images).
+        if name == crate::boxes::IMAGE {
+            crate::boxes::stage_test_distro(&stage)?;
+        }
         // The system carries its own kernel (ADR 0086).
         let boot = stage.join("boot/slate");
         std::fs::create_dir_all(&boot).map_err(|e| e.to_string())?;

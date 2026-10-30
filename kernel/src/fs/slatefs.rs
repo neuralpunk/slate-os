@@ -751,10 +751,12 @@ impl Inode for SInode {
     }
 }
 
-/// Whether `name` is one of the Linux runtime's subvolumes: `linux`, or
-/// `linux.` and more.
+/// Whether `name` is one of the Linux runtime's subvolumes (`linux`, or
+/// `linux.` and more) or Linux boxes' (`box.` or `box-base.` and more;
+/// ADR 0183).
 fn runtime_subvol(name: &str) -> bool {
-    name == "linux" || name.strip_prefix("linux.").is_some_and(|r| !r.is_empty())
+    let after = |p: &str| name.strip_prefix(p).is_some_and(|r| !r.is_empty());
+    name == "linux" || after("linux.") || after("box.") || after("box-base.")
 }
 
 /// `SLATEFS_IOC_CTL`: Slate's own ioctl on any file of a mounted SlateFS
@@ -768,6 +770,8 @@ fn runtime_subvol(name: &str) -> bool {
 /// - `delete NAME`, `readonly NAME 0|1`
 /// - `boot`: `default=… fallback=… tries=… pending=…`
 /// - `boot default=NAME fallback=NAME tries=N pending=0|1`: set it
+/// - `usage NAME`: `ALL OWN`, the bytes subvolume NAME reaches and those
+///   only it has (what deleting it frees; ADR 0183's phase 6)
 /// - `boot-ok`: the booted system is good (clears `pending`)
 /// - `commit`
 pub const SLATEFS_IOC_CTL: u32 = 0xC020_F501;
@@ -803,9 +807,10 @@ fn control(i: &SInode, arg: u64) -> Result<u64> {
     let root = i.dev().rdev == ROOT_RDEV.load(Ordering::Relaxed);
     let (_one, mut fs) = i.dev().lock_committing();
     if changes && root && !crate::proc::domain::may_write_image() {
-        // The Linux runtime's own subvolumes (`linux`, `linux.*`) are
-        // root's to make, snapshot (from anything but a system) and delete
-        // (ADR 0102's addendum), in either domain: slate-linux, which
+        // The Linux runtime's own subvolumes (`linux`, `linux.*`) and
+        // Linux boxes' (`box.*`, `box-base.*`, ADR 0183) are root's to
+        // make, snapshot (from anything but a system) and delete (ADR
+        // 0102's addendum), in either domain: slate-linux, which
         // keeps the runtime's state before an upgrade in them, runs in the
         // Linux domain (ADR 0038), and they hold no part of the system.
         // (The ioctl already asks for CAP_SYS_ADMIN.)
@@ -841,6 +846,11 @@ fn control(i: &SInode, arg: u64) -> Result<u64> {
                 }
                 out += &format!("{} {} {}\n", s.id, s.name, flags.join(","));
             }
+        }
+        ["usage", name] => {
+            let id = by_name(&fs, name)?;
+            let (all, own) = fs.usage(id).map_err(errno)?;
+            out += &format!("{all} {own}\n");
         }
         ["snapshot", name] | ["snapshot", name, "ro"] => {
             let ro = words.len() == 3;

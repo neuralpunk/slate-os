@@ -628,6 +628,9 @@ pub fn upgrade(args: &[String]) -> Result<(), String> {
     if u.simulate {
         println!("slate-linux: nothing was changed (--simulate)");
     } else {
+        // Strata's fonts as the system has them now, and their cache.
+        copy_fonts(root);
+        let _ = in_runtime(root, &["/usr/bin/fc-cache", "-s"]);
         println!("slate-linux: the runtime in {root} is up to date: Alpine {after}");
         if kept {
             println!("slate-linux: the runtime before is kept: slate-linux rollback returns to it");
@@ -687,8 +690,38 @@ fn setup(s: &Setup) -> Result<(), String> {
             note(stage, n, of, &name);
         }
     })?;
+    // Strata's fonts, for the Settings portal's font names (M31 phase 4):
+    // Flatpak's sandboxes see the runtime's fonts (/run/host/fonts).
+    copy_fonts(root);
+    // The fonts' cache, made now rather than by each program's first
+    // start (M31 phase 2); Flatpak's sandboxes use the runtime's too
+    // (/run/host/fonts-cache).
+    if fs::exists(format!("{root}/usr/bin/fc-cache").as_bytes()) {
+        note("finishing", 0, 0, "fonts");
+        if let Err(e) = in_runtime(root, &["/usr/bin/fc-cache", "-s"]) {
+            println!("slate-linux: the fonts' cache wasn't made: {e}");
+        }
+    }
     println!("slate-linux: the Linux runtime in {root} is ready");
     Ok(())
+}
+
+/// Strata's fonts, from Slate's system into the runtime's
+/// /usr/share/fonts/slate (their files as they are now).
+pub fn copy_fonts(root: &str) {
+    const FROM: &str = "/usr/share/fonts/slate";
+    let to = format!("{root}/usr/share/fonts/slate");
+    let _ = fs::mkdir(format!("{root}/usr/share/fonts").as_bytes(), 0o755);
+    let _ = fs::mkdir(to.as_bytes(), 0o755);
+    for e in fs::read_dir(FROM.as_bytes()).unwrap_or_default() {
+        let name = String::from(slate_rt::lossy(&e.name));
+        if !(name.ends_with(".ttf") || name.ends_with(".otf") || name.ends_with(".txt")) {
+            continue;
+        }
+        if let Ok(data) = fs::read_file(format!("{FROM}/{name}").as_bytes()) {
+            let _ = fs::write_file(format!("{to}/{name}").as_bytes(), &data, 0o644);
+        }
+    }
 }
 
 #[cfg(test)]

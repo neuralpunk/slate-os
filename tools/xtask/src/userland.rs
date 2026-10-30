@@ -19,7 +19,8 @@ pub struct Program {
     /// File mode in the image (set-user-ID root for su and passwd).
     pub mode: u32,
     /// The directory it goes in: /bin, or /usr/lib/slate for the Linux
-    /// programs that are copied into a Linux runtime (ADR 0038).
+    /// programs that are copied into a Linux runtime (ADR 0038); `test`
+    /// for a test program, in the test load's /test only.
     pub dir: &'static str,
     /// Part of the installed system; the installer is only on the install
     /// media (ADR 0023, ADR 0029).
@@ -130,6 +131,18 @@ pub const PROGRAMS: &[Program] = &[
         system: true,
     },
     Program { package: "slate-bluetooth", binary: "slate-bt", links: Some(&[]), mode: 0o755, dir: "bin", system: true },
+    // Linux boxes (ADR 0183): the service and the person's command.
+    Program { package: "slate-boxes", binary: "slate-boxd", links: Some(&[]), mode: 0o755, dir: "bin", system: true },
+    Program { package: "slate-boxes", binary: "slate-box", links: Some(&[]), mode: 0o755, dir: "bin", system: true },
+    // Copied into a box's /run, where it runs as a Linux program (its PID 1).
+    Program {
+        package: "slate-boxes",
+        binary: "slate-host",
+        links: Some(&[]),
+        mode: 0o755,
+        dir: "usr/lib/slate",
+        system: true,
+    },
     Program { package: "slate-netd", binary: "netd", links: Some(&[]), mode: 0o755, dir: "bin", system: true },
     Program { package: "slate-nettools", binary: "lookup", links: Some(&[]), mode: 0o755, dir: "bin", system: true },
     Program { package: "slate-nettools", binary: "ip", links: Some(&[]), mode: 0o755, dir: "bin", system: true },
@@ -253,6 +266,25 @@ pub const PROGRAMS: &[Program] = &[
         mode: 0o755,
         dir: "usr/lib/slate",
         system: true,
+    },
+    // The Settings portal it starts in the runtime for an app (M31 phase 4).
+    Program {
+        package: "slate-portal",
+        binary: "slate-portal",
+        links: Some(&[]),
+        mode: 0o755,
+        dir: "usr/lib/slate",
+        system: true,
+    },
+    // The Wayland test client (M31 phase 1): only in the test load's
+    // /test, and copied into a runtime by the measurements.
+    Program {
+        package: "slate-strata-wl",
+        binary: "wl-probe",
+        links: Some(&[]),
+        mode: 0o755,
+        dir: "test",
+        system: false,
     },
     Program { package: "slate-install", binary: "slate-boot", links: Some(&[]), mode: 0o755, dir: "bin", system: true },
     Program {
@@ -412,7 +444,9 @@ pub fn symbols_dir() -> PathBuf {
 pub fn sign_flags(binary: &str) -> u32 {
     use slate_elfsign::{ANYWHERE, KEYSLOTS, UPDATER};
     match binary {
-        "strata-wl" => 0,
+        // Copied out of the system tree to run as Linux programs (in the
+        // Linux runtime, in boxes): never Slate's there.
+        "strata-wl" | "wl-probe" | "slate-portal" | "slate-host" => 0,
         "quarry" | "slate-update" => ANYWHERE | UPDATER,
         // They keep the encrypted root's key slots with passwords (ADR 0130).
         "slate-brokerd" | "login" | "passwd" | "chpasswd" | "slate-crypt" => ANYWHERE | KEYSLOTS,

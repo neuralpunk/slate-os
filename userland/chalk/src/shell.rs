@@ -153,6 +153,9 @@ pub struct Shell {
     pub aliases: BTreeMap<Vec<u8>, Vec<u8>>,
     pub opts: Opts,
     pub interactive: bool,
+    /// A subshell of an interactive shell: what it runs was typed at the
+    /// prompt, so it may ask (a Linux source folder, ADR 0183).
+    pub from_prompt: bool,
     pub login: bool,
     /// Trap actions by signal number (0 = EXIT).
     pub traps: BTreeMap<i32, Vec<u8>>,
@@ -230,6 +233,7 @@ impl Shell {
             aliases: BTreeMap::new(),
             opts: Opts::default(),
             interactive: false,
+            from_prompt: false,
             login: false,
             traps: BTreeMap::new(),
             jobs: Jobs::default(),

@@ -30,6 +30,8 @@ clicking a window in the top bar brings it up or minimises it.
 
 ## Keys
 
+- **super** on its own opens the **Applications** menu (and closes it
+  again), as clicking it on the top bar does.
 - **super + space** opens the launcher. Type part of an app's name and
   press Enter. With nothing typed, it lists the apps by category, the
   ones you used last first. It also has Lock screen, Log out, Restart,
@@ -55,7 +57,11 @@ ask for your password first.
 ## Apps
 
 - **Terminal**: the command line, with SlateOS's own shell and the
-  usual tools. Drag to select text (double click for a word, triple
+  usual tools. It has tabs: the **+** after the tabs, ctrl + t or the
+  right button's **New tab** opens one in the folder you're in, and a
+  tab's **×** or ctrl + shift + w closes it; ctrl + Page Up / Page Down
+  (or ctrl + tab) moves between them. In full-screen programs such as an
+  editor, ctrl + t is the program's: use ctrl + shift + t there. Drag to select text (double click for a word, triple
   click for a line); ctrl + shift + c copies and ctrl + shift + v
   pastes, and the middle button (or shift + Insert) pastes what you last
   selected. The right button opens a menu with Copy and Paste. The
@@ -166,6 +172,52 @@ home folder. `slate-linux upgrade` keeps that runtime up to date; if an
 upgrade fails, the runtime is put back as it was, and `slate-linux
 rollback` returns to the one from before the last upgrade. The
 installation guide's "Linux programs" section has more.
+
+## Linux software from source
+
+Some programs are published only as source code, built with
+`./configure`, `make` and `sudo make install`. SlateOS builds and runs
+them with Linux's own tools, from its own terminal, as if they were
+SlateOS's commands:
+
+```
+cd ~/src
+tar xf hello-2.12.3.tar.gz
+cd hello-2.12.3
+./configure && make && sudo make install
+hello
+```
+
+- The first time you run a program in a folder with source code, SlateOS
+  asks whether to build it with Linux tools, and remembers the answer
+  (`slate-box here` and `slate-box not-here` change it).
+- Behind this is your own Linux system: Arch Linux, with its compiler,
+  `make` and the rest of its tools, kept apart from SlateOS. It is set
+  up the first time it is needed: about 400 MB from Arch's own servers,
+  checked against Arch's signing key, then about 1.2 GB on disk.
+  `slate-box setup` sets it up ahead of time.
+- Its programs are SlateOS commands: `make`, `gcc` and whatever you
+  install (`hello` above, or `sudo pacman -S cmake`) run by name, in the
+  folder you are in, on your own files there. SlateOS's own commands
+  always come first.
+- `sudo` of a Linux command installs into your Linux system, never into
+  SlateOS. It is yours alone: it doesn't see your other files, SlateOS's
+  programs, or other people's. A command sees the folder you run it
+  from; `slate-box share ~/Documents` shares a folder of your home for
+  good (`slate-box unshare` stops), `slate-box network off` cuts it off
+  the network, and `slate-box show` lists what it may reach.
+- While a Linux program has the terminal, its window carries the
+  **linux** tag in Strata's title bar. Nothing else changes.
+- Every install is kept as a receipt: `slate-box installs` lists them,
+  `slate-box undo hello-2.12.3` removes exactly what that install added
+  and puts back what it changed, and `slate-box rollback hello-2.12.3`
+  takes your Linux system back to before it (and every install since).
+- **Settings › Linux boxes** shows how much of the disk each takes (and
+  the base they share), warns when the disk runs low, removes a box or
+  empties its package cache. `slate-box list` and `slate-box clean` do
+  the same from the terminal.
+- For a Linux shell of its own, `slate-box enter linux`; `slate-box
+  create NAME` makes more, separate Linux systems.
 
 ## The web
 

@@ -1,0 +1,17 @@
+[package]
+name = "slate-pgp"
+description = "OpenPGP detached Ed25519 signatures (RFC 9580), checked and made, for Linux boxes' distributions (ADR 0183)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+slate-hash = { path = "../hash" }
+# Vetted Ed25519 (ADR 0012's exception for cryptography; ADR 0025).
+ed25519-dalek = { version = "=2.2.0", default-features = false }
+# ed25519-dalek's SHA-512, in portable code (as libs/qpkg).
+sha2 = { version = "=0.10.9", default-features = false, features = ["force-soft"] }
+
+[lints]
+workspace = true

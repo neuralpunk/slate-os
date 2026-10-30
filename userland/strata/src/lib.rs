@@ -15,6 +15,7 @@ extern crate std;
 
 pub mod agent;
 pub mod alarms;
+pub mod appicons;
 pub mod approval;
 pub mod desk;
 pub mod desktop;

@@ -51,12 +51,14 @@ pub fn displays_scenario(o: &Opts) -> Result {
         }
         con.run("cat ~/.cache/strata/displays-now", "Virtual-2 lit 1280,0 1024x768@60 modes 1024x768@60", 10)?;
         // A terminal, dragged by its title bar 1000 px right (onto the
-        // second display), then maximised there with super + up.
+        // second display), then maximised there with super + up. Its
+        // window (the tab strip included) is placed at y 87, its title
+        // bar above that: the pointer goes from the middle to y 70.
         monitor(&mon, &["sendkey meta_l-ret"])?;
         con.wait_for("\"terminal\" from pid", 15)?;
         pause(1500);
         let mouse = mouse_index(&mon, "PS/2 Mouse")?;
-        monitor(&mon, &[&format!("mouse_set {mouse}"), "mouse_move 0 -300"])?;
+        monitor(&mon, &[&format!("mouse_set {mouse}"), "mouse_move 0 -330"])?;
         pause(300);
         let mut drag = vec!["mouse_button 1".to_string()];
         drag.extend(std::iter::repeat_n("mouse_move 100 0".to_string(), 10));

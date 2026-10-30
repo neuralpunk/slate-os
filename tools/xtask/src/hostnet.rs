@@ -39,7 +39,7 @@ fn body() -> Vec<u8> {
 /// Listeners on a free port of 127.0.0.1 and, where the host has IPv6,
 /// the same port of ::1: QEMU's user network takes the guest's
 /// connections to its host addresses (10.0.2.2, fec0::2) to those.
-fn listeners(what: &str) -> Result<(Vec<TcpListener>, u16)> {
+pub(crate) fn listeners(what: &str) -> Result<(Vec<TcpListener>, u16)> {
     let v4 = TcpListener::bind("127.0.0.1:0").map_err(|e| format!("{what}: {e}"))?;
     let port = v4.local_addr().map_err(|e| e.to_string())?.port();
     let mut all = vec![v4];
@@ -49,7 +49,7 @@ fn listeners(what: &str) -> Result<(Vec<TcpListener>, u16)> {
     Ok((all, port))
 }
 
-fn serve_tcp(
+pub(crate) fn serve_tcp(
     ls: Vec<TcpListener>,
     stop: Arc<AtomicBool>,
     handle: impl Fn(std::net::TcpStream) + Send + Sync + 'static,
@@ -87,7 +87,7 @@ fn echo(mut s: std::net::TcpStream) {
 }
 
 /// Read an HTTP request's head; returns the request line.
-fn read_request(s: &mut std::net::TcpStream) -> Option<String> {
+pub(crate) fn read_request(s: &mut std::net::TcpStream) -> Option<String> {
     read_head(s).and_then(|h| h.lines().next().map(str::to_string))
 }
 

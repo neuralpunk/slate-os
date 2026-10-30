@@ -62,11 +62,15 @@ pub struct Window {
     pub linux: bool,
     /// ... inside a Linux runtime's sandbox (slate-linux-app, ADR 0038).
     pub sandboxed: bool,
+    /// ... in a Linux box, by the kernel's tag (ADR 0183): its name.
+    pub linux_box: Option<String>,
     /// Its app's glyph, from the entry whose `exec` it runs (ADR 0124).
     pub icon: Option<Icon>,
     /// Its app's accent in Sediment, from the entry whose `exec` its
     /// program is, as the kernel names it (ADR 0167 and its addendum).
     pub accent: Option<slate_ui::themes::Stratum>,
+    /// A Linux app's own icon, from its launcher entry (M31 phase 4).
+    pub image: Option<alloc::rc::Rc<slate_image::Image>>,
     pub workspace: usize,
     /// The frame when normal.
     pub rect: Area,
@@ -204,6 +208,9 @@ pub enum Command {
     Terminal,
     /// super + space.
     Launcher,
+    /// super alone (pressed and released with nothing between): the
+    /// Applications menu, or closing it.
+    Applications,
     /// super + shift + e: leave Strata.
     Quit,
     /// super + L: the lock screen (ADR 0039).
@@ -251,6 +258,10 @@ pub fn binding(code: u16, logo: bool, shift: bool, alt: bool) -> Option<Command>
     }
     if alt && !logo && code == KEY_SPACE {
         return Some(Command::TitleButtons);
+    }
+    // The input layer's lone logo key, at its release (the logo bit off).
+    if matches!(code, KEY_LEFTMETA | KEY_RIGHTMETA) && !logo && !shift && !alt {
+        return Some(Command::Applications);
     }
     if !logo {
         return None;
@@ -380,8 +391,10 @@ impl Wm {
             path: path.map(String::from),
             linux,
             sandboxed: false,
+            linux_box: None,
             icon: None,
             accent: None,
+            image: None,
             workspace: self.active,
             rect: Area::new(x, y, w, h),
             state: State::Normal,
@@ -803,7 +816,9 @@ impl Wm {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use slate_display::input::{KEY_1, KEY_ENTER, KEY_ESC, KEY_LEFT, KEY_Q, KEY_RIGHT, KEY_SPACE, KEY_TAB, KEY_UP};
+    use slate_display::input::{
+        KEY_1, KEY_ENTER, KEY_ESC, KEY_LEFT, KEY_LEFTMETA, KEY_Q, KEY_RIGHT, KEY_RIGHTMETA, KEY_SPACE, KEY_TAB, KEY_UP,
+    };
 
     #[test]
     fn bindings() {
@@ -815,6 +830,10 @@ mod tests {
         assert_eq!(binding(KEY_Q, true, false, false), Some(Command::Close));
         assert_eq!(binding(KEY_ENTER, true, false, false), Some(Command::Terminal));
         assert_eq!(binding(KEY_Q, false, false, false), None);
+        // The logo key alone (its release: the logo bit off).
+        assert_eq!(binding(KEY_LEFTMETA, false, false, false), Some(Command::Applications));
+        assert_eq!(binding(KEY_RIGHTMETA, false, false, false), Some(Command::Applications));
+        assert_eq!(binding(KEY_LEFTMETA, true, false, false), None);
         assert_eq!(binding(KEY_SPACE, false, false, true), Some(Command::TitleButtons));
         assert_eq!(binding(KEY_SPACE, true, false, false), Some(Command::Launcher));
     }

@@ -1771,7 +1771,8 @@ fn strata_scenario(o: &Opts) -> Result {
         }
         // Scrollback and the clipboards (ADR 0038). A script clears the
         // screen and the scrollback, then prints 60 commands; maximised,
-        // the terminal has 33 rows, so the first 28 scroll off.
+        // below its tab strip, the terminal has about 31 rows, so the
+        // first 30 or so scroll off.
         con.run(
             "echo 'printf \"\\033[2J\\033[3J\\033[H\"; i=1; while [ $i -le 60 ]; do echo touch /tmp/sb$i; \
              i=$((i+1)); done' > /tmp/sb.sh && echo written",
@@ -1782,13 +1783,14 @@ fn strata_scenario(o: &Opts) -> Result {
         pause(400);
         type_keys(&mon, "sh /tmp/sb.sh\n")?;
         pause(1000);
-        // Over row 0 (y 74-95; the pointer was left at (1090, 671) by the
-        // resize), the wheel goes all the way back: row 0 shows "touch
-        // /tmp/sb1", row 1 "touch /tmp/sb2".
+        // Over row 0 (y 110-131, below the 36-pixel tab strip; the
+        // pointer was left at (1090, 671) by the resize), the wheel goes
+        // all the way back: row 0 shows "touch /tmp/sb1", row 1 "touch
+        // /tmp/sb2".
         for step in [
             "mouse_move -200 -200",
             "mouse_move -200 -200",
-            "mouse_move -200 -187",
+            "mouse_move -200 -151",
             "mouse_move -200 0",
             "mouse_move -90 0",
         ] {
@@ -2460,6 +2462,7 @@ pub fn test(o: &Opts) -> Result {
             "apps" => crate::apps::apps_scenario(o),
             "tools" => crate::systools::tools_scenario(o),
             "bluetooth" => crate::bluetooth::bluetooth_scenario(o),
+            "boxes" => crate::boxes::boxes_scenario(o),
             "stress" => crate::stress::strata_stress(o),
             "packages" => crate::packages::packages_scenario(o),
             "update" => update_scenario(o),
@@ -2511,6 +2514,7 @@ pub fn test(o: &Opts) -> Result {
         vec![("try", both, crate::trylive::try_scenario)],
         vec![("nohpet", true, no_hpet_scenario)],
         vec![("bluetooth", both, crate::bluetooth::bluetooth_scenario)],
+        vec![("boxes", both, crate::boxes::boxes_scenario)],
         vec![("update", true, update_scenario)],
         vec![("powercut", both, power_cut_scenario)],
         vec![("nic", both, nic_scenario)],
@@ -4201,6 +4205,24 @@ impl Console {
         self.wait_for(want, secs)?;
         self.wait_for(PROMPT, 30)?;
         self.wait_for("# ", 5)
+    }
+
+    /// Run `cmd` and return its output's lines (standard error too), each
+    /// marked on its way so that neither the echoed command nor the prompt
+    /// is among them.
+    pub fn output(&mut self, cmd: &str, secs: u64) -> Result<Vec<String>> {
+        let start = self.pos;
+        self.send(&format!("{{ {cmd}; }} 2>&1 | sed 's/^/<''out> /'; echo '<''out-end>'\r"))?;
+        self.wait_for("<out-end>", secs)?;
+        let clean = strip_ansi(&self.log);
+        let lines = clean[start..self.pos]
+            .lines()
+            .filter_map(|l| l.trim_end_matches('\r').strip_prefix("<out> "))
+            .map(String::from)
+            .collect();
+        self.wait_for(PROMPT, 30)?;
+        self.wait_for("# ", 5)?;
+        Ok(lines)
     }
 
     /// [`Console::run`], and wait for `also` too, which another program

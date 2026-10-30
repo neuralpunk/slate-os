@@ -43,6 +43,8 @@ pub struct Metrics {
     pub line_h: f32,
     pub pad_x: f32,
     pub pad_y: f32,
+    /// The tab strip's height above the grid (device pixels).
+    pub top: f32,
 }
 
 impl Metrics {
@@ -54,13 +56,14 @@ impl Metrics {
             line_h: round(LINE * scale),
             pad_x: PAD_X * scale,
             pad_y: PAD_Y * scale,
+            top: crate::tabs::STRIP_H * scale,
         }
     }
 
     /// The columns and rows that fit `width` × `height` device pixels.
     pub fn grid(&self, width: u32, height: u32) -> (usize, usize) {
         let cols = floor((width as f32 - 2.0 * self.pad_x) / self.cell_w).max(1.0) as usize;
-        let rows = floor((height as f32 - 2.0 * self.pad_y) / self.line_h).max(1.0) as usize;
+        let rows = floor((height as f32 - 2.0 * self.pad_y - self.top) / self.line_h).max(1.0) as usize;
         (cols, rows)
     }
 }
@@ -142,7 +145,7 @@ impl Metrics {
     /// The row and the column boundary nearest a point in device pixels
     /// (for character selections), and the cell under it.
     pub fn locate(&self, x: i32, y: i32, rows: usize, cols: usize) -> (usize, usize, usize) {
-        let row = floor((y as f32 - self.pad_y) / self.line_h).clamp(0.0, rows as f32 - 1.0) as usize;
+        let row = floor((y as f32 - self.top - self.pad_y) / self.line_h).clamp(0.0, rows as f32 - 1.0) as usize;
         let at = (x as f32 - self.pad_x) / self.cell_w;
         let boundary = round(at).clamp(0.0, cols as f32) as usize;
         let cell = floor(at).clamp(0.0, cols as f32 - 1.0) as usize;
@@ -223,7 +226,7 @@ pub fn draw(
     let offset = view.offset.min(term.history_len());
     let first = term.history_len() - offset;
     for row in 0..term.rows() {
-        let top = m.pad_y + row as f32 * m.line_h;
+        let top = m.top + m.pad_y + row as f32 * m.line_h;
         let (cells, _) = term.line(first + row).unwrap_or((&[], false));
         let number = term.dropped() + (first + row) as u64;
         let cell = |col: usize| cells.get(col).copied().unwrap_or(Cell::BLANK);
@@ -280,7 +283,7 @@ pub fn draw(
         let wide = under.width() == 2 && col + 1 < term.cols();
         let (w, h) = (if wide { 16.0 * m.scale } else { (8.0 * m.scale).min(m.cell_w) }, 16.0 * m.scale);
         let x = round(x_of(col)) as i32;
-        let y = round(m.pad_y + row as f32 * m.line_h + (m.line_h - h) / 2.0) as i32;
+        let y = round(m.top + m.pad_y + row as f32 * m.line_h + (m.line_h - h) / 2.0) as i32;
         let r = Rect::new(x, y, w as i32, h as i32);
         if c.focused {
             // The theme's accent while typing (chalk in graphite).
@@ -290,7 +293,7 @@ pub fn draw(
                 let (face, slant) = face_for(f, it, &cell.attr);
                 let mut s = [0u8; 64];
                 let n = glyphs(term, &cell, &mut s);
-                let top = m.pad_y + row as f32 * m.line_h;
+                let top = m.top + m.pad_y + row as f32 * m.line_h;
                 let st = Style::new(face, size, pal.window).oblique(slant);
                 let x = if wide {
                     x_of(col) + (2.0 * m.cell_w - text::width(&st, cell.ch.encode_utf8(&mut [0u8; 4]))) / 2.0
@@ -362,10 +365,13 @@ mod tests {
     #[test]
     fn grid_and_rendering() {
         let f = fonts();
-        let m = Metrics::new(&f, 1.0);
+        // The grid alone, at the window's top (no tab strip above it).
+        let m = Metrics { top: 0.0, ..Metrics::new(&f, 1.0) };
         // DM Mono advances 600 units of 1000: 7.8 px at 13.
         assert!((m.cell_w - 7.8).abs() < 0.01);
         assert_eq!(m.grid(560, 400), (67, 17));
+        // The tab strip above it takes a row's room.
+        assert_eq!(Metrics::new(&f, 1.0).grid(560, 400), (67, 16));
         let mut t = Term::new(40, 6);
         t.feed(b"\x1b[1;97malex@workstation\x1b[0m \x1b[38;5;245m~/slate\x1b[0m $ ls\r\n\x1b[31mred\x1b[0m \x1b[7minverse\x1b[0m");
         let mut canvas = Canvas::new(400, 160, Color::rgb(0));
@@ -386,7 +392,8 @@ mod tests {
     #[test]
     fn direct_colours_wide_characters_and_the_light_variant() {
         let f = fonts();
-        let m = Metrics::new(&f, 1.0);
+        // The grid alone, at the window's top (no tab strip above it).
+        let m = Metrics { top: 0.0, ..Metrics::new(&f, 1.0) };
         let mut t = Term::new(30, 3);
         // A direct-colour block, a wide character, italic and crossed-out text.
         t.feed("\x1b[48;2;18;52;86m  \x1b[0m 中 \x1b[3mitalic\x1b[0m \x1b[9mx\x1b[0m".as_bytes());
@@ -414,7 +421,8 @@ mod tests {
     #[test]
     fn scrollback_and_selection() {
         let f = fonts();
-        let m = Metrics::new(&f, 1.0);
+        // The grid alone, at the window's top (no tab strip above it).
+        let m = Metrics { top: 0.0, ..Metrics::new(&f, 1.0) };
         let mut t = Term::new(20, 3);
         t.set_scrollback(10);
         t.feed(b"first\r\nsecond\r\nthird\r\nfourth\r\nfifth");

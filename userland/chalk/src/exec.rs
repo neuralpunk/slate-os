@@ -800,6 +800,11 @@ impl Shell {
                 self.export(n);
             }
         }
+        // A Linux source folder's program, or sudo of a Linux command, goes
+        // to the person's Linux system (ADR 0183).
+        let ask = (self.interactive || self.from_prompt) && slate_rt::term::isatty(0);
+        let routed = crate::linux::route(argv, &mut |n| self.lookup(n), ask);
+        let argv: &[Vec<u8>] = routed.as_deref().unwrap_or(argv);
         let Some(path) = self.lookup(&argv[0]) else {
             crate::error(format_args!("{}: command not found", text(&argv[0])));
             return 127;
@@ -895,6 +900,7 @@ impl Shell {
         }
         signal::take();
         self.subshell = true;
+        self.from_prompt |= self.interactive;
         self.interactive = false;
         self.opts.monitor = false;
         self.jobs.clear();

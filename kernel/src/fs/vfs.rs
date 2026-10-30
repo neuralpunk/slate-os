@@ -929,6 +929,15 @@ fn attach(at: &Arc<Dentry>, root: Arc<Dentry>, source: &str, sb: Arc<dyn Inode>,
     });
 }
 
+/// The ID of the mount `d` lies in, in the caller's namespace (the one
+/// /proc/<pid>/mountinfo shows; never reused).
+pub fn mount_id_of(d: &Arc<Dentry>) -> Option<u64> {
+    let ns = mnt_ns();
+    let mounts = MOUNTS.lock();
+    let r = containing_mount(&mounts, ns, d)?;
+    mounts.iter().find(|m| m.ns == ns && Arc::ptr_eq(&m.root, &r)).map(|m| m.id)
+}
+
 /// The file system (root inode) and flags of the mount `d` lies in, in
 /// the caller's namespace.
 fn mount_of(d: &Arc<Dentry>) -> Option<(Arc<dyn Inode>, u32)> {

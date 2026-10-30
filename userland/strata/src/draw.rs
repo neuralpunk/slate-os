@@ -97,6 +97,8 @@ pub struct Bar<'a> {
     pub linux: bool,
     /// ... in a Linux runtime's sandbox (ADR 0038).
     pub sandboxed: bool,
+    /// ... in a Linux box (ADR 0183): its name.
+    pub linux_box: Option<&'a str>,
     /// Whether the network has a link; None hides the icon.
     pub network: Option<bool>,
     /// The battery's charge; None (no battery) hides it.
@@ -337,9 +339,11 @@ pub fn bar(p: &mut Painter<'_>, pal: &Palette, f: &Fonts<'_>, b: &Bar<'_>) -> Pa
         p.line(&st, a.x + 9.0 + 13.0 + 8.0, 0.0, bar_h, text);
         hits.pending = Some(a);
     }
-    let (domain_icon, domain) = match (b.linux, b.sandboxed) {
-        (true, true) => (Icon::SplitPane, "linux sandbox"),
-        (true, false) => (Icon::SplitPane, "linux"),
+    let boxed = b.linux_box.map(box_words);
+    let (domain_icon, domain) = match (b.linux, b.sandboxed, boxed.as_deref()) {
+        (true, _, Some(t)) => (Icon::SplitPane, t),
+        (true, true, None) => (Icon::SplitPane, "linux sandbox"),
+        (true, false, None) => (Icon::SplitPane, "linux"),
         _ => (Icon::Shield, "slate mode"),
     };
     right -= 16.0 + p.measure(&label, domain);
@@ -418,9 +422,14 @@ pub struct Frame<'a> {
     pub linux: bool,
     /// The program runs in a Linux runtime's sandbox (ADR 0038).
     pub sandboxed: bool,
+    /// The program runs in a Linux box (ADR 0183): its name, which the
+    /// tag says ("linux box dev").
+    pub linux_box: Option<&'a str>,
     /// The app's glyph (its entry's `icon`), before the name; the
     /// generic window when None.
     pub icon: Option<Icon>,
+    /// A Linux app's own icon, in place of the glyph (M31 phase 4).
+    pub image: Option<&'a slate_image::Image>,
     /// Its app's accent, as its entry declares it (ADR 0167 and its
     /// addendum).
     pub accent: Option<Stratum>,
@@ -461,12 +470,24 @@ fn domain_tag(p: &mut Painter<'_>, f: &Fonts<'_>, x: f32, mid: f32, border: Colo
 /// (ADR 0038): the domain tag's shape, with a 10 px shield and
 /// "linux sandbox". Returns its width.
 fn sandbox_tag(p: &mut Painter<'_>, f: &Fonts<'_>, x: f32, mid: f32, border: Color, text: Color) -> f32 {
+    shielded_tag(p, f, x, mid, border, text, "linux sandbox")
+}
+
+/// What a Linux box's tag says: "linux" for the person's own Linux
+/// system (the box `linux`, ADR 0183's phase 3), else "linux box NAME".
+fn box_words(name: &str) -> alloc::string::String {
+    if name == "linux" { alloc::string::String::from("linux") } else { alloc::format!("linux box {name}") }
+}
+
+/// The sandbox tag's shape with `words` ("linux box dev" for a Linux
+/// box's program, ADR 0183). Returns its width.
+fn shielded_tag(p: &mut Painter<'_>, f: &Fonts<'_>, x: f32, mid: f32, border: Color, text: Color, words: &str) -> f32 {
     let st = p.style(&f.mono, 10.5, text);
-    let w = 6.0 + 10.0 + 5.0 + p.measure(&st, "linux sandbox") + 6.0;
+    let w = 6.0 + 10.0 + 5.0 + p.measure(&st, words) + 6.0;
     let a = Area::new(x, mid - 9.0, w, 18.0);
     p.border(a, 4.0, 1.0, border);
     p.icon(Icon::Shield, x + 6.0, mid - 5.0, 10.0, text);
-    p.line(&st, x + 21.0, a.y, a.h, "linux sandbox");
+    p.line(&st, x + 21.0, a.y, a.h, words);
     w
 }
 
@@ -758,7 +779,10 @@ pub fn frame(p: &mut Painter<'_>, pal: &Palette, f: &Fonts<'_>, a: Area, fr: &Fr
     // slate-linux-app or Sway's bridge) gets the generic window. Its
     // colour is the app's own ink where the theme has them (Sediment).
     let glyph = if pal.app_accents { app_accent(pal, fr.accent).ink } else { pal.title_glyph };
-    p.icon(fr.icon.unwrap_or(Icon::Window), x, mid - 7.0, 14.0, fade(pal.title_button_unfocused, glyph));
+    match fr.image {
+        Some(img) => crate::appicons::draw(p, img, Area::new(x - 1.0, mid - 8.0, 16.0, 16.0)),
+        None => p.icon(fr.icon.unwrap_or(Icon::Window), x, mid - 7.0, 14.0, fade(pal.title_button_unfocused, glyph)),
+    }
     x += 14.0 + 10.0;
     // The theme's serif when it is installed (ADR 0175), else Host
     // Grotesk as the handoff's fallback.
@@ -772,7 +796,11 @@ pub fn frame(p: &mut Painter<'_>, pal: &Palette, f: &Fonts<'_>, a: Area, fr: &Fr
     };
     x += p.line(&name, x, a.y, bar_h, fr.app) + 10.0;
     // The path, cut to leave room for the domain tag after it.
-    let tag = if fr.sandboxed {
+    let boxed = fr.linux_box.map(box_words);
+    let tag = if let Some(t) = &boxed {
+        let st = p.style(&f.mono, 10.5, pal.text_4);
+        6.0 + 10.0 + 5.0 + p.measure(&st, t) + 6.0 + 10.0
+    } else if fr.sandboxed {
         let st = p.style(&f.mono, 10.5, pal.text_4);
         6.0 + 10.0 + 5.0 + p.measure(&st, "linux sandbox") + 6.0 + 10.0
     } else if fr.linux {
@@ -789,7 +817,9 @@ pub fn frame(p: &mut Painter<'_>, pal: &Palette, f: &Fonts<'_>, a: Area, fr: &Fr
             x += p.line(&st, x, a.y, bar_h, &shown) + 10.0;
         }
     }
-    if fr.sandboxed {
+    if let Some(t) = &boxed {
+        shielded_tag(p, f, x, mid, pal.border_strong, pal.text_4, t);
+    } else if fr.sandboxed {
         sandbox_tag(p, f, x, mid, pal.border_strong, pal.text_4);
     } else if fr.linux {
         domain_tag(p, f, x, mid, pal.border_strong, pal.text_4);
@@ -846,6 +876,8 @@ pub fn dim(p: &mut Painter<'_>, colour: Color, opacity: f32) {
 #[derive(Clone, Debug)]
 pub struct Row<'a> {
     pub icon: Icon,
+    /// A Linux app's own icon, drawn in place of `icon` (M31 phase 4).
+    pub image: Option<&'a slate_image::Image>,
     pub name: &'a str,
     pub linux: bool,
     /// Right-aligned: "app", "settings", "system".
@@ -1003,7 +1035,10 @@ fn launcher_row(p: &mut Painter<'_>, pal: &Palette, f: &Fonts<'_>, row: Area, r:
     let mid = row.y + ROW_H / 2.0;
     let tile = Area::new(row.x + 12.0, mid - 17.0, 34.0, 34.0);
     p.fill(tile, 9.0, tile_c);
-    p.icon(r.icon, tile.x + 8.5, tile.y + 8.5, 17.0, icon_c);
+    match r.image {
+        Some(img) => crate::appicons::draw(p, img, tile.grow(-4.0)),
+        None => p.icon(r.icon, tile.x + 8.5, tile.y + 8.5, 17.0, icon_c),
+    }
     let meta = p.style(&f.mono, 11.5, meta_c);
     let mw = p.measure(&meta, r.meta);
     p.line(&meta, row.right() - 12.0 - mw, row.y, ROW_H, r.meta);

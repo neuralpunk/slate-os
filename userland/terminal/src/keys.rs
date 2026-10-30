@@ -14,6 +14,8 @@ const KEY_ESC: u16 = 1;
 const KEY_BACKSPACE: u16 = 14;
 const KEY_TAB: u16 = 15;
 const KEY_ENTER: u16 = 28;
+const KEY_W: u16 = 17;
+const KEY_T: u16 = 20;
 const KEY_A: u16 = 30;
 const KEY_C: u16 = 46;
 const KEY_V: u16 = 47;
@@ -46,12 +48,29 @@ pub enum Local {
     SelectAll,
     /// shift + Insert: paste the selection.
     PasteSelection,
+    /// ctrl + t (ctrl + shift + t in full-screen programs): a new tab.
+    NewTab,
+    /// ctrl + shift + w: close the tab.
+    CloseTab,
+    /// ctrl + PgDn / ctrl + tab, ctrl + PgUp / ctrl + shift + tab: the
+    /// next or the previous tab.
+    NextTab,
+    PreviousTab,
 }
 
-/// What a key means to the terminal itself, if anything.
-pub fn local(code: u16, mods: u8) -> Option<Local> {
+/// What a key means to the terminal itself, if anything. `full_screen`:
+/// a program has the alternate screen (an editor, top), and ctrl + t is
+/// its own (nano's, for one), so only ctrl + shift + t opens a tab.
+pub fn local(code: u16, mods: u8, full_screen: bool) -> Option<Local> {
     let only = |m: u8| mods & (SHIFT | CTRL | ALT) == m;
     Some(match code {
+        KEY_T if only(CTRL) && !full_screen => Local::NewTab,
+        KEY_T if only(SHIFT | CTRL) => Local::NewTab,
+        KEY_W if only(SHIFT | CTRL) => Local::CloseTab,
+        KEY_PAGEDOWN if only(CTRL) => Local::NextTab,
+        KEY_PAGEUP if only(CTRL) => Local::PreviousTab,
+        KEY_TAB if only(CTRL) => Local::NextTab,
+        KEY_TAB if only(SHIFT | CTRL) => Local::PreviousTab,
         KEY_PAGEUP if only(SHIFT) => Local::PageUp,
         KEY_PAGEDOWN if only(SHIFT) => Local::PageDown,
         KEY_C if only(SHIFT | CTRL) => Local::Copy,
@@ -221,13 +240,22 @@ mod tests {
 
     #[test]
     fn local_keys_and_pasting() {
-        assert_eq!(local(KEY_PAGEUP, SHIFT), Some(Local::PageUp));
-        assert_eq!(local(KEY_PAGEUP, 0), None);
-        assert_eq!(local(KEY_C, SHIFT | CTRL), Some(Local::Copy));
-        assert_eq!(local(KEY_C, CTRL), None);
-        assert_eq!(local(KEY_V, SHIFT | CTRL), Some(Local::Paste));
-        assert_eq!(local(KEY_A, SHIFT | CTRL), Some(Local::SelectAll));
-        assert_eq!(local(KEY_INSERT, SHIFT), Some(Local::PasteSelection));
+        assert_eq!(local(KEY_PAGEUP, SHIFT, false), Some(Local::PageUp));
+        assert_eq!(local(KEY_PAGEUP, 0, false), None);
+        assert_eq!(local(KEY_C, SHIFT | CTRL, false), Some(Local::Copy));
+        assert_eq!(local(KEY_C, CTRL, false), None);
+        assert_eq!(local(KEY_V, SHIFT | CTRL, false), Some(Local::Paste));
+        assert_eq!(local(KEY_A, SHIFT | CTRL, false), Some(Local::SelectAll));
+        assert_eq!(local(KEY_INSERT, SHIFT, false), Some(Local::PasteSelection));
+        // Tabs: ctrl + t at the shell, ctrl + shift + t everywhere; in a
+        // full-screen program ctrl + t is the program's.
+        assert_eq!(local(KEY_T, CTRL, false), Some(Local::NewTab));
+        assert_eq!(local(KEY_T, CTRL, true), None);
+        assert_eq!(local(KEY_T, CTRL | SHIFT, true), Some(Local::NewTab));
+        assert_eq!(local(KEY_W, CTRL | SHIFT, false), Some(Local::CloseTab));
+        assert_eq!(local(KEY_W, CTRL, false), None);
+        assert_eq!(local(KEY_PAGEDOWN, CTRL, false), Some(Local::NextTab));
+        assert_eq!(local(KEY_TAB, CTRL | SHIFT, false), Some(Local::PreviousTab));
         assert_eq!(paste("a\nb\r\nc", false), b"a\rb\rc");
         assert_eq!(paste("x\x1b[201~y", true), b"\x1b[200~x[201~y\x1b[201~");
         assert_eq!(dropped("/root/a.txt\n/root/My Files/it's"), "/root/a.txt '/root/My Files/it'\\''s' ");

@@ -40,6 +40,12 @@ pub struct App {
     /// Its colour in themes with app accents (`accent=`, one of the five
     /// strata; ADR 0167's addendum).
     pub accent: Option<Stratum>,
+    /// A Linux app's own icon (its entry's `Icon=`) and picture, once
+    /// found (M31 phase 4, [`crate::appicons`]).
+    pub icon_name: String,
+    pub image: Option<alloc::rc::Rc<slate_image::Image>>,
+    /// A Flatpak app's ID (its entry's `X-Flatpak=`).
+    pub flatpak: String,
 }
 
 /// The categories in the order they are listed; others follow by name.
@@ -88,6 +94,9 @@ pub fn parse_app(text: &str) -> Option<App> {
         category: String::from("other"),
         comment: String::new(),
         accent: None,
+        icon_name: String::new(),
+        image: None,
+        flatpak: String::new(),
     };
     for line in text.lines() {
         let Some((k, v)) = line.split_once('=') else { continue };
@@ -138,6 +147,7 @@ pub fn parse_app(text: &str) -> Option<App> {
 /// It runs through slate-linux-app, tagged "linux".
 pub fn parse_desktop_entry(text: &str) -> Option<App> {
     let (mut name, mut exec, mut web, mut comment) = (String::new(), String::new(), false, String::new());
+    let (mut icon_name, mut flatpak) = (String::new(), String::new());
     let mut category = "other";
     let mut in_entry = false;
     for line in text.lines() {
@@ -151,6 +161,8 @@ pub fn parse_desktop_entry(text: &str) -> Option<App> {
             ("Name", v) => name = String::from(v),
             ("Exec", v) => exec = String::from(v),
             ("Comment", v) => comment = String::from(v),
+            ("Icon", v) => icon_name = String::from(v),
+            ("X-Flatpak", v) => flatpak = String::from(v),
             ("Type", t) if t != "Application" => return None,
             ("NoDisplay" | "Hidden" | "Terminal", "true") => return None,
             ("Categories", c) => {
@@ -173,6 +185,9 @@ pub fn parse_desktop_entry(text: &str) -> Option<App> {
         category: String::from(category),
         comment,
         accent: None,
+        icon_name,
+        image: None,
+        flatpak,
     })
 }
 
@@ -320,8 +335,17 @@ pub enum Entry<'a> {
 impl<'a> Entry<'a> {
     fn row(self) -> Row<'a> {
         match self {
-            Entry::App(a) => Row { icon: a.icon, name: &a.name, linux: a.linux, meta: &a.kind, comment: &a.comment },
-            Entry::Action(x) => Row { icon: x.icon(), name: x.name(), linux: false, meta: x.meta(), comment: "" },
+            Entry::App(a) => Row {
+                icon: a.icon,
+                image: a.image.as_deref(),
+                name: &a.name,
+                linux: a.linux,
+                meta: &a.kind,
+                comment: &a.comment,
+            },
+            Entry::Action(x) => {
+                Row { icon: x.icon(), image: None, name: x.name(), linux: false, meta: x.meta(), comment: "" }
+            }
         }
     }
 }

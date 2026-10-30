@@ -9,7 +9,13 @@
 //! runs with software rendering and opens foot (`desktop::accept`). M18d:
 //! Firefox from a Linux runtime in a Strata window (`linuxapp::accept`).
 //! M28: a Flathub app installed, updated and rolled back, in a Strata
-//! window, and an AppImage (`flatpak::accept`).
+//! window, and an AppImage (`flatpak::accept`). M31: Firefox in one
+//! click with its progress, on a system without a Linux runtime
+//! (`flatpak::browser_fresh`); GNOME's Calculator following Strata's
+//! light or dark theme as it changes, with its icon and Strata's fonts
+//! (`flatpak::themed`). M33: source packages (autotools, CMake, Meson,
+//! Cargo, setuptools) built, tested, installed and run in an Arch Linux
+//! box (`boxes::accept`).
 //! M20: Slate's own tools on the real network: names with IPv4 and IPv6
 //! addresses, a download over IPv4 from the internet and over IPv6 (from
 //! the host's server through QEMU's network, and from the internet when
@@ -234,10 +240,16 @@ pub fn run(o: &Opts) -> Result {
     crate::linuxapp::accept()?;
     // M28: Flatpak and AppImage (ADR 0114).
     crate::flatpak::accept()?;
+    // M31: Firefox in one click on a fresh system (ADR 0181).
+    crate::flatpak::browser_fresh()?;
+    // M31: a GTK app follows Strata's theme, with its icon (ADR 0182).
+    crate::flatpak::themed()?;
+    // M33: Linux from source in an Arch box (ADR 0183).
+    crate::boxes::accept()?;
     println!(
         "xtask: accept: M12 passed (ssh, git over HTTP and HTTPS, C with GCC and Clang, Rust, Python; \
          workbench passes e2fsck), M13's DNS check, M15 (podman rootful and rootless, docker), M18a (Sway \
-         with foot on virtio-gpu, typing, D-Bus), M18d (Firefox in Strata), M28's Flatpak and AppImage, M20 (lookups, fetch over IPv4 \
+         with foot on virtio-gpu, typing, D-Bus), M18d (Firefox in Strata), M28's Flatpak and AppImage, M31's Firefox in one click and themed GTK app, M33's source packages in an Arch box, M20 (lookups, fetch over IPv4 \
          and IPv6, NTP) and M21 (HTTPS from three sites with Slate's TLS client) ({:.0}s)",
         started.elapsed().as_secs_f64()
     );

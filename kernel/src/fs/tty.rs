@@ -180,6 +180,9 @@ pub struct PtyLink {
     locked: AtomicBool,
     /// Owner and permissions of /dev/pts/N: (uid, gid, mode bits).
     attrs: IrqSpinLock<(u32, u32, u32)>,
+    /// The devpts instance whose ptmx made it (0: the system's; ADR
+    /// 0183: a Linux box's /dev/pts lists only its own).
+    instance: u64,
 }
 
 impl PtyLink {
@@ -910,6 +913,11 @@ impl PtyMaster {
 
 /// Allocate a new pseudo-terminal; returns its master file.
 pub fn open_master(flags: u32) -> Result<Arc<dyn File>> {
+    open_master_in(flags, 0)
+}
+
+/// [`open_master`] through devpts instance `instance`'s ptmx.
+pub fn open_master_in(flags: u32, instance: u64) -> Result<Arc<dyn File>> {
     let mut ptys = PTYS.lock();
     ptys.retain(|_, t| t.strong_count() > 0);
     let index = (0..MAX_PTYS).find(|i| !ptys.contains_key(i)).ok_or(crate::abi::linux::errno::ENOSPC)?;
@@ -927,6 +935,7 @@ pub fn open_master(flags: u32) -> Result<Arc<dyn File>> {
             let c = p.cred();
             (c.fsuid, c.fsgid, 0o620)
         })),
+        instance,
     };
     let tty = Arc::new(new_tty(Kind::Pty(link), Winsize { ws_row: 24, ws_col: 80, ws_xpixel: 0, ws_ypixel: 0 }));
     ptys.insert(index, Arc::downgrade(&tty));
@@ -968,6 +977,11 @@ pub fn open_slave(index: u32, flags: u32) -> Result<Arc<dyn File>> {
 /// Indices of the pseudo-terminals in use (for /dev/pts).
 pub fn pty_indices() -> Vec<u32> {
     PTYS.lock().iter().filter(|(_, t)| t.upgrade().is_some_and(|t| !t.hung_up())).map(|(&i, _)| i).collect()
+}
+
+/// The devpts instance pseudo-terminal `index` was made through.
+pub fn pty_instance(index: u32) -> Option<u64> {
+    pty_link(index, |l| l.instance)
 }
 
 impl File for PtyMaster {

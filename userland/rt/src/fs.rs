@@ -625,6 +625,18 @@ pub fn umount(target: &[u8]) -> Result<()> {
     crate::syscall!(sys::UMOUNT2, t.as_ptr(), 0).map(|_| ())
 }
 
+/// umount2(2) with MNT_DETACH: the mount goes now, and the file system
+/// when nothing uses it any more.
+pub fn umount_detach(target: &[u8]) -> Result<()> {
+    if sys::native() {
+        let (p, n) = npath(target)?;
+        return crate::syscall!(nr::UMOUNT as usize, p, n, slate_abi::umount::DETACH).map(|_| ());
+    }
+    let t = cpath(target)?;
+    // MNT_DETACH (musl `sys/mount.h`).
+    crate::syscall!(sys::UMOUNT2, t.as_ptr(), 2).map(|_| ())
+}
+
 /// What statfs(2) says about the file system holding a path.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct StatFs {

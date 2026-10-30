@@ -53,6 +53,8 @@ pub const NEW_WINDOW: &[u8] = b"/bin/terminal";
 /// The person's Flatpak apps updated in the background, when due (ADR
 /// 0115).
 const APP_UPDATES: &[u8] = b"/bin/slate-flatpak update --auto";
+/// What a Linux program's start needs, read ahead (M31 phase 2).
+const LINUX_WARM: &[u8] = b"/bin/slate-linux warm";
 /// The system's updates, checked in the background (ADR 0112): only the
 /// repositories' signed indexes are fetched, and the count is kept.
 const UPDATE_CHECK: &[u8] = b"/bin/software-updater --check";
@@ -99,9 +101,15 @@ fn load_apps() -> Vec<App> {
                 if e.name.ends_with(b".desktop") && !seen.contains(&e.name) {
                     seen.push(e.name.clone());
                     let path = alloc::format!("{dir}/{}", lossy(&e.name));
-                    if let Some(a) =
+                    if let Some(mut a) =
                         fs::read_file(path.as_bytes()).ok().and_then(|t| launcher::parse_desktop_entry(&lossy(&t)))
                     {
+                        // Its own icon, beside its entry (M31 phase 4).
+                        a.image = crate::appicons::resolve(&dir, &a.icon_name)
+                            .or_else(|| {
+                                (!a.flatpak.is_empty()).then(|| crate::appicons::from_catalog(&a.flatpak)).flatten()
+                            })
+                            .and_then(|p| crate::appicons::load(&p));
                         out.push(a);
                     }
                 }
@@ -588,6 +596,9 @@ pub fn main() -> i32 {
     // The system's: five minutes in, then every six hours (not on the
     // live system, which isn't updated).
     let mut update_check_at = now_ms() + 300_000;
+    // The Linux runtime warmed once, soon after the session starts, so the
+    // first Linux program starts as fast as the later ones (M31 phase 2).
+    let mut warm_at = Some(now_ms() + 3000);
     // The live system (M27): a way back to the installer.
     let live = fs::exists(LIVE.as_bytes());
     if live {
@@ -669,6 +680,9 @@ pub fn main() -> i32 {
     let mut warmed = false;
     // Frame timings for the bench (ADR 0062).
     let mut stats = Stats::new(cmdline_word("strata.stats").is_some());
+    // Windows whose new contents are to be drawn: their apps hear that they
+    // are on the screen once the frame showing them is (protocol v8).
+    let mut frame_owed: Vec<WinId> = Vec::new();
     // When the last input was read, to time the work after it.
     let mut handled_from = 0i64;
     loop {
@@ -1005,9 +1019,15 @@ pub fn main() -> i32 {
                     let mut client = |p: &mut Painter<'_>, id: WinId, c: Area| {
                         if let Some(b) = server.buffer(id) {
                             let r = p.device(&c);
-                            let (bw, bh, serial) = (b.width as i32, b.height as i32, b.serial);
+                            let (bw, bh, serial, opaque) = (b.width as i32, b.height as i32, b.serial, b.opaque);
                             let px = b.pixels();
                             let src = &px[..(bw * bh) as usize];
+                            // An opaque buffer (a Linux compositor's frames,
+                            // M31) is copied, its fourth byte set.
+                            if opaque {
+                                p.canvas.copy_opaque(r.x, r.y, bw, bh, src);
+                                return;
+                            }
                             // Into the main canvas (opaque), the card blends
                             // it as draw_image would (slate-ui's colours
                             // aren't premultiplied).
@@ -1243,6 +1263,12 @@ pub fn main() -> i32 {
                 }
             }
         }
+        // The frame that showed them is out (or there was nothing to draw,
+        // and won't be): their apps may draw the next.
+        if !deferred && !frame_owed.is_empty() {
+            server.frames_shown(&frame_owed);
+            frame_owed.clear();
+        }
         let mut fds = server.poll_fds();
         // (The card last: its vblank events say a display has shown its
         // last frame.)
@@ -1346,6 +1372,9 @@ pub fn main() -> i32 {
         }
         for (id, r) in changes.contents {
             stats.contents(id);
+            if !frame_owed.contains(&id) {
+                frame_owed.push(id);
+            }
             if let Some(a) = wm.layout().into_iter().find(|(w, _)| *w == id).map(|(_, a)| a) {
                 // Only what the app says changed, within its content.
                 let c = draw::content(a, wm.title_h);
@@ -1366,6 +1395,12 @@ pub fn main() -> i32 {
             update_check_at = now_ms() + 6 * 3_600_000;
             if !live && fs::exists(UPDATER) {
                 spawn(UPDATE_CHECK, &socket);
+            }
+        }
+        if warm_at.is_some_and(|t| now_ms() >= t) {
+            warm_at = None;
+            if fs::exists(alloc::format!("{LINUX_RUNTIME}/usr/bin/sway").as_bytes()) {
+                spawn(LINUX_WARM, &socket);
             }
         }
         if now_ms() >= app_updates_at {
@@ -1492,7 +1527,10 @@ pub fn main() -> i32 {
                 }
                 // So does the launcher (super + space closes it again).
                 Input::Key { code, ch, mods, .. } if launcher.is_some() => {
-                    let toggle = binding(code, mods.logo, mods.shift, mods.alt) == Some(Command::Launcher);
+                    let toggle = matches!(
+                        binding(code, mods.logo, mods.shift, mods.alt),
+                        Some(Command::Launcher | Command::Applications)
+                    );
                     let outcome = if toggle {
                         Some(launcher::Outcome::Close)
                     } else {
@@ -1596,9 +1634,11 @@ pub fn main() -> i32 {
                     damage.set_full();
                 }
                 // So does the Applications menu (super + space trades it
-                // for the launcher).
+                // for the launcher, super alone closes it).
                 Input::Key { code, ch, mods, .. } if menu.is_some() => {
-                    if binding(code, mods.logo, mods.shift, mods.alt) == Some(Command::Launcher) {
+                    if binding(code, mods.logo, mods.shift, mods.alt) == Some(Command::Applications) {
+                        menu = None;
+                    } else if binding(code, mods.logo, mods.shift, mods.alt) == Some(Command::Launcher) {
                         menu = None;
                         fresh_apps(&mut apps);
                         launcher =
@@ -1683,6 +1723,11 @@ pub fn main() -> i32 {
                             fresh_apps(&mut apps);
                             launcher =
                                 Some(Launcher::new(apps.clone()).with_recent(launcher::load_recent()).with_live(live))
+                        }
+                        Command::Applications => {
+                            slate_rt::eprintln!("strata: the applications menu (super)");
+                            fresh_apps(&mut apps);
+                            menu = Some(Menu::new(apps.clone(), launcher::load_recent()));
                         }
                         Command::Lock => {
                             slate_rt::eprintln!("strata: locked");

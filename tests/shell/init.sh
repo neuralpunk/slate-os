@@ -32,8 +32,8 @@ svc net "" "" "2 3 4 5"
 svc db net log "3 5"
 svc log "" "" "2 3 4 5"
 svc late '$all' "" "3"
-check order_3 "$(slinit --order 3 | grep -Ev "^(sshd|slate-brokerd|devd|seatd|netd|logd|slate-btd|fstrim)$" | tr '\n' ' ')" "log net db web late "
-check order_2 "$(slinit --order 2 | grep -Ev '^(sshd|slate-brokerd|devd|seatd|netd|logd|slate-btd|fstrim)$' | tr '\n' ' ')" "log net web "
+check order_3 "$(slinit --order 3 | grep -Ev "^(sshd|slate-brokerd|devd|seatd|netd|logd|slate-btd|slate-boxd|fstrim)$" | tr '\n' ' ')" "log net db web late "
+check order_2 "$(slinit --order 2 | grep -Ev '^(sshd|slate-brokerd|devd|seatd|netd|logd|slate-btd|slate-boxd|fstrim)$' | tr '\n' ' ')" "log net web "
 printf '#!/bin/sh\necho no header\n' > /etc/init.d/plain && chmod 755 /etc/init.d/plain
 check no_header_ignored "$(slinit --order 3 | grep -c plain)" 0
 rm -f /etc/init.d/web /etc/init.d/net /etc/init.d/db /etc/init.d/log /etc/init.d/late /etc/init.d/plain

@@ -235,6 +235,18 @@ pub fn setgid(gid: u32) -> Result<()> {
     }
     crate::syscall!(sys::SETGID, gid).map(|_| ())
 }
+/// All three user IDs and all three group IDs at once (setresgid(2) then
+/// setresuid(2)); needs the privilege to (CAP_SETUID and CAP_SETGID in
+/// the caller's user namespace).
+pub fn set_all_ids(uid: u32, gid: u32) -> Result<()> {
+    if sys::native() {
+        let ids = slate_abi::Ids { ruid: uid, euid: uid, suid: uid, rgid: gid, egid: gid, sgid: gid };
+        return crate::syscall!(nr::SETIDS as usize, &ids as *const slate_abi::Ids).map(|_| ());
+    }
+    crate::syscall!(sys::SETRESGID, gid, gid, gid)?;
+    crate::syscall!(sys::SETRESUID, uid, uid, uid).map(|_| ())
+}
+
 pub fn setgroups(groups: &[u32]) -> Result<()> {
     if sys::native() {
         return crate::syscall!(nr::SETGROUPS as usize, groups.as_ptr(), groups.len()).map(|_| ());
@@ -433,6 +445,16 @@ pub fn set_service(pid: i32, name: &[u8]) -> Result<()> {
     Ok(())
 }
 
+/// Tag this process as one of the Linux box `name` (ADR 0183; Slate
+/// only): once, inherited, never removed.
+pub fn box_tag(name: &[u8]) -> Result<()> {
+    if !sys::native() {
+        return Err(Errno::ENOSYS);
+    }
+    crate::syscall!(nr::BOX_TAG as usize, name.as_ptr(), name.len())?;
+    Ok(())
+}
+
 /// Signal every process of service `name` → how many there were.
 pub fn kill_service(name: &[u8], sig: i32) -> Result<usize> {
     if !sys::native() {
@@ -500,15 +522,49 @@ pub fn setids_of(pid: i32, uid: u32, gid: u32, groups: &[u32]) -> Result<()> {
 
 /// unshare(2) flags. Source: musl `sched.h`.
 pub const CLONE_NEWNS: usize = 0x0002_0000;
+pub const CLONE_NEWUTS: usize = 0x0400_0000;
+pub const CLONE_NEWIPC: usize = 0x0800_0000;
 pub const CLONE_NEWUSER: usize = 0x1000_0000;
+pub const CLONE_NEWPID: usize = 0x2000_0000;
+pub const CLONE_NEWNET: usize = 0x4000_0000;
 
-/// unshare(2): new namespaces of the kinds `flags` names. Linux interface
-/// only (ENOSYS natively: Slate programs don't make namespaces yet).
+/// unshare(2): new namespaces of the kinds `flags` (`CLONE_NEW*`) names;
+/// natively through Slate's own call (ADR 0183).
 pub fn unshare(flags: usize) -> Result<()> {
     if sys::native() {
-        return Err(Errno::ENOSYS);
+        use slate_abi::ns;
+        let table = [
+            (CLONE_NEWUSER, ns::USER),
+            (CLONE_NEWNS, ns::MOUNT),
+            (CLONE_NEWPID, ns::PID),
+            (CLONE_NEWUTS, ns::UTS),
+            (CLONE_NEWIPC, ns::IPC),
+            (CLONE_NEWNET, ns::NET),
+        ];
+        if flags & !table.iter().fold(0, |m, (l, _)| m | l) != 0 {
+            return Err(Errno::EINVAL);
+        }
+        let native = table.iter().filter(|(l, _)| flags & l != 0).fold(0u32, |m, (_, n)| m | n);
+        return crate::syscall!(nr::UNSHARE as usize, native).map(|_| ());
     }
     crate::syscall!(sys::UNSHARE, flags).map(|_| ())
+}
+
+/// pivot_root(2): `new_root` (a mount point) becomes the caller's mount
+/// namespace's root, the old one moving to `put_old`.
+pub fn pivot_root(new_root: &[u8], put_old: &[u8]) -> Result<()> {
+    if sys::native() {
+        return crate::syscall!(
+            nr::PIVOT_ROOT as usize,
+            new_root.as_ptr(),
+            new_root.len(),
+            put_old.as_ptr(),
+            put_old.len()
+        )
+        .map(|_| ());
+    }
+    let (a, b) = (crate::fs::cpath(new_root)?, crate::fs::cpath(put_old)?);
+    crate::syscall!(sys::PIVOT_ROOT, a.as_ptr(), b.as_ptr()).map(|_| ())
 }
 
 /// Hand the kernel the key that opens key slot `slot` of the encrypted

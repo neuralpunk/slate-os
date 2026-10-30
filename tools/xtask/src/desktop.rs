@@ -104,8 +104,13 @@ pub fn make_workbench(name: &str, packages: &str, files: &[(&str, &str)], fresh:
 /// and, if given, its monitor at `mon`; the display is virtio-gpu when
 /// `gpu`, else the firmware framebuffer.
 pub fn boot(workbench: &Path, mon: Option<&Path>, gpu: bool) -> Result<Console> {
+    boot_with(workbench, mon, gpu, "")
+}
+
+/// [`boot`], with `extra` on the kernel's command line too.
+pub fn boot_with(workbench: &Path, mon: Option<&Path>, gpu: bool, extra: &str) -> Result<Console> {
     let o = Opts::default();
-    let cmdline = format!("slate.compat=on {}", std::env::var("SLATE_DESKTOP_CMDLINE").unwrap_or_default());
+    let cmdline = format!("slate.compat=on {extra} {}", std::env::var("SLATE_DESKTOP_CMDLINE").unwrap_or_default());
     let img = image::build(&o, cmdline.trim(), "slate-desktop.img", image::Root::Disk)?;
     let mut c = crate::qemu::base_command(&o, &img)?;
     crate::qemu::add_disk(&mut c, 0, workbench);

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! The right-click menu (ADR 0099): Copy, Paste, Select all and Clear
-//! scrollback, drawn inside the window as Strata draws its Applications
+//! The right-click menu (ADR 0099): Copy, Paste, Select all, Clear
+//! scrollback and New tab, drawn inside the window as Strata draws its Applications
 //! menu (docs/design/WM_STYLE.md §2, §5): an `overlay` surface with a `border`
 //! edge and the menu shadow, the chosen row inverted in chalk. The mouse
 //! or the arrow keys, Enter and Esc work it.
@@ -19,9 +19,10 @@ pub enum Item {
     Paste,
     SelectAll,
     ClearScrollback,
+    NewTab,
 }
 
-pub const ITEMS: [Item; 4] = [Item::Copy, Item::Paste, Item::SelectAll, Item::ClearScrollback];
+pub const ITEMS: [Item; 5] = [Item::Copy, Item::Paste, Item::SelectAll, Item::ClearScrollback, Item::NewTab];
 
 impl Item {
     fn label(self) -> &'static str {
@@ -30,6 +31,7 @@ impl Item {
             Item::Paste => "Paste",
             Item::SelectAll => "Select all",
             Item::ClearScrollback => "Clear scrollback",
+            Item::NewTab => "New tab",
         }
     }
 
@@ -39,6 +41,7 @@ impl Item {
             Item::Paste => "ctrl+shift+v",
             Item::SelectAll => "ctrl+shift+a",
             Item::ClearScrollback => "",
+            Item::NewTab => "ctrl+t",
         }
     }
 }
@@ -201,7 +204,9 @@ mod tests {
         assert_eq!(m.key(108), Outcome::Open);
         assert_eq!(m.chosen, Some(1));
         m.key(103);
-        assert_eq!(m.chosen, Some(3));
+        assert_eq!(m.chosen, Some(4));
+        assert_eq!(m.key(28), Outcome::Chose(Item::NewTab));
+        m.key(103);
         assert_eq!(m.key(28), Outcome::Chose(Item::ClearScrollback));
         assert_eq!(m.key(1), Outcome::Closed);
         let mut m = Menu::open(10.0, 10.0, 800.0, 560.0, true);

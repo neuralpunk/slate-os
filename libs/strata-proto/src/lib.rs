@@ -18,6 +18,12 @@
 //! desktop's own icons. Paths are one per line. A drop with ctrl held
 //! copies rather than moves (`copy`, since version 7).
 //!
+//! Strata says when it has put a window's new contents on the screen
+//! (`Frame`, since version 8), so an app that draws continuously draws at
+//! the screen's pace and not faster. A buffer may be `OPAQUE` (since
+//! version 8): its fourth byte means nothing (a Linux compositor's
+//! XRGB8888 frames, M31), and Strata shows it without blending.
+//!
 //! Every message is a record: a 4-byte little-endian length of the rest,
 //! a 2-byte type, then the fields (little-endian integers; strings as a
 //! 2-byte length and UTF-8, clipboard text as a 4-byte length and UTF-8). Buffers hold 32-bit 0xAARRGGBB pixels, rows
@@ -33,12 +39,18 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 /// The protocol's version, in `Hello`.
-pub const VERSION: u32 = 7;
+pub const VERSION: u32 = 8;
 /// The largest record accepted.
 pub const MAX_RECORD: usize = 64 * 1024;
 /// The most clipboard text a record carries (longer text is cut, at a
 /// character's boundary).
 pub const MAX_TEXT: usize = MAX_RECORD - 64;
+
+/// `Buffer`'s flags.
+pub mod buffer {
+    /// The pixels' fourth byte means nothing: the buffer is opaque.
+    pub const OPAQUE: u8 = 1;
+}
 
 /// Which clipboard `Copy` and `Paste` mean: the one ctrl + shift + c/v use,
 /// or the selection (pasted with the middle button).
@@ -69,12 +81,14 @@ pub enum Request {
         pid: u32,
     },
     /// Buffer `index` (0 or 1) of the window's pixels: comes with one file
-    /// descriptor to map, at least `width * height * 4` bytes.
+    /// descriptor to map, at least `width * height * 4` bytes; `flags`
+    /// are `buffer::*`.
     Buffer {
         win: u32,
         width: u32,
         height: u32,
         index: u8,
+        flags: u8,
     },
     /// Show buffer `index` now; this part of it changed. The buffer shown
     /// before is released (`Release`).
@@ -178,6 +192,9 @@ pub enum Event {
     /// window at (x, y), device pixels (ADR 0156). One path per line;
     /// `copy`: ctrl was held, so they are copied, not moved.
     Drop { win: u32, x: i32, y: i32, paths: String, copy: bool },
+    /// The window's contents shown last are on the screen (or the window
+    /// isn't, and won't be drawn): time to draw the next frame.
+    Frame { win: u32 },
 }
 
 const HELLO: u16 = 1;
@@ -200,6 +217,7 @@ const SCROLL: u16 = 105;
 const PASTED: u16 = 106;
 const RELEASE: u16 = 107;
 const DROP: u16 = 108;
+const FRAME: u16 = 109;
 
 /// `s` cut to at most `max` bytes, at a character's boundary.
 pub fn cut(s: &str, max: usize) -> &str {
@@ -287,8 +305,8 @@ impl Request {
             Request::Hello { version } => Out::new(HELLO).u32(*version),
             Request::Create { win, app, path } => Out::new(CREATE).u32(*win).str(app).str(path),
             Request::Title { win, app, path, pid } => Out::new(TITLE).u32(*win).str(app).str(path).u32(*pid),
-            Request::Buffer { win, width, height, index } => {
-                Out::new(BUFFER).u32(*win).u32(*width).u32(*height).u8(*index)
+            Request::Buffer { win, width, height, index, flags } => {
+                Out::new(BUFFER).u32(*win).u32(*width).u32(*height).u8(*index).u8(*flags)
             }
             Request::Damage { win, x, y, width, height, index } => {
                 Out::new(DAMAGE).u32(*win).u32(*x).u32(*y).u32(*width).u32(*height).u8(*index)
@@ -313,7 +331,9 @@ impl Request {
             HELLO => Request::Hello { version: r.u32()? },
             CREATE => Request::Create { win: r.u32()?, app: r.str()?, path: r.str()? },
             TITLE => Request::Title { win: r.u32()?, app: r.str()?, path: r.str()?, pid: r.u32()? },
-            BUFFER => Request::Buffer { win: r.u32()?, width: r.u32()?, height: r.u32()?, index: r.u8()? },
+            BUFFER => {
+                Request::Buffer { win: r.u32()?, width: r.u32()?, height: r.u32()?, index: r.u8()?, flags: r.u8()? }
+            }
             DAMAGE => Request::Damage {
                 win: r.u32()?,
                 x: r.u32()?,
@@ -370,6 +390,7 @@ impl Event {
             Event::Drop { win, x, y, paths, copy } => {
                 Out::new(DROP).u32(*win).u32(*x as u32).u32(*y as u32).text(paths).u8(u8::from(*copy))
             }
+            Event::Frame { win } => Out::new(FRAME).u32(*win),
         }
         .done()
     }
@@ -410,6 +431,7 @@ impl Event {
                 paths: r.text()?,
                 copy: r.u8()? != 0,
             },
+            FRAME => Event::Frame { win: r.u32()? },
             _ => return None,
         })
     }
@@ -476,7 +498,8 @@ mod tests {
             Request::Hello { version: VERSION },
             Request::Create { win: 1, app: "terminal".to_string(), path: "~/slate".to_string() },
             Request::Title { win: 1, app: "etch".to_string(), path: String::new(), pid: 42 },
-            Request::Buffer { win: 1, width: 800, height: 600, index: 1 },
+            Request::Buffer { win: 1, width: 800, height: 600, index: 1, flags: 0 },
+            Request::Buffer { win: 2, width: 64, height: 32, index: 0, flags: buffer::OPAQUE },
             Request::Damage { win: 1, x: 0, y: 2, width: 800, height: 20, index: 1 },
             Request::Destroy { win: 1 },
             Request::Copy { which: clipboard::SELECTION, text: "ls -l\nécho".to_string() },
@@ -510,6 +533,7 @@ mod tests {
             Event::Release { win: 3, index: 0 },
             Event::Drop { win: 3, x: 120, y: -4, paths: "/root/Desktop/notes.txt".to_string(), copy: false },
             Event::Drop { win: 3, x: 0, y: 0, paths: "/root/a".to_string(), copy: true },
+            Event::Frame { win: 3 },
         ];
         let mut stream: Vec<u8> = evs.iter().flat_map(|e| e.encode()).collect();
         let mut got = Vec::new();

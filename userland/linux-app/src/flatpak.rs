@@ -29,6 +29,10 @@
 //!   `flatpak update` itself), to the commit before the installed one in
 //!   its remote's history (Flatpak fetches it, signature checked).
 //! - `slate-flatpak remove APP...`.
+//! - Installs and updates say how far they are, a line each time the
+//!   whole moves on (M31 phase 3): `slate-flatpak: 42% of 173.8 MB:
+//!   org.mozilla.firefox (2 of 2)` ([`Progress`]); the Web Browser and App
+//!   Center show it.
 //! - `slate-flatpak catalog`: Flathub (added if missing) and its
 //!   catalog, fetched as Flatpak fetches it (`update --appstream`, signed
 //!   with the repository), into the person's installation for App Center
@@ -614,6 +618,124 @@ pub fn extract_dir(home: &str, digest: &[u8]) -> String {
     format!("{home}/.cache/slate/appimages/{hex}")
 }
 
+/// How far an install or update is (M31 phase 3), from what flatpak
+/// says with `FLATPAK_FANCY_OUTPUT=1`, observed with Flatpak 1.16
+/// (Alpine's): first its plan, a line a part (`" 2.\t \tID\tBRANCH\tOP\t
+/// REMOTE\t< 129.5 MB"`, the size what it fetches at most), then a line
+/// each time a part moves on (`"Installing 2/2… ████▌  42%  8.1 MB/s"`).
+/// The whole is the parts' sizes: those done, and the share of the one
+/// under way.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Progress {
+    /// The plan: each part's ID and size in bytes (0: not said).
+    pub parts: Vec<(String, u64)>,
+    /// The part under way (from 1) and its percentage.
+    pub at: usize,
+    pub percent: u32,
+}
+
+/// A size as flatpak writes it (`129.5 MB`, `512 bytes`; SI units, the
+/// space possibly a no-break one): bytes.
+pub fn parse_size(text: &str) -> Option<u64> {
+    let t = text.replace('\u{a0}', " ");
+    let mut w = t.split_whitespace();
+    let n: f64 = w.next()?.parse().ok()?;
+    let unit = match w.next()? {
+        "bytes" | "byte" | "B" => 1.0,
+        "kB" | "KB" => 1e3,
+        "MB" => 1e6,
+        "GB" => 1e9,
+        _ => return None,
+    };
+    Some((n * unit) as u64)
+}
+
+impl Progress {
+    /// Take one line of flatpak's output; whether it was a plan's or
+    /// progress line (not to be shown as it is).
+    pub fn take(&mut self, line: &str) -> bool {
+        let l = line.trim();
+        // A plan's line: "N." then tab-separated fields, the size last.
+        if let Some((n, rest)) = l.split_once('.')
+            && let Ok(n) = n.trim().parse::<usize>()
+            && rest.contains('\t')
+        {
+            let fields: Vec<&str> = rest.split('\t').map(str::trim).filter(|f| !f.is_empty()).collect();
+            // (A part done carries a mark before its ID.)
+            let id = fields.iter().find(|f| f.contains('.') && !f.starts_with('<')).copied().unwrap_or("");
+            let size = fields.last().and_then(|f| parse_size(f.trim_start_matches('<'))).unwrap_or(0);
+            if n == self.parts.len() + 1 && !id.is_empty() {
+                self.parts.push((String::from(id), size));
+            }
+            return true;
+        }
+        // A progress line: "Installing 2/2… … 42%".
+        let verb = ["Installing", "Updating", "Uninstalling"].iter().find(|v| l.starts_with(**v));
+        if verb.is_some() {
+            let mut words = l.split_whitespace();
+            let _ = words.next();
+            if let Some((a, _)) = words.next().map(|w| w.trim_end_matches('…')).and_then(|w| w.split_once('/'))
+                && let Ok(a) = a.parse::<usize>()
+            {
+                if a != self.at {
+                    self.at = a;
+                    self.percent = 0;
+                }
+                if let Some(p) = l.split_whitespace().rev().find_map(|w| w.strip_suffix('%')?.parse::<u32>().ok()) {
+                    // (Flatpak's own figure can go back a little.)
+                    self.percent = p.min(100);
+                }
+                return true;
+            }
+        }
+        false
+    }
+
+    /// How much of the whole is done, 0 to 1.
+    pub fn fraction(&self) -> f32 {
+        if self.parts.is_empty() || self.at == 0 {
+            return 0.0;
+        }
+        let total: u64 = self.parts.iter().map(|p| p.1).sum();
+        let at = self.at.min(self.parts.len());
+        let now = self.percent as f64 / 100.0;
+        if total == 0 {
+            // Sizes not said: by parts.
+            return ((at - 1) as f64 + now) as f32 / self.parts.len() as f32;
+        }
+        let done: u64 = self.parts[..at - 1].iter().map(|p| p.1).sum();
+        ((done as f64 + now * self.parts[at - 1].1 as f64) / total as f64) as f32
+    }
+
+    /// The line slate-flatpak says: `NN% of SIZE: ID (i of n)`.
+    pub fn say(&self) -> Option<String> {
+        let (id, _) = self.parts.get(self.at.checked_sub(1)?)?;
+        let total: u64 = self.parts.iter().map(|p| p.1).sum();
+        let pct = (self.fraction() * 100.0) as u32;
+        let of = if total > 0 { format!(" of {}", show_size(total)) } else { String::new() };
+        Some(format!("{pct}%{of}: {id} ({} of {})", self.at, self.parts.len()))
+    }
+}
+
+/// `bytes` for people: `129.5 MB`.
+pub fn show_size(bytes: u64) -> String {
+    match bytes {
+        b if b >= 1_000_000_000 => format!("{:.1} GB", b as f64 / 1e9),
+        b if b >= 1_000_000 => format!("{:.1} MB", b as f64 / 1e6),
+        b if b >= 1000 => format!("{} kB", b / 1000),
+        b => format!("{b} bytes"),
+    }
+}
+
+/// A progress line slate-flatpak said (`slate-flatpak: 42% of ...`): the
+/// fraction and the rest (what is being fetched).
+pub fn parse_said(line: &str) -> Option<(f32, String)> {
+    let rest = line.trim().strip_prefix("slate-flatpak: ")?;
+    let (pct, _) = rest.split_once('%')?;
+    let pct: u32 = pct.parse().ok()?;
+    Some((pct.min(100) as f32 / 100.0, String::from(rest)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -621,6 +743,44 @@ mod tests {
 
     fn s(v: &[&str]) -> Vec<String> {
         v.iter().map(|x| x.to_string()).collect()
+    }
+
+    #[test]
+    fn progress_from_flatpaks_lines() {
+        let mut p = Progress::default();
+        assert!(!p.take("Looking for matches…"));
+        assert!(!p.take("org.mozilla.firefox permissions:"));
+        assert!(p.take(" 1.\t   \torg.mozilla.firefox.Locale\tstable\ti\tflathub\t< 44.3\u{a0}MB"));
+        assert!(p.take(" 2.\t   \torg.mozilla.firefox\tstable\ti\tflathub\t< 129.5\u{a0}MB"));
+        assert_eq!(p.parts.len(), 2);
+        assert_eq!(p.parts[1], (String::from("org.mozilla.firefox"), 129_500_000));
+        assert_eq!(p.say(), None, "nothing under way yet");
+        assert!(p.take("Installing 1/2…"));
+        assert!(p.take("Installing 1/2…                          0%  0 bytes/s"));
+        assert!(p.take("Installing 1/2… ████████████████▍  93%"));
+        assert!(p.take("Installing 1/2… ████████████▍  78%"));
+        assert_eq!(p.at, 1);
+        assert_eq!(p.say().as_deref(), Some("19% of 173.8 MB: org.mozilla.firefox.Locale (1 of 2)"));
+        assert!(p.take("Installing 2/2… ██▌  12%  8.1 MB/s  00:12"));
+        // The first part whole, an eighth of the second.
+        assert!((p.fraction() - (44.3 + 0.12 * 129.5) / 173.8).abs() < 0.001);
+        assert!(p.take("Installing 2/2… ████████ 100%  8.1 MB/s  00:00"));
+        assert_eq!(p.say().as_deref(), Some("100% of 173.8 MB: org.mozilla.firefox (2 of 2)"));
+        assert!(!p.take("Installation complete."));
+        // Sizes not said: by parts.
+        let mut q = Progress::default();
+        q.take(" 1.\t\ta.b.c\tstable\tu\tflathub\t");
+        q.take(" 2.\t\ta.b.d\tstable\tu\tflathub\t");
+        q.take("Updating 2/2… 50%");
+        assert_eq!(q.fraction(), 0.75);
+        assert_eq!(parse_size("2.1\u{a0}GB"), Some(2_100_000_000));
+        assert_eq!(parse_size("512 bytes"), Some(512));
+        assert_eq!(parse_size("many"), None);
+        assert_eq!(
+            parse_said("slate-flatpak: 42% of 173.8 MB: org.mozilla.firefox (2 of 2)"),
+            Some((0.42, String::from("42% of 173.8 MB: org.mozilla.firefox (2 of 2)")))
+        );
+        assert_eq!(parse_said("Installing 1/2"), None);
     }
 
     #[test]

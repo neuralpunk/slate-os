@@ -100,6 +100,36 @@ pub fn check_root(img: &Path, offset: u64, spec: &str, want: &[u8]) -> Result {
     Ok(())
 }
 
+/// An empty SlateFS of `size` (sparse), labelled `label` (the Linux
+/// boxes' workbench, M33).
+pub fn empty(img: &Path, size: &str, label: &str) -> Result {
+    let src = img.with_extension("empty");
+    let _ = std::fs::remove_dir_all(&src);
+    std::fs::create_dir_all(&src).map_err(|e| e.to_string())?;
+    let _ = std::fs::remove_file(img);
+    let mut c = Command::new(tool()?);
+    c.args(["mkfs", "-L", label, "-s", "top", "--size", size, "-d"])
+        .arg(&src)
+        .args(["--owner", "0:0"])
+        .arg(img)
+        .stdout(std::process::Stdio::null());
+    run_cmd(&mut c)?;
+    let _ = std::fs::remove_dir_all(&src);
+    Ok(())
+}
+
+/// A SlateFS of `size` (sparse) holding `src`'s files, owned by root.
+pub fn with_files(img: &Path, size: &str, label: &str, src: &Path) -> Result {
+    let _ = std::fs::remove_file(img);
+    let mut c = Command::new(tool()?);
+    c.args(["mkfs", "-L", label, "-s", "top", "--size", size, "-d"])
+        .arg(src)
+        .args(["--owner", "0:0"])
+        .arg(img)
+        .stdout(std::process::Stdio::null());
+    run_cmd(&mut c)
+}
+
 /// `target/slatefs-test.img` for tests/shell/slatefs.sh (/dev/vdd).
 pub fn test_disk() -> Result<std::path::PathBuf> {
     let src = crate::target_dir().join("slatefs-test-src");

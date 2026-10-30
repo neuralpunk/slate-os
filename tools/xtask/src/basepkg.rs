@@ -32,6 +32,7 @@ const DESKTOP: &[&str] = &[
     "bin/terminal",
     "bin/slate-linux-app",
     "usr/lib/slate/strata-wl",
+    "usr/lib/slate/slate-portal",
     "usr/share/fonts/slate",
     "usr/share/strata",
 ];

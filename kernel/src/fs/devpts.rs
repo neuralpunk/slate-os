@@ -2,13 +2,19 @@
 
 //! devpts (pts(4)): /dev/pts/N for each pseudo-terminal in use, and
 //! /dev/pts/ptmx.
+//!
+//! Instances (ADR 0183): a devpts mounted with `newinstance` is one of
+//! its own. Its ptmx makes pseudo-terminals that belong to it, and it
+//! lists only those, and the ones its mount named with `allow=N` (a Linux
+//! box's session terminal). The system's instance (0) lists them all.
 
 use alloc::string::ToString;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::any::Any;
+use core::sync::atomic::{AtomicU64, Ordering};
 
-use super::tty::{PTMX_MAJOR, PTMX_MINOR, PTS_MAJOR, pty_attrs, pty_indices, set_pty_attrs};
+use super::tty::{PTMX_MAJOR, PTMX_MINOR, PTS_MAJOR, pty_attrs, pty_indices, pty_instance, set_pty_attrs};
 use super::vfs::*;
 use crate::abi::linux::errno::*;
 
@@ -22,10 +28,33 @@ enum Node {
 
 struct PtsInode {
     node: Node,
+    /// 0: the system's instance, which shows every pseudo-terminal.
+    instance: u64,
+    /// Pseudo-terminals of other instances this one shows too.
+    allow: Arc<Vec<u32>>,
 }
 
+static NEXT_INSTANCE: AtomicU64 = AtomicU64::new(1);
+
 pub fn new() -> Arc<dyn Inode> {
-    Arc::new(PtsInode { node: Node::Root })
+    Arc::new(PtsInode { node: Node::Root, instance: 0, allow: Arc::new(Vec::new()) })
+}
+
+/// A devpts of its own (`newinstance`), showing also `allow`'s.
+pub fn new_instance(allow: Vec<u32>) -> Arc<dyn Inode> {
+    let instance = NEXT_INSTANCE.fetch_add(1, Ordering::Relaxed);
+    Arc::new(PtsInode { node: Node::Root, instance, allow: Arc::new(allow) })
+}
+
+impl PtsInode {
+    fn child(&self, node: Node) -> Arc<PtsInode> {
+        Arc::new(PtsInode { node, instance: self.instance, allow: self.allow.clone() })
+    }
+
+    /// Whether this instance shows pseudo-terminal `n`.
+    fn shows(&self, n: u32) -> bool {
+        self.instance == 0 || self.allow.contains(&n) || pty_instance(n) == Some(self.instance)
+    }
 }
 
 impl Inode for PtsInode {
@@ -60,13 +89,13 @@ impl Inode for PtsInode {
             return Err(ENOTDIR);
         }
         if name == "ptmx" {
-            return Ok(Arc::new(PtsInode { node: Node::Ptmx }));
+            return Ok(self.child(Node::Ptmx));
         }
         let n: u32 = name.parse().map_err(|_| ENOENT)?;
-        if !pty_indices().contains(&n) {
+        if !pty_indices().contains(&n) || !self.shows(n) {
             return Err(ENOENT);
         }
-        Ok(Arc::new(PtsInode { node: Node::Slave(n) }))
+        Ok(self.child(Node::Slave(n)))
     }
 
     fn readdir(&self) -> Result<Vec<DirEntry>> {
@@ -74,11 +103,19 @@ impl Inode for PtsInode {
             return Err(ENOTDIR);
         }
         let mut v = alloc::vec![DirEntry { name: "ptmx".into(), ino: 2, kind: FileType::CharDevice, pos: 0 }];
-        for n in pty_indices() {
+        for n in pty_indices().into_iter().filter(|&n| self.shows(n)) {
             let ino = u64::from(n) + 3;
             v.push(DirEntry { name: n.to_string(), ino, kind: FileType::CharDevice, pos: ino });
         }
         Ok(v)
+    }
+
+    fn open_special(self: Arc<Self>, flags: u32) -> Option<Result<Arc<dyn crate::fs::File>>> {
+        match self.node {
+            // An instance's own ptmx makes its own pseudo-terminals.
+            Node::Ptmx if self.instance != 0 => Some(super::tty::open_master_in(flags, self.instance)),
+            _ => None,
+        }
     }
 
     fn set_owner(&self, uid: Option<u32>, gid: Option<u32>) -> Result<()> {

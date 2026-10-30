@@ -1,0 +1,18 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# Linux boxes (ADR 0183): slate-boxd fetches distributions (checked
+# against their makers' keys), makes their bases and people's boxes on
+# SlateFS subvolumes with IDs of their own, mounts them, and writes a box
+# session's ID maps. It answers SlateOS's own programs on
+# /run/slate-boxd.sock. slinit runs and supervises it.
+### BEGIN INIT INFO
+# Provides:          slate-boxd
+# Required-Start:
+# Required-Stop:
+# Should-Start:      logd netd
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Short-Description: Linux boxes
+# X-Slate-Exec:      /bin/slate-boxd
+### END INIT INFO
+exit 0

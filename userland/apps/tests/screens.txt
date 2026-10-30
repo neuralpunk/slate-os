@@ -64,6 +64,7 @@ appcenter-all-light 83ae70a887a090a9
 appcenter-page-installed 110303d2d88e889e
 appcenter-page 6fff0aab2053a8e8
 appcenter-installing ab6aff9db1b61151
+appcenter-installing-progress f5fcaa465fffdb2b
 appcenter-setting-up e086972957daa9f5
 appcenter-setting-up-light f780a19aa8024316
 disks-stick 4efd0d531e0e73b8
@@ -76,7 +77,8 @@ updater-rollback-light d01d41c08fad733b
 updater-apps f10d65a0fe1396bf
 browser-offer 1d3fd28ae7c89121
 browser-fetching 8b7f4216a0942ac0
-browser-setting-up 926fcb752e291882
+browser-setting-up 605b60d51b91c411
+browser-fetching-progress 970d51f82e1eb305
 browser-failed-light a86a74a4618f8322
 browser-didnt-start 5657fc3a486f2f2e
 updater-apps-all 31e83c7446168772

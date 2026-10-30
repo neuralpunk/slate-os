@@ -297,13 +297,21 @@ fn desktop(p: &mut Painter<'_>, pal: &Palette, f: &Fonts<'_>, focused: usize, ex
 }
 
 const APPS: &[Row<'static>] = &[
-    Row { icon: Icon::Globe, name: "Firefox", linux: true, meta: "app", comment: "Browse the web" },
-    Row { icon: Icon::Folder, name: "Files", linux: false, meta: "app", comment: "Browse and organise your files" },
-    Row { icon: Icon::Letter, name: "Fonts", linux: false, meta: "settings", comment: "" },
+    Row { image: None, icon: Icon::Globe, name: "Firefox", linux: true, meta: "app", comment: "Browse the web" },
+    Row {
+        image: None,
+        icon: Icon::Folder,
+        name: "Files",
+        linux: false,
+        meta: "app",
+        comment: "Browse and organise your files",
+    },
+    Row { image: None, icon: Icon::Letter, name: "Fonts", linux: false, meta: "settings", comment: "" },
 ];
 const ACTIONS: &[Row<'static>] = &[
-    Row { icon: Icon::Search, name: "Find in files", linux: false, meta: "~/slate", comment: "" },
+    Row { image: None, icon: Icon::Search, name: "Find in files", linux: false, meta: "~/slate", comment: "" },
     Row {
+        image: None,
         icon: Icon::Undo,
         name: "Roll back to snapshot \u{201c}factory\u{201d}",
         linux: false,
@@ -350,6 +358,39 @@ fn scenes() -> Vec<(&'static str, Canvas)> {
             draw::launcher(p, &g, f, &launcher);
         }),
     ));
+    // A Linux app's own icon in its row and on its window's title bar (M31
+    // phase 4): a made-up one, an orange disc with a soft edge.
+    {
+        let mut px = alloc::vec![0u32; 64 * 64];
+        for (i, p) in px.iter_mut().enumerate() {
+            let (x, y) = ((i % 64) as f32 - 31.5, (i / 64) as f32 - 31.5);
+            let d = slate_ui::math::sqrt(x * x + y * y);
+            let a = ((30.0 - d) * 255.0).clamp(0.0, 255.0) as u32;
+            *p = (a << 24) | 0x00E8_6A2C;
+        }
+        let img = alloc::rc::Rc::new(slate_image::Image { width: 64, height: 64, pixels: px });
+        let rows = [draw::Row {
+            image: Some(&img),
+            icon: Icon::Terminal,
+            name: "Lagrange",
+            linux: true,
+            meta: "app",
+            comment: "A Gemini client",
+        }];
+        let sections = [Section { label: "1 match", rows: &rows }];
+        let found = Launcher { query: "lag", sections: &sections, selected: 1, scroll: None };
+        out.push((
+            "linux-app-icons",
+            render(1440, 900, 1.0, |p, f| {
+                let (mut wm, ids) = mockup_wm(1440.0, 900.0, 2);
+                wm.get_mut(ids[2]).unwrap().image = Some(img.clone());
+                wm.get_mut(ids[2]).unwrap().app = String::from("Lagrange");
+                crate::desktop::desktop(p, &g, f, &wm, &status(), none, &mut contents(&g, f, ids));
+                draw::dim(p, g.dim_launcher, 1.0);
+                draw::launcher(p, &g, f, &found);
+            }),
+        ));
+    }
     // ADR 0039: the launcher as Strata builds it, with the apps opened last
     // first and the pointer's row (the second) selected; then "trml",
     // found by its letters.
@@ -1118,8 +1159,8 @@ fn scenes() -> Vec<(&'static str, Canvas)> {
         crate::settings::Settings { dim: true, wallpaper: slate_ui::wallpaper::Design::Dunes, ..Default::default() };
     let mut base = View::new(settings, "Europe/London");
     base.accounts = std::vec![
-        Account { name: "ada".into(), full: "Ada Lovelace".into(), admin: true, uid: 1000 },
-        Account { name: "grace".into(), full: "Grace Hopper".into(), admin: false, uid: 1001 },
+        Account { name: "ada".into(), full: "Ada Lovelace".into(), admin: true, desktop: true, uid: 1000 },
+        Account { name: "grace".into(), full: "Grace Hopper".into(), admin: false, desktop: true, uid: 1001 },
     ];
     base.me = "ada".into();
     base.security = Security {
@@ -1200,6 +1241,17 @@ fn scenes() -> Vec<(&'static str, Canvas)> {
         b.busy = Some(b.devices[0].addr);
         b.prompt = Some(slate_bluetooth::host::Prompt::Passkey(b.devices[0].addr, 7_351));
     }
+    // Linux boxes (ADR 0183): two boxes, the base they share, a disk
+    // running low (the warning), removing the first asked about.
+    let mut boxes = at_section(S::Boxes, SFocus::Content, 0);
+    boxes.boxes = Some(crate::settings_app::Boxes::parse(
+        "is\tbox\tlinux\tArch Linux\t1288490189\t9000000000\n\
+         is\tbox\tdev\tArch Linux\t52428800\t9000000000\n\
+         is\tbase\tarch\tArch Linux\t1610612736\t1610612736\t2\n\
+         is\tdisk\t3221225472\t68719476736\nok\n",
+    ));
+    boxes.removing = true;
+    boxes.say("Press Enter again to remove linux and everything in it (about 1.2 GB comes back).", true);
     // Pictures: the wallpaper's own (chosen), the accounts', one's own
     // account page, and a full name being typed.
     let mut own_picture = at_section(S::Appearance, SFocus::Content, 2 + slate_ui::wallpaper::Design::ALL.len());
@@ -1307,6 +1359,7 @@ fn scenes() -> Vec<(&'static str, Canvas)> {
         ("settings-bluetooth", bt),
         ("settings-bluetooth-pairing", bt_pairing),
         ("settings-bluetooth-passkey", bt_passkey),
+        ("settings-boxes", boxes),
         ("settings-security", at_section(S::Security, SFocus::Content, 0)),
         ("settings-session", at_section(S::Session, SFocus::Sidebar, 0)),
         ("settings-about", at_section(S::About, SFocus::Sidebar, 0)),

@@ -590,6 +590,16 @@ pub fn progress_bar(p: &mut Painter<'_>, pal: &Palette, a: Area, fraction: Optio
     }
 }
 
+/// How far an install or update is, from the line slate-flatpak says
+/// (M31 phase 3; `flatpak::Progress` in userland/linux-app):
+/// `slate-flatpak: 42% of 173.8 MB: org.mozilla.firefox (2 of 2)`, as a
+/// fraction.
+pub fn flatpak_fraction(line: &str) -> Option<f32> {
+    let rest = line.trim().strip_prefix("slate-flatpak: ")?;
+    let pct: u32 = rest.split_once('%')?.0.parse().ok()?;
+    Some(pct.min(100) as f32 / 100.0)
+}
+
 /// How far `slate-linux setup` is, from its progress file (ADR 0126):
 /// `STAGE STEP STEPS TEXT`.
 #[derive(Clone, Debug, PartialEq, Eq)]

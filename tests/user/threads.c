@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
+#include <sys/stat.h>
 #include <sys/syscall.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -100,6 +101,21 @@ static void *cow_waiter(void *arg) {
     cow_waiting = 1;
     while (cow_word == 0) syscall(SYS_futex, &cow_word, 0, 0, NULL, NULL, 0);
     cow_woken = 1;
+    return NULL;
+}
+
+/* tmpfs's locks (ADR 0183): one thread makes and removes a directory in
+   /tmp while another stats it and the directory around it; tmpfs once
+   took a directory's entries and an inode's metadata in opposite orders
+   in the two paths, and parallel builds deadlocked on it. */
+static volatile int race_done;
+static void *race_stat(void *arg) {
+    (void)arg;
+    struct stat st;
+    while (!race_done) {
+        stat("/tmp/tmpfs-race", &st);
+        stat("/tmp/tmpfs-race/d", &st);
+    }
     return NULL;
 }
 
@@ -209,5 +225,16 @@ int main(void) {
     stop_waiting = 1;
     check("detached", pthread_create(&s, &a, sleeper, &target) == 0);
     usleep(10000);
+
+    mkdir("/tmp/tmpfs-race", 0755);
+    pthread_t r;
+    int ok = pthread_create(&r, NULL, race_stat, NULL) == 0;
+    for (int i = 0; i < 20000 && ok; i++) {
+        ok = mkdir("/tmp/tmpfs-race/d", 0755) == 0 && rmdir("/tmp/tmpfs-race/d") == 0;
+    }
+    race_done = 1;
+    pthread_join(r, NULL);
+    rmdir("/tmp/tmpfs-race");
+    check("tmpfs_stat_while_adding", ok);
     return failures;
 }

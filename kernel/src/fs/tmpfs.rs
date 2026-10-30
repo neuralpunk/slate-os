@@ -56,7 +56,7 @@ pub const TMPFS_MAGIC: i64 = 0x0102_1994;
 pub const SYSFS_MAGIC: i64 = 0x6265_6572;
 pub const MQUEUE_MAGIC: i64 = 0x1980_0202;
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 struct Meta {
     mode: u32,
     nlink: u64,
@@ -306,16 +306,21 @@ impl TmpInode {
         if name.is_empty() || name == "." || name == ".." {
             return Err(EEXIST);
         }
+        // The child's type before the directory's entries are locked: an
+        // inode's metadata lock is never taken under its entries' lock
+        // (metadata() takes them the other way round, ADR 0183's builds
+        // deadlocked on it).
+        let is_dir = child.meta.lock().mode & S_IFMT == S_IFDIR;
         let dir = self.dir()?;
         let mut d = dir.lock();
         if d.contains_key(name) {
             return Err(EEXIST);
         }
-        if child.meta.lock().mode & S_IFMT == S_IFDIR {
-            self.meta.lock().nlink += 1;
-        }
         d.insert(String::from(name), child.clone());
         drop(d);
+        if is_dir {
+            self.meta.lock().nlink += 1;
+        }
         self.touch();
         Ok(child)
     }
@@ -388,7 +393,8 @@ impl Inode for TmpInode {
         Some(StatFs { magic: fs.magic, block_size: 4096, blocks, free_blocks, files, free_files, read_only: false })
     }
     fn metadata(&self) -> Metadata {
-        let m = self.meta.lock();
+        // A copy, the lock let go before the contents' lock is taken.
+        let m: Meta = (*self.meta.lock()).clone();
         // A file's pages are its blocks: holes have none (tmpfs(5)).
         let (size, blocks) = match &self.kind {
             Kind::File(p) => {

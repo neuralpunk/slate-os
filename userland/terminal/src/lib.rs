@@ -19,3 +19,4 @@ pub mod mouse;
 pub mod outbox;
 pub mod render;
 pub mod select;
+pub mod tabs;

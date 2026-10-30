@@ -23,6 +23,7 @@ pub mod expand;
 pub mod glob;
 pub mod jobs;
 pub mod lineedit;
+pub mod linux;
 pub mod parser;
 pub mod print;
 pub mod shell;
