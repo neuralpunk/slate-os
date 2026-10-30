@@ -16,6 +16,13 @@ Flatpak apps and Linux drives, on a kernel and base system that are
 entirely its own; and, beyond that, a clean slate: minimal, fast and
 modern, with nothing preinstalled beyond the basics.
 
+> [!WARNING]
+> **SlateOS is alpha software. Don't use it in production.** It is early
+> and changing quickly: expect bugs, crashes, missing features and data
+> loss, and changes between releases that break what worked before.
+> Don't run it on a computer, or with files, you can't afford to lose:
+> try it in a virtual machine or on a spare disk, and back up first.
+
 Website: **[neuralpunk.github.io/slate-os](https://neuralpunk.github.io/slate-os/)**
 
 ## What it does today

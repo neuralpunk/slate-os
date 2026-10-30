@@ -35,7 +35,7 @@
   --sage: #A4B38C; --sage-t: #2D2F29; --sage-b: #4A5041;
   --moss: #8FB2A4; --moss-t: #2A2F2C; --moss-b: #434F4A;
   --clay: #D0907E; --clay-t: #332B27; --clay-b: #5A433C;
-  --steel: #93A7BA; --ochre: #CFB07A;
+  --steel: #93A7BA; --ochre: #CFB07A; --ochre-t: #332F27; --ochre-b: #594E3B;
   /* The installer's light palette */
   --l-window: #F3F2F2; --l-desktop: #DCDBDB; --l-side: #EEEDED; --l-hover: #E6E5E5;
   --l-hair: #DEDDDD; --l-border: #CFCECE; --l-ink: #0B0B0B; --l-t2: #404040; --l-t3: #5E5E5E;
@@ -154,6 +154,15 @@ body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-a
 .ledger-item { display: flex; align-items: center; gap: 18px; padding: 18px 28px; font: 400 13px/1 var(--f-mono); color: var(--text-4); white-space: nowrap; }
 .ledger-item b { color: var(--chalk); font-weight: 400; }
 .ledger-item svg { width: 12px; height: 12px; color: var(--decor); }
+
+/* Alpha notice: ochre, the warning colour, with an icon and a label so colour isn't alone */
+.alpha-wrap { padding-block: clamp(40px, 5vw, 64px) 0; }
+.alpha { display: grid; grid-template-columns: auto 1fr; gap: clamp(14px, 2vw, 22px); align-items: start; max-width: 60rem; margin-inline: auto; padding: clamp(18px, 2.4vw, 26px) clamp(18px, 2.6vw, 30px); background: var(--ochre-t); border: 1px solid var(--ochre-b); border-left: 3px solid var(--ochre); border-radius: 10px; }
+.alpha-icon { width: 22px; height: 22px; color: var(--ochre); margin-top: 2px; }
+.alpha-label { font: 400 11.5px/1 var(--f-mono); letter-spacing: .08em; text-transform: lowercase; color: var(--ochre); }
+.alpha h2 { margin-top: 10px; font: 500 clamp(17px, 1.5vw, 19px)/1.3 var(--f-sans); letter-spacing: -.01em; color: var(--chalk); }
+.alpha p { margin-top: 8px; font-size: 15.5px; line-height: 1.6; color: var(--text-2); max-width: 46em; }
+.alpha p b { color: var(--text-1); font-weight: 500; }
 @keyframes ticker { to { transform: translateX(-50%); } }
 
 /* ── Sections ───────────────────────────────── */
@@ -620,6 +629,7 @@ footer { border-top: 1px solid var(--divider); padding-block: 48px calc(40px + e
       <polyline points="3,17.5 16,24 29,17.5" fill="none" stroke="currentColor" stroke-width="1.6" opacity=".45"/>
       <polyline points="3,23.5 16,30 29,23.5" fill="none" stroke="currentColor" stroke-width="1.6" opacity=".2"/>
     </symbol>
+    <symbol id="i-warn" viewBox="0 0 16 16"><path d="M8 1.9 14.6 13.6H1.4z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M8 6.2v3.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><circle cx="8" cy="11.7" r=".85" fill="currentColor"/></symbol>
     <symbol id="i-arrow" viewBox="0 0 16 16"><path d="M2 8h11M9 4l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></symbol>
     <symbol id="i-shield" viewBox="0 0 16 16"><path d="M8 1.6 13.4 3.6v4.2c0 3.1-2.3 5.6-5.4 6.6-3.1-1-5.4-3.5-5.4-6.6V3.6z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></symbol>
     <symbol id="i-split" viewBox="0 0 16 16"><rect x="1.8" y="2.6" width="12.4" height="10.8" rx="1.8" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M8 2.6v10.8" stroke="currentColor" stroke-width="1.3"/></symbol>
@@ -692,7 +702,7 @@ footer { border-top: 1px solid var(--divider); padding-block: 48px calc(40px + e
   <div class="frame hero-base">
     <div>kernel <b>ours</b> · shell <b>chalk</b><br>filesystem <b>SlateFS</b> · desktop <b>Strata</b></div>
     <div class="scroll-cue">scroll<i></i></div>
-    <div><b>github.com/neuralpunk/slate-os</b><br>open source · in development</div>
+    <div><b>github.com/neuralpunk/slate-os</b><br>open source · alpha</div>
   </div>
 </section>
 
@@ -718,6 +728,18 @@ footer { border-top: 1px solid var(--divider); padding-block: 48px calc(40px + e
     <div class="ledger-item" aria-hidden="true"><b>1</b> switch to Linux compatibility<svg><use href="#mark"/></svg></div>
     <div class="ledger-item" aria-hidden="true"><b>UEFI</b> and <b>BIOS</b>, its own bootloader<svg><use href="#mark"/></svg></div>
   </div>
+</div>
+
+<!-- ── Alpha notice ── -->
+<div class="frame alpha-wrap">
+  <aside class="alpha" role="note" aria-labelledby="alpha-title">
+    <svg class="alpha-icon" aria-hidden="true"><use href="#i-warn"/></svg>
+    <div>
+      <div class="alpha-label">alpha · in development</div>
+      <h2 id="alpha-title">SlateOS is alpha software. Don't use it in production.</h2>
+      <p>It is early and changing quickly. <b>Expect bugs, crashes, missing features and data loss</b>, and changes between releases that break what worked before. Don't run it on a computer, or with files, you can't afford to lose: try it in a virtual machine or on a spare disk, and back up first.</p>
+    </div>
+  </aside>
 </div>
 
 <!-- ── Screenshots ── -->
