@@ -35,7 +35,7 @@
   --sage: #A4B38C; --sage-t: #2D2F29; --sage-b: #4A5041;
   --moss: #8FB2A4; --moss-t: #2A2F2C; --moss-b: #434F4A;
   --clay: #D0907E; --clay-t: #332B27; --clay-b: #5A433C;
-  --steel: #93A7BA; --ochre: #CFB07A; --ochre-t: #332F27; --ochre-b: #594E3B;
+  --steel: #93A7BA; --ochre: #CFB07A;
   /* The installer's light palette */
   --l-window: #F3F2F2; --l-desktop: #DCDBDB; --l-side: #EEEDED; --l-hover: #E6E5E5;
   --l-hair: #DEDDDD; --l-border: #CFCECE; --l-ink: #0B0B0B; --l-t2: #404040; --l-t3: #5E5E5E;
@@ -155,14 +155,13 @@ body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-a
 .ledger-item b { color: var(--chalk); font-weight: 400; }
 .ledger-item svg { width: 12px; height: 12px; color: var(--decor); }
 
-/* Alpha notice: ochre, the warning colour, with an icon and a label so colour isn't alone */
-.alpha-wrap { padding-block: clamp(40px, 5vw, 64px) 0; }
-.alpha { display: grid; grid-template-columns: auto 1fr; gap: clamp(14px, 2vw, 22px); align-items: start; max-width: 60rem; margin-inline: auto; padding: clamp(18px, 2.4vw, 26px) clamp(18px, 2.6vw, 30px); background: var(--ochre-t); border: 1px solid var(--ochre-b); border-left: 3px solid var(--ochre); border-radius: 10px; }
-.alpha-icon { width: 22px; height: 22px; color: var(--ochre); margin-top: 2px; }
-.alpha-label { font: 400 11.5px/1 var(--f-mono); letter-spacing: .08em; text-transform: lowercase; color: var(--ochre); }
-.alpha h2 { margin-top: 10px; font: 500 clamp(17px, 1.5vw, 19px)/1.3 var(--f-sans); letter-spacing: -.01em; color: var(--chalk); }
-.alpha p { margin-top: 8px; font-size: 15.5px; line-height: 1.6; color: var(--text-2); max-width: 46em; }
-.alpha p b { color: var(--text-1); font-weight: 500; }
+/* Alpha notice: one quiet line, ochre (the warning colour) only on the icon and the label, so colour isn't alone */
+.alpha-wrap { padding-block: clamp(24px, 3vw, 36px) 0; }
+.alpha { display: flex; align-items: baseline; gap: 10px; width: fit-content; max-width: 100%; margin-inline: auto; padding: 9px 14px; background: var(--well); border: 1px solid var(--divider); border-radius: 8px; font-size: 13.5px; line-height: 1.55; color: var(--text-4); }
+.alpha svg { flex: none; width: 13px; height: 13px; color: var(--ochre); transform: translateY(2px); }
+.alpha-label { flex: none; font: 400 11.5px/1 var(--f-mono); letter-spacing: .06em; color: var(--ochre); }
+.alpha b { color: var(--text-1); font-weight: 500; }
+.finale .alpha { margin: 28px 0 0; max-width: 34em; }
 @keyframes ticker { to { transform: translateX(-50%); } }
 
 /* ── Sections ───────────────────────────────── */
@@ -732,13 +731,10 @@ footer { border-top: 1px solid var(--divider); padding-block: 48px calc(40px + e
 
 <!-- ── Alpha notice ── -->
 <div class="frame alpha-wrap">
-  <aside class="alpha" role="note" aria-labelledby="alpha-title">
-    <svg class="alpha-icon" aria-hidden="true"><use href="#i-warn"/></svg>
-    <div>
-      <div class="alpha-label">alpha · in development</div>
-      <h2 id="alpha-title">SlateOS is alpha software. Don't use it in production.</h2>
-      <p>It is early and changing quickly. <b>Expect bugs, crashes, missing features and data loss</b>, and changes between releases that break what worked before. Don't run it on a computer, or with files, you can't afford to lose: try it in a virtual machine or on a spare disk, and back up first.</p>
-    </div>
+  <aside class="alpha" role="note" aria-label="Alpha software">
+    <svg aria-hidden="true"><use href="#i-warn"/></svg>
+    <span class="alpha-label">alpha</span>
+    <span><b>Not for production.</b> Expect bugs, crashes and data loss: try it in a virtual machine or on a spare disk.</span>
   </aside>
 </div>
 
@@ -1367,6 +1363,11 @@ Domain:	slate
         <a class="btn btn-primary" href="https://github.com/neuralpunk/slate-os"><svg><use href="#i-gh"/></svg>View on GitHub</a>
         <a class="btn btn-ghost" href="https://github.com/neuralpunk/slate-os/blob/main/guides/INSTALL.md"><svg><use href="#i-book"/></svg>Install guide</a>
       </div>
+      <aside class="alpha" role="note" aria-label="Alpha software">
+        <svg aria-hidden="true"><use href="#i-warn"/></svg>
+        <span class="alpha-label">alpha</span>
+        <span><b>SlateOS is alpha software. Don't use it in production.</b> Expect bugs, crashes, missing features and data loss, and changes between releases that break what worked before.</span>
+      </aside>
       <p class="get-note">The first build fetches the pinned Rust toolchain and takes a few minutes. Installing erases the disk you choose unless you install beside what is on it: back up first.</p>
     </div>
     <div class="monument" aria-hidden="true">
@@ -1394,7 +1395,7 @@ Domain:	slate
       <div><h6>system</h6><ul><li><a href="#system">Kernel</a></li><li><a href="#security">Slate mode</a></li><li><a href="#updates">SlateFS</a></li><li><a href="#desktop">Strata</a></li><li><a href="#themes">Themes</a></li><li><a href="#graphics">Graphics</a></li></ul></div>
       <div><h6>project</h6><ul><li><a href="https://github.com/neuralpunk/slate-os">Source on GitHub</a></li><li><a href="https://github.com/neuralpunk/slate-os/blob/main/guides/INSTALL.md">Install guide</a></li><li><a href="https://github.com/neuralpunk/slate-os/blob/main/guides/getting-started.md">Getting started</a></li></ul></div>
       <div><h6>principles</h6><ul><li>Minimal by default</li><li>Clean room</li><li>Fast everywhere</li><li>Opt-in compatibility</li></ul></div>
-      <div><h6>status</h6><ul><li>In development</li><li>Next: laptops</li><li>No downloads yet</li><li>MIT or Apache-2.0</li></ul></div>
+      <div><h6>status</h6><ul><li>Alpha</li><li>Next: laptops</li><li>No downloads yet</li><li>MIT or Apache-2.0</li></ul></div>
     </div>
     <div class="legal"><span>neuralpunk.github.io/slate-os</span><span>No Linux, BSD or UNIX code. On purpose.</span></div>
   </div>
