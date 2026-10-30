@@ -49,6 +49,37 @@ fn numbers_after(con: &Console, marker: &str) -> Result<Vec<f64>> {
     Ok(line.rsplit(marker).next().unwrap_or("").split_whitespace().filter_map(|v| v.parse().ok()).collect())
 }
 
+/// Solitaire's first column's card dragged by the mouse onto the second
+/// column's top card is played there, or refused by the rules: either
+/// way the drop reached the game. Solitaire says where its columns are,
+/// Strata where its window went.
+fn solitaire_drag(mon: &std::path::Path, con: &mut Console) -> Result {
+    let line = con.last_line_with("\"solitaire\" from pid").unwrap_or_default();
+    let id = line.split("strata: window ").nth(1).and_then(|r| r.split(' ').next()).unwrap_or("").to_string();
+    let frame = con.last_line_with(&format!("strata: window {id} placed at ")).unwrap_or_default();
+    let frame: Vec<f64> =
+        frame.rsplit(" placed at ").next().unwrap_or("").split_whitespace().filter_map(|v| v.parse().ok()).collect();
+    let [fx, fy, ..] = frame[..] else { return Err(format!("no frame for Solitaire in {frame:?}")) };
+    let [cx, cy, _, _, step] = numbers_after(con, "solitaire: column 0's top at ")?[..] else {
+        return Err("Solitaire didn't say where its columns are".into());
+    };
+    // On the screen: the frame's title bar is 36 high, its border 1 wide.
+    let (x, y) = ((fx + 1.0 + cx + 12.0) as usize, (fy + 36.0 + cy + 12.0) as usize);
+    let mouse = mouse_index(mon, "HID Mouse")?;
+    monitor(mon, &[&format!("mouse_set {mouse}")])?;
+    let mut p = Pointer { mon, at: (0, 0) };
+    p.home()?;
+    p.to(x, y)?;
+    monitor(mon, &["mouse_button 1"])?;
+    p.to(x + 20, y + 10)?;
+    // The second column's top card is a face-down card's step lower.
+    p.to(x + step as usize, y + 12)?;
+    monitor(mon, &["mouse_button 0"])?;
+    con.wait_for_any(&["solitaire: moved Tab(0) to Tab(1)", "solitaire: Tab(0) can't go on Tab(1)"], 10)
+        .map_err(|e| format!("a card dragged onto another: {e}"))?;
+    Ok(())
+}
+
 /// A file dragged out of Files' window onto the desktop is moved there
 /// (ADR 0156); ctrl + z on the desktop puts it back, and dragged again
 /// with ctrl held it is copied (its addendum). Files says where its first
@@ -173,6 +204,7 @@ pub fn apps_scenario(o: &Opts) -> Result {
         launch(&mon, &mut con, "solit", "solitaire")?;
         type_keys(&mon, "d")?;
         con.wait_for("solitaire: turned the stock (23 left)", 10)?;
+        solitaire_drag(&mon, &mut con)?;
         monitor(&mon, &["sendkey meta_l-q"])?;
         pause(600);
         // Mines: the first square opened by key is never a mine.
@@ -454,7 +486,7 @@ pub fn apps_scenario(o: &Opts) -> Result {
     println!(
         "xtask: apps scenario passed (the Calculator's sums in both modes and angle units, the Clock's timer, \
          places and an alarm, the Image Viewer's JPEG and PNG, a zip made and extracted, a file edited and \
-         saved, Files' copy, trash and undo, a file dragged from Files onto the desktop, undone there and copied with ctrl, a calendar imported and exported, contacts imported and added, the \
+         saved, Files' copy, trash and undo, a file dragged from Files onto the desktop, undone there and copied with ctrl, a Solitaire card dragged onto another by the mouse, a calendar imported and exported, contacts imported and added, the \
          Web Browser's first-use offer, App Center's offer to set up and a catalog searched, Help's About and a guide, its link and a search; {:.2}s)",
         started.elapsed().as_secs_f64()
     );

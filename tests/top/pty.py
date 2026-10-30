@@ -34,10 +34,12 @@ def run(args, keys, wait=0.4):
                     return
     drain(wait)
     screens = []
+    RAW.clear()
     for k in keys:
         os.write(fd, k.encode())
         drain(wait)
-        screens.append(plain(out.decode('latin1').split('\x1b[H')[-1]))
+        RAW.append(out.decode('latin1').split('\x1b[H')[-1])
+        screens.append(plain(RAW[-1]))
     exited = False
     for _ in range(20):
         p, status = os.waitpid(pid, os.WNOHANG)
@@ -49,6 +51,10 @@ def run(args, keys, wait=0.4):
         os.kill(pid, 9)
         os.waitpid(pid, 0)
     return screens, exited
+
+
+# The screens of the last run with their escapes.
+RAW = []
 
 
 def plain(s):
@@ -93,4 +99,22 @@ check('%CPU moved below %MEM', re.search(r'\* %MEM .*\n.*\* %CPU', screens[7]) i
 check('and in the header', re.search(r'%MEM +%CPU', screens[8]) is not None and exited)
 screens, exited = run(['-d', '2', '-s'], ['k', 'q'])
 check('secure mode', 'Unavailable in secure mode' in screens[0] and exited)
+# g334: highlights, colours, the sort moved, scrolling, threads in the forest.
+os.remove(CONF) if os.path.exists(CONF) else None
+screens, exited = run(['-d', '2'], ['x', 'b', 'z', 'Z', '6', 'T', '\r', '<', '>', '>', 'C', DOWN, '\x1b[C', '\x1b[H', 'H', 'V', 'W', 'q'])
+raw = RAW
+check('the sort column bold with x', re.search(r'\x1b\[1m +[0-9.]+\x1b\[m +[0-9.]+ +[0-9:.]+ ', raw[0]) is not None)
+check('in reverse with b', '\x1b[7m' in raw[1].split('\n', 7)[-1])
+check('in colour with z', '\x1b[31m\x1b[7m' in raw[2] and '\x1b[33m\x1b[7m' in raw[2])
+check('the colour screen', 'Help for color mapping' in screens[3] and 'current target is  T ' in screens[3])
+check('cyan tasks chosen', 'current color is  6 ' in screens[5] and '\x1b[36m' in raw[6])
+check('sorted by S with <', re.search(r'\x1b\[31m\x1b\[7mS', raw[7]) is not None)
+check('by %MEM with > >', re.search(r'\x1b\[31m\x1b\[7m +[0-9.]+\x1b\[m\x1b\[36m +[0-9:.]+ ', raw[9]) is not None)
+check('scroll coordinates with C', re.search(r'scroll coordinates: y = 1/\d+ \(tasks\), x = 1/11 \(fields\)', screens[10]) is not None)
+check('a task down', re.search(r'y = 2/\d+', screens[11]) is not None)
+check('a field right', re.search(r'x = 2/11', screens[12]) is not None and not re.search(r'^ +PID ', screens[12], re.M))
+check('home again', re.search(r'y = 1/\d+ \(tasks\), x = 1/11', screens[13]) is not None)
+check('threads in the forest', 'Show threads On' in screens[14] and 'Forest mode On' in screens[15] and '`- ' in screens[15])
+text = open(CONF).read() if os.path.exists(CONF) else ''
+check('the look kept', 'colours=1,1,3,6,1' in text and 'highlight_column=1' in text and 'highlight_reverse=1' in text and exited)
 sys.exit(1 if failed else 0)

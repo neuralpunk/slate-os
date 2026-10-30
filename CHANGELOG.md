@@ -2,6 +2,78 @@
 
 What changed in each SlateOS release, newest first.
 
+## 0.1.2 (2026-10-29)
+
+### Network: Intel's I225 and I226
+
+- **A new wired network driver.** Intel's I225 and I226 2.5 Gigabit
+  Ethernet controllers (I225-V, I225-LM, I226-V, I226-LM and their
+  relatives, the I220-V and I221-V), the wired port on many recent
+  desktop and laptop boards, now work. They are driven like Intel's
+  I210 family, with one receive and one transmit queue.
+- **Fast.** Received frames raise interrupts, moderated as Intel's own
+  driver sets them, so they no longer wait for a timer; downloads of
+  about 100 MB/s have been seen.
+- **When a card stays quiet.** A network card that receives frames but
+  raises no interrupts for them is noticed and polled every 10 ms
+  instead, and says so in `dmesg`. For its first minute an I225/I226
+  logs its own counters there (frames, misses, interrupts), and a card
+  that can't be started says why (`dmesg | grep igc`).
+
+### Hardware
+
+- **Devices behind bridges.** SlateOS now turns on memory access in
+  every PCI bridge between a device and the processor, not only in the
+  device itself. Firmware often leaves it off on ports it didn't boot
+  from, and a card behind one could neither reach memory nor raise
+  interrupts.
+- **Devices in low-power states.** PCI devices that firmware left
+  powered down are woken before use, with their settings put back.
+
+### Web Browser and Linux apps
+
+- **Firefox on first use.** Setting up the Linux runtime (the first
+  time the Web Browser or App Center needs it) runs one setup at a
+  time: a second one started while the first is under way waits for it
+  instead of failing.
+- **Clear answers.** `web-browser --get` shows the setup's progress
+  while it waits; a failed setup quotes the error of the program that
+  failed, and the runtime is checked afterwards, naming exactly what is
+  missing if something is.
+- **Permissions fixed.** On a computer with a Bluetooth controller, the
+  Bluetooth service could create `/var/lib/slate` readable by root
+  only, shutting other users (such as "Try SlateOS"'s live user) out of
+  the Linux runtime. It is now created readable by everyone, and one
+  made earlier is opened up.
+
+### Command line
+
+- **`chattr` and `lsattr`.** SlateOS's own versions of the tools that
+  show and change a file's attributes. UEFI variables that firmware
+  needs are immutable, and `chattr -i` now unlocks one without a Linux
+  program; `lsattr` shows which are locked.
+- **Checksums.** `md5sum`, `sha256sum` and the rest (and `cksum`)
+  handle file names with backslashes and newlines the way GNU's tools
+  do, so their lists can be checked by either. They also gain `-z`
+  (lines ending in NUL) and `--ignore-missing`. With `-c` they now say
+  which files couldn't be read and which lines weren't checksum lines.
+- **top.** Running tasks show in bold. `x` highlights the sort column,
+  `b` switches highlights between bold and reverse video, and `z`
+  colours the task list as well as the summary. `Z` opens a screen for
+  choosing each window's colours. `<` and `>` move the sort to the
+  next column. The arrow keys, PgUp, PgDn, Home and End scroll the task
+  list and the columns (`C` shows where you are). The process tree
+  (`V`) now also works while threads are shown. Each window's look is
+  saved with `W`.
+
+### Desktop
+
+- **Settings › Displays in "Try SlateOS"**: the Graphics row explains
+  that full graphics is chosen during the install, rather than offering
+  a change that would only take effect at a next start.
+- When turning on full graphics fails, the message now gives quarry's
+  own reason.
+
 ## 0.1.1 (2026-10-29)
 
 ### Bluetooth: mice that just work

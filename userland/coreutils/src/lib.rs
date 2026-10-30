@@ -13,6 +13,7 @@ extern crate alloc;
 extern crate std;
 
 pub mod archive;
+pub mod attrs;
 pub mod awk;
 pub mod blkdiscard;
 pub mod compress;
@@ -64,6 +65,7 @@ pub const APPLETS: &[(&str, Applet)] = &[
     ("bzcat", compress::bzcat),
     ("bzip2", compress::bzip2),
     ("cat", fileops::cat),
+    ("chattr", attrs::chattr),
     ("chgrp", fileops::chgrp),
     ("chmod", fileops::chmod),
     ("chown", fileops::chown),
@@ -107,6 +109,7 @@ pub const APPLETS: &[(&str, Applet)] = &[
     ("ln", fileops::ln),
     ("logname", simple::logname),
     ("ls", ls::main),
+    ("lsattr", attrs::lsattr),
     ("lzcat", compress::lzcat),
     ("lzma", compress::lzma),
     ("md5sum", sums::md5sum),

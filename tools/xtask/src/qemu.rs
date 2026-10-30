@@ -328,6 +328,11 @@ fn nic_scenario(o: &Opts) -> Result {
             "away-1",
             10,
         )?;
+        // Their interrupts carried the traffic: no card fell back to
+        // polling.
+        if con.log.contains("polling the card") {
+            return Err("an igb card took frames without interrupts".into());
+        }
         // A CPU plugged in: QEMU raises general-purpose event 2, whose
         // _E02 method (run by the acpi thread, ADR 0079) notifies the CPU.
         monitor(&mon, &[&format!("device_add {},id=cpu4,socket-id=0,core-id=4,thread-id=0", cpu_type())])?;

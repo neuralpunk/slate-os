@@ -55,6 +55,10 @@ const COMMAND_BUS_MASTER: u16 = 1 << 2;
 const COMMAND_INTX_DISABLE: u16 = 1 << 10;
 const STATUS_CAPABILITIES: u16 = 1 << 4;
 
+/// Power management (PCI Bus Power Management Interface Specification
+/// 1.2, §3.2): PMCSR at +4, its power state in bits 1:0 (§3.2.4).
+const CAP_PM: u8 = 0x01;
+const PMCSR_STATE: u16 = 0b11;
 pub const CAP_MSI: u8 = 0x05;
 pub const CAP_VENDOR: u8 = 0x09;
 pub const CAP_MSIX: u8 = 0x11;
@@ -248,10 +252,66 @@ impl Device {
     }
 
     /// Turn on memory decoding and bus mastering (DMA), and turn off INTx
-    /// (Slate uses MSI-X or MSI).
+    /// (Slate uses MSI-X or MSI). A function another system left in a
+    /// low-power state is brought back to D0 first: in D3hot its registers
+    /// read as all ones.
     pub fn enable(&self) {
+        self.wake();
+        self.enable_bridges_above();
         let cmd = self.read16(COMMAND);
         self.write16(COMMAND, cmd | COMMAND_MEMORY | COMMAND_IO | COMMAND_BUS_MASTER | COMMAND_INTX_DISABLE);
+    }
+
+    /// Turn on memory decoding and bus mastering in every bridge between
+    /// the function and the root complex. A bridge whose Bus Master Enable
+    /// is clear refuses the memory requests it gets from below (PCI Express
+    /// Base Specification 4.0, §7.5.1.1.3; PCI-to-PCI Bridge Architecture
+    /// Specification 1.2, §3.2.5.3): the function's DMA and its MSI writes.
+    /// Firmware sets it only for ports it used itself (a boot drive, the
+    /// USB controllers), so a network card it never booted from had none.
+    fn enable_bridges_above(&self) {
+        let all = devices();
+        let mut bus = self.address.bus;
+        // Each step goes up a bus; 256 bounds a malformed topology.
+        for _ in 0..256 {
+            if bus == 0 {
+                break;
+            }
+            let Some(bridge) = all.iter().find(|d| d.read8(HEADER_TYPE) & 0x7F == 1 && d.read8(SECONDARY_BUS) == bus)
+            else {
+                break;
+            };
+            let cmd = bridge.read16(COMMAND);
+            if cmd & (COMMAND_MEMORY | COMMAND_BUS_MASTER) != COMMAND_MEMORY | COMMAND_BUS_MASTER {
+                bridge.write16(COMMAND, cmd | COMMAND_MEMORY | COMMAND_BUS_MASTER);
+                log_info!("{:?}: bus mastering turned on for {:?} below it", bridge.address, self.address);
+            }
+            bus = bridge.address.bus;
+        }
+    }
+
+    /// Put the function in D0 if it is in D1, D2 or D3hot. Leaving D3hot
+    /// may reset it (PMCSR's No_Soft_Reset clear, §3.2.4), which clears
+    /// its BARs: they are written back. D3hot to D0 takes up to 10 ms
+    /// (§5.6.1, table 5-6).
+    fn wake(&self) {
+        let Some(pm) = self.capability(CAP_PM) else { return };
+        let pmcsr = self.read16(pm + 4);
+        let state = pmcsr & PMCSR_STATE;
+        if state == 0 {
+            return;
+        }
+        // A bridge (header type 1) has two BARs, a device six.
+        let count = if self.read8(HEADER_TYPE) & 0x7F == 0 { 6 } else { 2 };
+        let bars: [u32; 6] = core::array::from_fn(|i| self.read32(BAR0 + 4 * i));
+        self.write16(pm + 4, pmcsr & !PMCSR_STATE);
+        super::dma::delay_ms(10);
+        for (i, &b) in bars.iter().enumerate().take(count) {
+            if self.read32(BAR0 + 4 * i) != b {
+                self.write32(BAR0 + 4 * i, b);
+            }
+        }
+        log_info!("{:?}: woken from D{state} to D{}", self.address, self.read16(pm + 4) & PMCSR_STATE);
     }
 
     /// Map memory BAR `i` and return its virtual address.

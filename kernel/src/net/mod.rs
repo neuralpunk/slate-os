@@ -358,6 +358,13 @@ fn follow_link() -> bool {
 /// Some card has no interrupts: the network thread polls them.
 static POLLED: AtomicBool = AtomicBool::new(false);
 
+/// A card registered with interrupts found that they don't come: the
+/// network thread polls it from now on.
+pub fn poll_cards() {
+    POLLED.store(true, Ordering::Relaxed);
+    wake();
+}
+
 fn worker() {
     let mut announced = 0;
     let mut last_link_check = 0;

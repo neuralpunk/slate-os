@@ -538,13 +538,33 @@ impl App for Browser {
     }
 }
 
+/// The broker's `browser=setup`, saying how far it is as setup goes on
+/// (it can take minutes, and the broker's child says nothing itself).
+fn setup_on_terminal() -> Result<(), String> {
+    let mut job = Job::start(|| kit::broker("browser=setup").map(|()| String::new()))?;
+    let mut said = String::new();
+    loop {
+        if let Some(r) = job.poll() {
+            return r.map(|_| ());
+        }
+        if let Some(p) = kit::SetupProgress::read() {
+            let now = p.say();
+            if now != said {
+                slate_rt::println!("web-browser: {now}");
+                said = now;
+            }
+        }
+        slate_rt::time::sleep_ns(500_000_000);
+    }
+}
+
 /// `web-browser --get`: first use on the terminal.
 fn get_on_terminal(id: &str) -> i32 {
     let needs = Needs::read(id);
     let (name, maker) = describe(id);
     if needs.setup {
         slate_rt::println!("web-browser: setting up the Linux runtime (it asks for approval)");
-        if let Err(e) = kit::broker("browser=setup") {
+        if let Err(e) = setup_on_terminal() {
             slate_rt::eprintln!("web-browser: the Linux runtime wasn't set up: {e}");
             return 1;
         }

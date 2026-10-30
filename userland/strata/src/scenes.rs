@@ -1229,7 +1229,8 @@ fn scenes() -> Vec<(&'static str, Canvas)> {
         // the next start.
         ("settings-graphics", {
             let mut v = at_section(S::Displays, SFocus::Content, 3);
-            v.graphics = Some(crate::settings_app::Graphics { installed: true, available: true, running: false });
+            v.graphics =
+                Some(crate::settings_app::Graphics { installed: true, available: true, running: false, live: false });
             v
         }),
         ("settings-display", {

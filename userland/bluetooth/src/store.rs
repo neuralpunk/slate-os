@@ -124,11 +124,27 @@ pub fn load() -> Vec<Device> {
     out
 }
 
+/// The store's folder, only root's; /var/lib/slate above it is everyone's
+/// way to theirs (the Linux runtime's, the faces), so not root's alone.
+fn make_dir() {
+    let _ = slate_rt::fs::mkdir(b"/var/lib/slate", 0o755);
+    let _ = slate_rt::fs::mkdir(DIR.as_bytes(), 0o700);
+}
+
+/// slate-btd made /var/lib/slate root's alone before (0700), which shut
+/// everyone else out of the Linux runtime under it: open it again.
+pub fn repair() {
+    let top = b"/var/lib/slate";
+    if slate_rt::fs::lstat(top)
+        .is_ok_and(|s| s.mode & slate_rt::fs::S_IFMT == slate_rt::fs::S_IFDIR && s.uid == 0 && s.mode & 0o7777 == 0o700)
+    {
+        let _ = slate_rt::fs::chmod(top, 0o755);
+    }
+}
+
 /// Write the paired devices: each one's file, and none for the others.
 pub fn save(devices: &[Device]) -> Result<(), String> {
-    for d in ["/var/lib/slate", DIR] {
-        let _ = slate_rt::fs::mkdir(d.as_bytes(), 0o700);
-    }
+    make_dir();
     let _ = slate_rt::fs::mkdir(&path("devices"), 0o700);
     let keep: Vec<String> = devices.iter().filter(|d| d.paired()).map(|d| d.addr.to_string()).collect();
     for d in devices {
@@ -159,9 +175,7 @@ pub fn irk() -> [u8; 16] {
     }
     let mut k = [0u8; 16];
     let _ = slate_rt::process::random(&mut k);
-    for d in ["/var/lib/slate", DIR] {
-        let _ = slate_rt::fs::mkdir(d.as_bytes(), 0o700);
-    }
+    make_dir();
     let _ = slate_rt::fs::write_file(&path("irk"), alloc::format!("{}\n", hex(&k)).as_bytes(), 0o600);
     k
 }
@@ -173,9 +187,7 @@ pub fn powered() -> bool {
 }
 
 pub fn set_powered(on: bool) -> Result<(), String> {
-    for d in ["/var/lib/slate", DIR] {
-        let _ = slate_rt::fs::mkdir(d.as_bytes(), 0o700);
-    }
+    make_dir();
     let text = if on { "power=on\n" } else { "power=off\n" };
     slate_rt::fs::write_file(&path("settings"), text.as_bytes(), 0o600).map(|_| ()).map_err(|e| alloc::format!("{e}"))
 }

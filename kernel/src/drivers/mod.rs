@@ -134,6 +134,13 @@ pub const DRIVERS: &[Driver] = &[
         igb::probe,
     ),
     pci_driver(
+        "igc",
+        "Intel 2.5 GbE network cards (I225 and I226, ADR 0178)",
+        Stage::Network,
+        |d| d.vendor == 0x8086 && igb::I225_IDS.contains(&d.device),
+        igb::probe_i225,
+    ),
+    pci_driver(
         "rtl8139",
         "Realtek RTL8139 network cards",
         Stage::Network,

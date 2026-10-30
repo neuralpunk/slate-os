@@ -394,8 +394,13 @@ fn spawn_output(argv: &[String], env: &[Vec<u8>]) -> Result<(i32, String), Strin
 /// Into the runtime for Flatpak's commands (not a window's): the
 /// environment, with the runtime directory Flatpak needs made.
 fn enter_for_flatpak(root: &str, system: bool) -> Result<(Vec<Vec<u8>>, String), String> {
-    if !fs::exists(format!("{root}/usr/bin/flatpak").as_bytes()) {
-        return Err(format!("no Flatpak in the Linux runtime {root}; `slate-linux setup flatpak` adds it (ADR 0114)"));
+    // What the check met (not there, or not reachable for this account)
+    // says why, where a plain "missing" wouldn't.
+    let flatpak = format!("{root}/usr/bin/flatpak");
+    if let Err(e) = fs::lstat(flatpak.as_bytes()) {
+        return Err(format!(
+            "Flatpak isn't in the Linux runtime ({flatpak}: {e}); `slate-linux setup flatpak` adds it"
+        ));
     }
     let (uid, gid, user, home) =
         if system { (0, 0, String::from("root"), String::from(SYSTEM_HOME)) } else { person() };

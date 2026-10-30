@@ -314,6 +314,7 @@ pub fn main() -> i32 {
         eprintln!("slate-btd: must run as root");
         return 1;
     }
+    store::repair();
     let host_name = String::from(slate_rt::lossy(&process::uname()[1]));
     let paired = store::load();
     eprintln!("slate-btd: {} paired devices", paired.len());

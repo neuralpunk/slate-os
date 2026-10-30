@@ -733,8 +733,22 @@ fn draw_slot(p: &mut Painter<'_>, pal: &Palette, f: &Fonts<'_>, a: Area, label: 
 
 impl App for Solitaire {
     fn draw(&mut self, p: &mut Painter<'_>, pal: &Palette, f: &Fonts<'_>, a: Area) {
-        self.layout = Layout::of(a);
-        let l = self.layout;
+        let l = Layout::of(a);
+        if l != self.layout {
+            // Where the first column's top card lies, and the step to the
+            // next column (the apps scenario drags by them).
+            let t = &self.game.table.tab[0];
+            let top = if t.is_empty() { l.slot(Pile::Tab(0)) } else { l.in_column(0, t, t.len() - 1) };
+            crate::trace!(
+                "solitaire: column 0's top at {} {} {} {} and the columns {} apart",
+                top.x,
+                top.y,
+                top.w,
+                top.h,
+                l.card.0 + l.gap
+            );
+        }
+        self.layout = l;
         let t = self.game.table.clone();
         // The header: the draw mode, the moves and time.
         self.tabs =
@@ -951,6 +965,7 @@ impl App for Solitaire {
                     }
                     p => self.layout.slot(p),
                 };
+                crate::trace!("solitaire: picked up {pile:?} from card {k} at {x} {y}");
                 self.held = Some(Held {
                     from: pile,
                     index: k,
@@ -990,8 +1005,14 @@ impl App for Solitaire {
             return Effect::Redraw;
         }
         let card = Area::new(h.at.0 - h.grab.0, h.at.1 - h.grab.1, self.layout.card.0, self.layout.card.1);
-        if let Some(to) = self.drop_target(card) {
-            self.try_play(h.from, h.index, to);
+        crate::trace!("solitaire: dropped with the pointer at {} {}", h.at.0, h.at.1);
+        match self.drop_target(card) {
+            Some(to) => {
+                if !self.try_play(h.from, h.index, to) {
+                    crate::trace!("solitaire: {:?} can't go on {to:?}", h.from);
+                }
+            }
+            None => crate::trace!("solitaire: dropped on no pile"),
         }
         Effect::Redraw
     }

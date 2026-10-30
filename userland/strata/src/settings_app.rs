@@ -417,17 +417,22 @@ pub const DISPLAY_ROWS: [&str; 5] = ["Resolution", "Refresh rate", "Position", "
 
 /// Full graphics on this machine (ADR 0173): whether AMD's firmware is
 /// installed (it takes effect at the next start), whether the system's
-/// repository has it, and whether this session started with it.
+/// repository has it, whether this session started with it, and whether
+/// this is the live system (which has no next start: the installer asks).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Graphics {
     pub installed: bool,
     pub available: bool,
     pub running: bool,
+    pub live: bool,
 }
 
 impl Graphics {
     /// What the Graphics row says.
     pub fn words(&self, confirming: bool) -> &'static str {
+        if self.live {
+            return "chosen at install";
+        }
         match (self.installed, self.running, confirming) {
             (true, _, true) => "enter to turn off",
             (true, true, _) => "full graphics",
@@ -444,7 +449,8 @@ impl Graphics {
             let installed = g::full_graphics();
             // The driver lit a card: a DRM card under one of its functions.
             let running = slate_sysinfo::graphics().iter().any(|(_, c)| c.contains("AMD's firmware"));
-            Graphics { installed, available: g::available(), running }
+            let live = slate_rt::fs::exists(crate::session::LIVE.as_bytes());
+            Graphics { installed, available: g::available(), running, live }
         })
     }
 }
@@ -769,6 +775,11 @@ impl View {
                 }
                 if row > self.displays.displays.len() {
                     return match self.graphics {
+                        // The live system forgets everything at shutdown.
+                        Some(g) if g.live => {
+                            self.say("Full graphics is chosen when SlateOS is installed: the installer asks.", false);
+                            Effect::Redraw
+                        }
                         Some(g) if !g.installed && !g.available => {
                             self.say("This system's repository doesn't have AMD's firmware.", true);
                             Effect::Redraw
@@ -3522,5 +3533,24 @@ mod tests {
         let e = v.key(KEY_ENTER, None, 0, &n);
         assert!(matches!(e, Effect::Displays(t) if t.starts_with("scale=1\n")));
         assert_eq!(v.displays.scale_words(), "1×");
+    }
+
+    #[test]
+    fn graphics() {
+        let n = names();
+        let mut v = View::new(Settings::default(), "UTC");
+        v.displays = crate::displays::Now::parse("scale 1 auto\nHDMI-A-1 lit 0,0 1920x1080@60 primary\n");
+        v.graphics = Some(Graphics { installed: false, available: true, running: false, live: false });
+        section(&mut v, Section::Displays, &n);
+        // The display, the scale, then the Graphics row.
+        assert_eq!(v.rows(), 3);
+        v.key(KEY_DOWN, None, 0, &n);
+        v.key(KEY_DOWN, None, 0, &n);
+        assert_eq!(v.key(KEY_ENTER, None, 0, &n), Effect::Graphics(true));
+        // The live system has no next start: the installer asks.
+        v.graphics = Some(Graphics { installed: false, available: true, running: false, live: true });
+        assert_eq!(v.key(KEY_ENTER, None, 0, &n), Effect::Redraw);
+        assert!(v.status.contains("installer asks") && !v.status_bad);
+        assert_eq!(v.graphics.unwrap().words(false), "chosen at install");
     }
 }

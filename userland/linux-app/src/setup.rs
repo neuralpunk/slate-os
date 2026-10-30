@@ -141,6 +141,22 @@ fn unpack(s: &Setup) -> Result<(), String> {
 /// STEPS, TEXT the package), `finishing` (apk's triggers).
 pub const PROGRESS: &str = "/run/slate-linux-progress";
 
+/// Held while setup, an upgrade or a rollback changes the runtime: a
+/// second one waits for the first (two apks at once in one runtime fail on
+/// its database's lock).
+const LOCK: &str = "/run/slate-linux.lock";
+
+/// Wait for, and take, the lock: released when the process ends.
+fn one_at_a_time() -> Result<(), String> {
+    let fd = fs::open(LOCK.as_bytes(), fs::O_RDWR | fs::O_CREAT | fs::O_CLOEXEC, 0o600)
+        .map_err(|e| format!("{LOCK}: {e}"))?;
+    if fs::flock(fd, fs::LOCK_EX | fs::LOCK_NB).is_err() {
+        println!("slate-linux: the runtime is being changed already; waiting for that to finish");
+        fs::flock(fd, fs::LOCK_EX).map_err(|e| format!("{LOCK}: {e}"))?;
+    }
+    Ok(())
+}
+
 /// Say how far setup is.
 fn note(stage: &str, step: usize, steps: usize, text: &str) {
     let tmp = format!("{PROGRESS}.new");
@@ -174,13 +190,15 @@ fn in_runtime(root: &str, argv: &[&str]) -> Result<(), String> {
     in_runtime_lines(root, argv, |_| {})
 }
 
-/// [`in_runtime`], each line it writes to standard output passed on and
-/// shown to `line`.
+/// [`in_runtime`], each line it writes passed on and shown to `line`. Its
+/// standard error comes the same way, so that a failure can say what the
+/// program said of it (apk's `ERROR:` line).
 fn in_runtime_lines(root: &str, argv: &[&str], mut line: impl FnMut(&str)) -> Result<(), String> {
     let (r, w) = process::pipe(fs::O_CLOEXEC).map_err(|e| format!("a pipe: {e}"))?;
     match process::fork() {
         Ok(0) => {
             let _ = process::dup2(w, 1);
+            let _ = process::dup2(w, 2);
             let r = (|| -> Result<(), String> {
                 process::unshare(process::CLONE_NEWNS).map_err(|e| format!("a mount namespace: {e}"))?;
                 let m = |src: &str, at: &str, fstype: &str, flags: usize| {
@@ -203,6 +221,7 @@ fn in_runtime_lines(root: &str, argv: &[&str], mut line: impl FnMut(&str)) -> Re
         Ok(pid) => {
             let _ = slate_rt::io::close(w);
             let mut pending: Vec<u8> = Vec::new();
+            let mut why = String::new();
             let mut buf = [0u8; 4096];
             while let Ok(n) = slate_rt::io::read(r, &mut buf) {
                 if n == 0 {
@@ -212,13 +231,18 @@ fn in_runtime_lines(root: &str, argv: &[&str], mut line: impl FnMut(&str)) -> Re
                 pending.extend_from_slice(&buf[..n]);
                 while let Some(at) = pending.iter().position(|&b| b == b'\n') {
                     let l: Vec<u8> = pending.drain(..=at).collect();
-                    line(slate_rt::lossy(&l).trim_end());
+                    let l = slate_rt::lossy(&l);
+                    let l = l.trim_end();
+                    if l.starts_with("ERROR: ") || l.starts_with("WARNING: ") || l.starts_with("slate-linux: ") {
+                        why = String::from(l);
+                    }
+                    line(l);
                 }
             }
             let _ = slate_rt::io::close(r);
             match process::wait(pid, 0) {
                 Ok((_, 0)) => Ok(()),
-                Ok((_, st)) => Err(format!("{} failed (status {st:#x})", argv.join(" "))),
+                Ok((_, st)) => Err(failed(argv, st, &why)),
                 Err(e) => Err(format!("waiting for {}: {e}", argv[0])),
             }
         }
@@ -515,6 +539,18 @@ fn restore(root: &str) -> Result<(), String> {
     slate_rt::subvol::mount(SUBVOL, root)
 }
 
+/// What `argv` failing with wait status `st` comes to, with the last
+/// thing it said of why.
+pub fn failed(argv: &[&str], st: i32, why: &str) -> String {
+    let what = argv.join(" ");
+    let how = match (st & 0x7f, (st >> 8) & 0xff) {
+        (0, code) => format!("exit status {code}"),
+        (sig, _) => format!("signal {sig}"),
+    };
+    let why = why.strip_prefix("slate-linux: ").unwrap_or(why);
+    if why.is_empty() { format!("{what} failed ({how})") } else { format!("{what} failed ({how}): {why}") }
+}
+
 /// `slate-linux rollback [--root DIR]`: back to the runtime from before
 /// the last upgrade.
 pub fn rollback(args: &[String]) -> Result<(), String> {
@@ -523,6 +559,7 @@ pub fn rollback(args: &[String]) -> Result<(), String> {
         [o, r] if o == "--root" => r.clone(),
         _ => return Err("usage: slate-linux rollback [--root DIR]".into()),
     };
+    one_at_a_time()?;
     if !mounted_at(&root) {
         return Err(format!("{root} isn't a runtime on a subvolume of its own (upgrade it once first)"));
     }
@@ -535,6 +572,7 @@ pub fn rollback(args: &[String]) -> Result<(), String> {
 /// `slate-linux upgrade`.
 pub fn upgrade(args: &[String]) -> Result<(), String> {
     let u = parse_upgrade(args)?;
+    one_at_a_time()?;
     let root = u.root.as_str();
     let release = || fs::read_file(format!("{root}/etc/alpine-release").as_bytes()).ok();
     if release().is_none() {
@@ -600,6 +638,7 @@ pub fn upgrade(args: &[String]) -> Result<(), String> {
 
 pub fn main(args: &[String]) -> Result<(), String> {
     let s = parse(args)?;
+    one_at_a_time()?;
     let r = setup(&s);
     let _ = fs::unlink(PROGRESS.as_bytes());
     r
@@ -664,6 +703,21 @@ mod tests {
         assert_eq!(apk_step("Executing gtk-update-icon-cache-3.24.50-r0.trigger").unwrap().3, "gtk-update-icon-cache");
         assert_eq!(apk_step("OK: 398 MiB in 159 packages"), None);
         assert_eq!(apk_step("(x/y) nothing"), None);
+    }
+
+    #[test]
+    fn failures() {
+        let apk = ["/sbin/apk", "update", "--no-progress"];
+        let why = "ERROR: Unable to lock database: Resource temporarily unavailable";
+        assert_eq!(
+            failed(&apk, 0x6300, why),
+            "/sbin/apk update --no-progress failed (exit status 99): ERROR: Unable to lock database: Resource temporarily unavailable"
+        );
+        assert_eq!(failed(&apk, 9, ""), "/sbin/apk update --no-progress failed (signal 9)");
+        assert_eq!(
+            failed(&["/bin/x"], 0x7f00, "slate-linux: entering /r: ENOENT"),
+            "/bin/x failed (exit status 127): entering /r: ENOENT"
+        );
     }
 
     #[test]

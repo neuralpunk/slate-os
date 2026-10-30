@@ -10,8 +10,18 @@
 //!   up, Up and Down move it, Left or Enter put it down);
 //! - `o` and `O` filter the tasks (`[!]FIELD=TEXT`, `<` and `>`; `O`
 //!   minds case), ctrl + o shows the filters and `=` clears them; `V`
-//!   draws the process tree (forest view); `E` and `e` scale the summary's
-//!   and the tasks' memory (KiB to EiB); `z` colours the summary;
+//!   draws the process tree (forest view, threads under their process
+//!   when `H` shows them); `E` and `e` scale the summary's and the tasks'
+//!   memory (KiB to EiB); `<` and `>` sort by the field left or right of
+//!   the sort field;
+//! - each window's look: `x` highlights the sort column, `y` the running
+//!   tasks (on at first), `b` makes those highlights reverse video rather
+//!   than bold, `z` turns its colours on, and `Z`'s screen chooses them
+//!   (summary, messages, column heads, tasks and highlights, each one of
+//!   eight colours or none; red, red, yellow, none and red at first, as
+//!   procps' top has them, observed);
+//! - the arrows, PgUp, PgDn, Home and End scroll the current window's
+//!   tasks and fields, `C` says where it is scrolled to;
 //! - `H` (or `-H`) shows threads, `c` (or `-c`) command lines, `i` (or
 //!   `-i`) hides idle tasks, `1` (or `-1`) each CPU;
 //! - `W` writes the settings to `$XDG_CONFIG_HOME/slate/toprc` (Slate's
@@ -184,14 +194,86 @@ pub struct Win {
     pub reverse: bool,
     /// Not kept in the settings file (as top(1)'s).
     pub filters: Vec<Filter>,
+    /// `z`: colours on.
+    pub colour: bool,
+    /// `Z`'s colours for [`Part`]s: 0 to 7 (black, red, green, yellow,
+    /// blue, magenta, cyan, white) or -1 for none.
+    pub colours: [i8; 5],
+    /// `x`: the sort column highlighted; `y`: running tasks; `b`: those
+    /// highlights in reverse video rather than bold.
+    pub hi_column: bool,
+    pub hi_running: bool,
+    pub hi_reverse: bool,
+    /// Scrolled to: the first task and the first field shown (not kept).
+    pub first_task: usize,
+    pub first_field: usize,
+}
+
+/// What `Z` colours.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Part {
+    Summary,
+    Messages,
+    Heads,
+    Tasks,
+    Highlights,
+}
+
+/// The colours a window starts with (procps' top's, observed).
+const COLOURS: [i8; 5] = [1, 1, 3, -1, 1];
+
+/// The escape for colour `c` as text colour, nothing for none.
+fn fg(c: i8) -> String {
+    if (0..8).contains(&c) { alloc::format!("\x1b[3{c}m") } else { String::new() }
 }
 
 impl Win {
     fn new(n: usize) -> Win {
         let (name, fields, sort) = WINDOWS[n];
-        let mut w = Win { name, fields: fields.to_vec(), order: Vec::new(), sort, reverse: false, filters: Vec::new() };
+        let mut w = Win {
+            name,
+            fields: fields.to_vec(),
+            order: Vec::new(),
+            sort,
+            reverse: false,
+            filters: Vec::new(),
+            colour: false,
+            colours: COLOURS,
+            hi_column: false,
+            hi_running: true,
+            hi_reverse: false,
+            first_task: 0,
+            first_field: 0,
+        };
         w.order = order_for(&w.fields);
         w
+    }
+
+    /// The escape for part `p`: its colour when colours are on.
+    fn colour_of(&self, p: Part) -> String {
+        if self.colour { fg(self.colours[p as usize]) } else { String::new() }
+    }
+
+    /// The escape for highlighted text (`x`, `y`).
+    fn highlight(&self) -> String {
+        let mut e = self.colour_of(Part::Highlights);
+        e.push_str(if self.hi_reverse { "\x1b[7m" } else { "\x1b[1m" });
+        e
+    }
+
+    /// The fields shown after scrolling right (at least the last one).
+    fn shown_fields(&self) -> &[F] {
+        &self.fields[self.first_field.min(self.fields.len().saturating_sub(1))..]
+    }
+
+    /// `<` and `>`: sort by the shown field left (`left`) or right of the
+    /// sort field, if it is shown and has one there.
+    fn move_sort(&mut self, left: bool) {
+        let Some(i) = self.fields.iter().position(|f| *f == self.sort) else { return };
+        let to = if left { i.checked_sub(1) } else { Some(i + 1).filter(|&j| j < self.fields.len()) };
+        if let Some(j) = to {
+            self.sort = self.fields[j];
+        }
     }
 
     /// The fields shown again from the order and a set of them.
@@ -220,7 +302,6 @@ pub struct Settings {
     pub threads: bool,
     pub command_lines: bool,
     pub hide_idle: bool,
-    pub colour: bool,
     /// The process tree (`V`).
     pub forest: bool,
     /// The summary's and the tasks' memory units (index in `UNITS`).
@@ -241,7 +322,6 @@ impl Default for Settings {
             threads: false,
             command_lines: false,
             hide_idle: false,
-            colour: false,
             forest: false,
             scale_summary: 1,
             scale_tasks: 0,
@@ -290,7 +370,16 @@ impl Settings {
                 "threads" => s.threads = yes,
                 "command_lines" => s.command_lines = yes,
                 "hide_idle" => s.hide_idle = yes,
-                "colour" => s.colour = yes,
+                "colour" => win.colour = yes,
+                "colours" => {
+                    let c: Vec<i8> = v.split(',').filter_map(|c| c.trim().parse().ok()).collect();
+                    if let Ok(c) = <[i8; 5]>::try_from(c) {
+                        win.colours = c.map(|c| if (0..8).contains(&c) { c } else { -1 });
+                    }
+                }
+                "highlight_column" => win.hi_column = yes,
+                "highlight_running" => win.hi_running = yes,
+                "highlight_reverse" => win.hi_reverse = yes,
                 "forest" => s.forest = yes,
                 "alt" => s.alt = yes,
                 "window" => s.cur = v.parse::<usize>().ok().filter(|n| (1..=4).contains(n)).map_or(s.cur, |n| n - 1),
@@ -334,16 +423,25 @@ impl Settings {
                 spec(w.sort).name,
                 b(w.reverse)
             ));
+            let colours: Vec<String> = w.colours.iter().map(|c| alloc::format!("{c}")).collect();
+            out.push_str(&alloc::format!(
+                "{pre}colour={}\n{pre}colours={}\n{pre}highlight_column={}\n{pre}highlight_running={}\n\
+                 {pre}highlight_reverse={}\n",
+                b(w.colour),
+                colours.join(","),
+                b(w.hi_column),
+                b(w.hi_running),
+                b(w.hi_reverse)
+            ));
         }
         out.push_str(&alloc::format!(
-            "delay={}\nper_cpu={}\nthreads={}\ncommand_lines={}\nhide_idle={}\ncolour={}\nforest={}\nalt={}\n\
+            "delay={}\nper_cpu={}\nthreads={}\ncommand_lines={}\nhide_idle={}\nforest={}\nalt={}\n\
              window={}\nscale_summary={}\nscale_tasks={}\n",
             self.delay,
             b(self.per_cpu),
             b(self.threads),
             b(self.command_lines),
             b(self.hide_idle),
-            b(self.colour),
             b(self.forest),
             b(self.alt),
             self.cur + 1,
@@ -439,29 +537,67 @@ fn cell(f: F, r: &Row<'_>, ctx: &Ctx, s: &Settings) -> String {
     }
 }
 
-/// Fields side by side at their widths; the last one is not padded (and
-/// takes what room is left), others are cut to their width.
-fn join(fields: &[F], text: impl Fn(F) -> String) -> String {
-    let mut out = String::new();
+/// Fields at their widths; the last one is not padded (and takes what
+/// room is left), others are cut to their width.
+fn cells(fields: &[F], text: impl Fn(F) -> String) -> Vec<String> {
+    let mut out = Vec::new();
     for (i, &f) in fields.iter().enumerate() {
         let sp = spec(f);
         let v = text(f);
-        if i > 0 {
-            out.push(' ');
-        }
         if i + 1 == fields.len() && sp.left {
-            out.push_str(&v);
+            out.push(v);
         } else {
             let v: String = v.chars().take(sp.width.max(sp.name.len())).collect();
             let w = sp.width.max(sp.name.len());
-            if sp.left {
-                out.push_str(&alloc::format!("{v:<w$}"));
-            } else {
-                out.push_str(&alloc::format!("{v:>w$}"));
-            }
+            out.push(if sp.left { alloc::format!("{v:<w$}") } else { alloc::format!("{v:>w$}") });
         }
     }
     out
+}
+
+/// Fields side by side.
+fn join(fields: &[F], text: impl Fn(F) -> String) -> String {
+    cells(fields, text).join(" ")
+}
+
+/// Pieces of text in their styles (escapes), cut to `width` characters
+/// and ended with a reset; a style is written (after a reset) only where
+/// it changes, and escapes don't count.
+fn styled(pieces: &[(String, String)], width: usize) -> String {
+    let mut out = String::new();
+    let mut left = width;
+    let mut current = "";
+    for (style, text) in pieces {
+        if left == 0 {
+            break;
+        }
+        if style != current {
+            out.push_str("\x1b[m");
+            out.push_str(style);
+            current = style;
+        }
+        let t: String = text.chars().take(left).collect();
+        left -= t.chars().count();
+        out.push_str(&t);
+    }
+    out.push_str("\x1b[m");
+    out
+}
+
+/// A task's line on a terminal: in the tasks' colour, a running task
+/// highlighted (`y`), the sort column too (`x`).
+pub fn task_line(w: &Win, r: &Row<'_>, ctx: &Ctx, s: &Settings, width: usize) -> String {
+    let fields = w.shown_fields();
+    let base = if w.hi_running && r.p.state == b'R' { w.highlight() } else { w.colour_of(Part::Tasks) };
+    let mut pieces = Vec::new();
+    for (i, (f, c)) in fields.iter().zip(cells(fields, |f| cell(f, r, ctx, s))).enumerate() {
+        if i > 0 {
+            pieces.push((base.clone(), String::from(" ")));
+        }
+        let style = if w.hi_column && *f == w.sort { w.highlight() } else { base.clone() };
+        pieces.push((style, c));
+    }
+    styled(&pieces, width)
 }
 
 pub fn header(fields: &[F]) -> String {
@@ -512,26 +648,36 @@ pub fn sort(rows: &mut [Row<'_>], w: &Win, s: &Settings, ctx: &Ctx) {
     });
 }
 
-/// The forest view: each process under its parent, siblings in the sort's
-/// order, with its depth for the COMMAND field's branches. Tasks whose
-/// parent isn't shown are roots.
+/// A task's place in the forest: its own ID and its parent's. A thread
+/// other than a process's first is under that one, which is under the
+/// parent process's (as procps' top shows them with `H`).
+fn tree_ids(p: &Proc) -> (u32, u32) {
+    (p.lwp, if p.lwp != p.pid { p.pid } else { p.ppid })
+}
+
+/// The forest view: each process under its parent (each thread under its
+/// process), siblings in the sort's order, with its depth for the COMMAND
+/// field's branches. Tasks whose parent isn't shown are roots.
 pub fn forest(rows: Vec<Row<'_>>) -> Vec<Row<'_>> {
-    let pids: Vec<u32> = rows.iter().map(|r| r.p.pid).collect();
+    let ids: Vec<u32> = rows.iter().map(|r| r.p.lwp).collect();
     let mut slots: Vec<Option<Row<'_>>> = rows.into_iter().map(Some).collect();
     let mut out = Vec::new();
     fn visit<'a>(i: usize, depth: usize, slots: &mut Vec<Option<Row<'a>>>, out: &mut Vec<Row<'a>>) {
         let Some(mut r) = slots[i].take() else { return };
-        let pid = r.p.pid;
+        let id = r.p.lwp;
         r.depth = depth;
         out.push(r);
         for j in 0..slots.len() {
-            if slots[j].as_ref().is_some_and(|c| c.p.ppid == pid && c.p.pid != pid) {
+            if slots[j].as_ref().is_some_and(|c| tree_ids(c.p).1 == id && c.p.lwp != id) {
                 visit(j, depth + 1, slots, out);
             }
         }
     }
     for i in 0..slots.len() {
-        let root = slots[i].as_ref().is_some_and(|r| r.p.ppid == r.p.pid || !pids.contains(&r.p.ppid));
+        let root = slots[i].as_ref().is_some_and(|r| {
+            let (id, parent) = tree_ids(r.p);
+            parent == id || !ids.contains(&parent)
+        });
         if root {
             visit(i, 0, &mut slots, &mut out);
         }
@@ -601,9 +747,14 @@ const HELP: &str = "Help for Interactive Commands\n\n\
   A         all four windows; a w next and previous; g choose one\n\
   o O       add a filter ([!]FIELD=TEXT, < or >; O minds case)\n\
   ^O        show the filters; = clears them\n\
+  < >       sort by the field left or right of the sort field\n\
   V         the process tree (forest view)\n\
   E e       scale the summary's and the tasks' memory\n\
-  z         colours on or off\n\
+  x y       highlight the sort column, running tasks\n\
+  b         highlights bold or reverse\n\
+  z Z       colours on or off, choose them\n\
+  arrows    scroll the tasks and fields (PgUp PgDn Home End)\n\
+  C         where the window is scrolled to\n\
   H         threads on or off\n\
   c         command lines or names\n\
   i         idle tasks on or off\n\
@@ -627,8 +778,11 @@ pub fn keys(bytes: &[u8]) -> Vec<(u8, bool)> {
             while j < bytes.len() && !(0x40..=0x7e).contains(&bytes[j]) {
                 j += 1;
             }
-            if let Some(&f) = bytes.get(j) {
-                out.push((f, true));
+            match bytes.get(j) {
+                // `ESC [ 5 ~`: the number says which key (PgUp is 5).
+                Some(b'~') => out.push((bytes.get(i + 2).copied().filter(u8::is_ascii_digit).unwrap_or(b'~'), true)),
+                Some(&f) => out.push((f, true)),
+                None => {}
             }
             i = j + 1;
             continue;
@@ -671,12 +825,87 @@ pub struct FieldsScreen {
     pub moving: bool,
 }
 
+/// `Z`'s screen while it is up: the window it colours, the part chosen,
+/// and the colours and toggles until they are kept (Enter, `a`, `w`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ColourScreen {
+    pub win: usize,
+    pub part: Part,
+    pub colours: [i8; 5],
+    pub colour: bool,
+    pub hi_reverse: bool,
+}
+
+impl ColourScreen {
+    fn of(s: &Settings, win: usize) -> ColourScreen {
+        let w = &s.wins[win];
+        ColourScreen { win, part: Part::Tasks, colours: w.colours, colour: w.colour, hi_reverse: w.hi_reverse }
+    }
+
+    fn keep(&self, s: &mut Settings) {
+        let w = &mut s.wins[self.win];
+        (w.colours, w.colour, w.hi_reverse) = (self.colours, self.colour, self.hi_reverse);
+    }
+}
+
 /// The screens and prompts the keys act on.
 #[derive(Debug, Default)]
 pub struct Ui {
     pub fields: Option<FieldsScreen>,
+    pub colours: Option<ColourScreen>,
     pub help: bool,
     pub message: String,
+    /// `C`: say where the window is scrolled to.
+    pub coordinates: bool,
+    /// The current window's tasks and rows for them in the last frame
+    /// (for scrolling).
+    pub tasks: usize,
+    pub page: usize,
+}
+
+/// `Z`'s screen: a sample in the colours chosen, the parts and colours to
+/// choose from, and the keys.
+pub fn colour_screen(s: &Settings, c: &ColourScreen) -> String {
+    let w = &s.wins[c.win];
+    let name = alloc::format!("{}:{}", c.win + 1, w.name);
+    let col = |p: Part| if c.colour { fg(c.colours[p as usize]) } else { String::new() };
+    let hi = col(Part::Highlights) + if c.hi_reverse { "\x1b[7m" } else { "\x1b[1m" };
+    let on = |v: bool| if v { "On" } else { "Off" };
+    let parts =
+        [(Part::Summary, 'S'), (Part::Messages, 'M'), (Part::Heads, 'H'), (Part::Tasks, 'T'), (Part::Highlights, 'X')];
+    let letter = parts.iter().find(|p| p.0 == c.part).map_or('T', |p| p.1);
+    let r = "\x1b[m";
+    let mut out = alloc::format!("\x1b[1mHelp for color mapping{r} - \"Current Window\" = \x1b[7m {name} {r}\n\n");
+    let summary = col(Part::Summary);
+    out.push_str(&alloc::format!("   {summary}top - 12:00:00 up 1 day, load average: 0.10{r}\n"));
+    out.push_str(&alloc::format!("   {summary}Tasks:  64 total,   2 running,  62 sleeping{r}\n"));
+    let msg = col(Part::Messages);
+    out.push_str(&alloc::format!("   {msg}\x1b[7m Nasty Message! {r}  -or-  {msg}\x1b[1mInput Prompt{r}\n"));
+    let head = col(Part::Heads);
+    out.push_str(&alloc::format!("   {head}\x1b[7m  PID USER      %CPU S COMMAND    {r}\n"));
+    let task = col(Part::Tasks);
+    out.push_str(&alloc::format!("   {task}17284 {hi}alex     {r}{task}  0.0 S chalk      {r}\n"));
+    out.push_str(&alloc::format!("   {hi} 8601 alex       0.4 R top        {r}\n"));
+    out.push_str(&alloc::format!("   {task}11005 {hi}alex     {r}{task}  0.0 S terminal   {r}\n"));
+    out.push_str(&alloc::format!(
+        "   available toggles: \x1b[1mz{r} =color/mono (\x1b[1m{}{r}), \x1b[1mb{r} =tasks bold/reverse (\x1b[1m{}{r})\n\n",
+        on(c.colour),
+        on(c.hi_reverse)
+    ));
+    out.push_str(&alloc::format!(
+        "1) Select a \x1b[1mtarget{r} as an upper case letter, \x1b[1mcurrent target{r} is \x1b[7m {letter} {r}:\n\
+         \x20  S = Summary Data,  M = Messages/Prompts,  H = Column Heads\n\
+         \x20  T = Task Information,  X = Task x/y (col/row) Highlights\n\
+         2) Select a \x1b[1mcolor{r} as a number (\x1b[1mnone{r} as @) or use the up/down arrow\n\
+         \x20  keys to raise/lower the 8 colors value, \x1b[1mcurrent color{r} is \x1b[7m {} {r}:\n\
+         \x20  0 = black,  1 = red,    2 = green,  3 = yellow,\n\
+         \x20  4 = blue,   5 = magenta, 6 = cyan,  7 = white,  @ = none (-1)\n\n\
+         3) Then use these keys when finished:\n\
+         \x20  'q' or <Esc> to abort changes to window '\x1b[1m{name}{r}'\n\
+         \x20  'a' or 'w' to commit & change another, <Enter> to commit and end\n",
+        c.colours[c.part as usize]
+    ));
+    out
 }
 
 /// Window `w`'s rows: filtered, with what its fields need, sorted, and as
@@ -691,7 +920,7 @@ fn window_rows<'a>(tasks: &'a [Proc], cpu: &[f64], w: &Win, s: &Settings, ctx: &
         .filter(|r| w.filters.iter().all(|f| f.keeps(&cell(f.f, r, ctx, s))))
         .collect();
     sort(&mut rows, w, s, ctx);
-    if s.forest && !s.threads { forest(rows) } else { rows }
+    if s.forest { forest(rows) } else { rows }
 }
 
 pub fn top(args: &[Vec<u8>]) -> i32 {
@@ -814,7 +1043,11 @@ pub fn top(args: &[Vec<u8>]) -> i32 {
         } else {
             (usize::MAX, 512)
         };
-        let (on, off) = if s.colour && interactive { ("\x1b[1;31m", "\x1b[m") } else { ("", "") };
+        // The summary and messages in the current window's colours.
+        let cw = s.win();
+        let (on, off) =
+            if interactive && cw.colour { (cw.colour_of(Part::Summary), "\x1b[m") } else { (String::new(), "") };
+        let msg_on = if interactive { cw.colour_of(Part::Messages) } else { String::new() };
         let mut frame = String::new();
         let up = ctx.now as u64;
         let tm = slate_rt::tz::localtime(slate_rt::time::unix());
@@ -868,7 +1101,16 @@ pub fn top(args: &[Vec<u8>]) -> i32 {
             sum(get("SwapFree")),
             sum(get("SwapTotal").saturating_sub(get("SwapFree")))
         ));
-        frame.push_str(&alloc::format!("{}\n", ui.message));
+        if ui.message.is_empty() && ui.coordinates {
+            ui.message = alloc::format!(
+                "scroll coordinates: y = {}/{} (tasks), x = {}/{} (fields)",
+                cw.first_task.min(ui.tasks.saturating_sub(1)) + 1,
+                ui.tasks,
+                cw.first_field.min(cw.fields.len() - 1) + 1,
+                cw.fields.len()
+            );
+        }
+        frame.push_str(&alloc::format!("{msg_on}{}{off}\n", ui.message));
         let summary_lines = frame.lines().count();
         let shown: Vec<usize> = if s.alt { (0..4).collect() } else { alloc::vec![s.cur] };
         // Each window: a title line when all four show, its header, rows.
@@ -880,22 +1122,37 @@ pub fn top(args: &[Vec<u8>]) -> i32 {
                 let mark = if wi == s.cur { "*" } else { " " };
                 frame.push_str(&alloc::format!("{mark}{}:{}\n", wi + 1, w.name));
             }
-            let head = header(&w.fields);
+            let head = header(w.shown_fields());
             if interactive {
-                frame.push_str(&alloc::format!("\x1b[7m{:<width$}\x1b[m\n", head, width = width.saturating_sub(1)));
+                let colour = w.colour_of(Part::Heads);
+                frame.push_str(&alloc::format!(
+                    "{colour}\x1b[7m{:<width$}\x1b[m\n",
+                    head,
+                    width = width.saturating_sub(1)
+                ));
             } else {
                 frame.push_str(&head);
                 frame.push('\n');
             }
             let rows = window_rows(&tasks, &shares, w, &s, &ctx);
             let room = per.saturating_sub(1 + titles);
-            for r in rows.iter().take(room) {
-                frame.push_str(&line(&w.fields, r, &ctx, &s).chars().take(width.saturating_sub(1)).collect::<String>());
+            if wi == s.cur {
+                (ui.tasks, ui.page) = (rows.len(), room);
+            }
+            let first = w.first_task.min(rows.len().saturating_sub(1));
+            for r in rows.iter().skip(first).take(room) {
+                if interactive {
+                    frame.push_str(&task_line(w, r, &ctx, &s, width.saturating_sub(1)));
+                } else {
+                    frame.push_str(&line(w.shown_fields(), r, &ctx, &s));
+                }
                 frame.push('\n');
             }
         }
         if let Some(f) = ui.fields {
             frame = fields_screen(&s, f.cursor, f.moving);
+        } else if let Some(c) = &ui.colours {
+            frame = colour_screen(&s, c);
         } else if ui.help {
             frame = alloc::format!("{HELP}\n");
         }
@@ -920,7 +1177,7 @@ pub fn top(args: &[Vec<u8>]) -> i32 {
             continue;
         }
         // Wait for the delay or a key (screens wait for a key alone).
-        let ms = if ui.fields.is_some() || ui.help { -1 } else { (s.delay * 1000.0) as i32 };
+        let ms = if ui.fields.is_some() || ui.colours.is_some() || ui.help { -1 } else { (s.delay * 1000.0) as i32 };
         let mut fds = [io::PollFd { fd: io::STDIN, events: io::POLLIN, revents: 0 }];
         if io::poll(&mut fds, ms).unwrap_or(0) == 0 {
             continue;
@@ -980,7 +1237,57 @@ pub fn key(k: u8, esc: bool, s: &mut Settings, ui: &mut Ui, ask: &dyn Fn(&str) -
         };
         return false;
     }
+    if let Some(mut c) = ui.colours {
+        let n = &mut c.colours[c.part as usize];
+        match (k, esc) {
+            (b'S', false) => c.part = Part::Summary,
+            (b'M', false) => c.part = Part::Messages,
+            (b'H', false) => c.part = Part::Heads,
+            (b'T', false) => c.part = Part::Tasks,
+            (b'X', false) => c.part = Part::Highlights,
+            (b'0'..=b'7', false) => *n = (k - b'0') as i8,
+            (b'@', false) => *n = -1,
+            (b'A', true) => *n = if *n >= 7 { -1 } else { *n + 1 },
+            (b'B', true) => *n = if *n <= -1 { 7 } else { *n - 1 },
+            (b'z', false) => c.colour = !c.colour,
+            (b'b', false) => c.hi_reverse = !c.hi_reverse,
+            (b'a' | b'w', false) => {
+                c.keep(s);
+                let next = if k == b'a' { (c.win + 1) % 4 } else { (c.win + 3) % 4 };
+                c = ColourScreen::of(s, next);
+            }
+            (b'\r' | b'\n', false) => {
+                c.keep(s);
+                s.cur = c.win;
+                ui.colours = None;
+                return false;
+            }
+            (b'q' | 0x1b, false) => {
+                s.cur = c.win;
+                ui.colours = None;
+                return false;
+            }
+            _ => {}
+        }
+        ui.colours = Some(c);
+        return false;
+    }
     if esc {
+        // Scrolling the current window: a task, a page, a field, the ends.
+        let (tasks, page) = (ui.tasks, ui.page.max(1));
+        let w = s.win_mut();
+        let last_task = tasks.saturating_sub(1);
+        match k {
+            b'A' => w.first_task = w.first_task.min(last_task).saturating_sub(1),
+            b'B' => w.first_task = (w.first_task + 1).min(last_task),
+            b'5' => w.first_task = w.first_task.min(last_task).saturating_sub(page),
+            b'6' => w.first_task = (w.first_task + page).min(last_task),
+            b'D' => w.first_field = w.first_field.min(w.fields.len() - 1).saturating_sub(1),
+            b'C' => w.first_field = (w.first_field + 1).min(w.fields.len() - 1),
+            b'H' | b'1' | b'7' => (w.first_task, w.first_field) = (0, 0),
+            b'F' | b'4' | b'8' => w.first_task = tasks.saturating_sub(page),
+            _ => {}
+        }
         return false;
     }
     let refused = |ui: &mut Ui| ui.message = String::from("Unavailable in secure mode");
@@ -1009,7 +1316,13 @@ pub fn key(k: u8, esc: bool, s: &mut Settings, ui: &mut Ui, ask: &dyn Fn(&str) -
         }
         b'E' => s.scale_summary = (s.scale_summary + 1) % UNITS.len(),
         b'e' => s.scale_tasks = (s.scale_tasks + 1) % (UNITS.len() - 1),
-        b'z' => s.colour = !s.colour,
+        b'z' => s.win_mut().colour = !s.win().colour,
+        b'Z' => ui.colours = Some(ColourScreen::of(s, s.cur)),
+        b'x' => s.win_mut().hi_column = !s.win().hi_column,
+        b'y' => s.win_mut().hi_running = !s.win().hi_running,
+        b'b' => s.win_mut().hi_reverse = !s.win().hi_reverse,
+        b'<' | b'>' => s.win_mut().move_sort(k == b'<'),
+        b'C' => ui.coordinates = !ui.coordinates,
         b'o' | b'O' => {
             let n = s.win().filters.len() + 1;
             let case = if k == b'O' { "" } else { "ignoring case" };
@@ -1210,7 +1523,8 @@ mod tests {
         for k in [b'A', b'a', b'V', b'E', b'e', b'z'] {
             key(k, false, &mut s, &mut ui, &none);
         }
-        assert!(s.alt && s.forest && s.colour);
+        // `z` coloured the window current then (1), before `a` moved on.
+        assert!(s.alt && s.forest && s.wins[1].colour && !s.wins[0].colour);
         assert_eq!((s.cur, s.scale_summary, s.scale_tasks), (1, 2, 1));
         key(b'w', false, &mut s, &mut ui, &none);
         key(b'g', false, &mut s, &mut ui, &|_| String::from("3"));
@@ -1234,5 +1548,105 @@ mod tests {
         s.secure = true;
         key(b'k', false, &mut s, &mut ui, &|_| String::from("1"));
         assert_eq!(ui.message, "Unavailable in secure mode");
+    }
+
+    #[test]
+    fn highlights_and_colours() {
+        let mut s = Settings::default();
+        let run = Proc { pid: 7, lwp: 7, state: b'R', comm: "top".into(), ..Default::default() };
+        let idle = Proc { pid: 8, lwp: 8, state: b'S', comm: "chalk".into(), ..Default::default() };
+        let w = s.win().clone();
+        // At first: running tasks bold, nothing else.
+        let l = task_line(&w, &Row::new(&run, 0.0), &ctx(), &s, 200);
+        assert!(l.starts_with("\x1b[m\x1b[1m    7") && l.ends_with("\x1b[m"), "{l:?}");
+        let l = task_line(&w, &Row::new(&idle, 0.0), &ctx(), &s, 200);
+        assert!(!l.contains("\x1b[1m") && !l.contains("\x1b[7m"));
+        // `x` the sort column, `b` in reverse, `z` in colour (red, the first highlights').
+        let mut ui = Ui::default();
+        let none = |_: &str| String::new();
+        for k in [b'x', b'b', b'z'] {
+            key(k, false, &mut s, &mut ui, &none);
+        }
+        let w = s.win().clone();
+        let l = task_line(&w, &Row::new(&idle, 2.5), &ctx(), &s, 200);
+        assert!(l.contains("\x1b[m\x1b[31m\x1b[7m  2.5"), "{l:?}");
+        // Cut to the width, escapes not counted.
+        let l = task_line(&w, &Row::new(&idle, 2.5), &ctx(), &s, 10);
+        let mut plain = String::new();
+        let mut in_escape = false;
+        for c in l.chars() {
+            match c {
+                '\x1b' => in_escape = true,
+                'm' if in_escape => in_escape = false,
+                c if !in_escape => plain.push(c),
+                _ => {}
+            }
+        }
+        assert_eq!(plain, "    8 root");
+        // `<` and `>` move the sort among the shown fields.
+        key(b'<', false, &mut s, &mut ui, &none);
+        assert_eq!(s.win().sort, F::S);
+        key(b'>', false, &mut s, &mut ui, &none);
+        key(b'>', false, &mut s, &mut ui, &none);
+        assert_eq!(s.win().sort, F::Mem);
+        // The settings keep each window's look.
+        s.wins[2].colours = [2, -1, 4, 6, 5];
+        assert_eq!(Settings::parse(&s.text()), s);
+        assert!(Settings::parse("colours=9,1,2,3,4\n").wins[0].colours == [-1, 1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn colour_screen_keys() {
+        let mut s = Settings::default();
+        let mut ui = Ui::default();
+        let none = |_: &str| String::new();
+        key(b'Z', false, &mut s, &mut ui, &none);
+        assert!(colour_screen(&s, &ui.colours.unwrap()).contains("\"Current Window\" = \x1b[7m 1:Def"));
+        // Tasks green, the heads one up from yellow; `q` forgets them.
+        for (k, esc) in [(b'2', false), (b'H', false), (b'A', true), (b'z', false), (b'q', false)] {
+            key(k, esc, &mut s, &mut ui, &none);
+        }
+        assert_eq!((s.win().colours, s.win().colour, ui.colours), (COLOURS, false, None));
+        // Again, kept with `a` for window 1, and window 2's with Enter.
+        for (k, esc) in [(b'Z', false), (b'2', false), (b'z', false), (b'a', false), (b'@', false), (b'\r', false)] {
+            key(k, esc, &mut s, &mut ui, &none);
+        }
+        assert_eq!((s.wins[0].colours[Part::Tasks as usize], s.wins[0].colour), (2, true));
+        assert_eq!((s.wins[1].colours[Part::Tasks as usize], s.cur), (-1, 1));
+    }
+
+    #[test]
+    fn scrolling() {
+        let mut s = Settings::default();
+        let mut ui = Ui { tasks: 50, page: 20, ..Ui::default() };
+        let none = |_: &str| String::new();
+        let press = |k: &[u8], s: &mut Settings, ui: &mut Ui| {
+            for (k, esc) in keys(k) {
+                key(k, esc, s, ui, &none);
+            }
+        };
+        press(b"\x1b[B\x1b[B\x1b[6~", &mut s, &mut ui);
+        assert_eq!(s.win().first_task, 22);
+        press(b"\x1b[6~\x1b[6~", &mut s, &mut ui);
+        assert_eq!(s.win().first_task, 49);
+        press(b"\x1b[5~\x1bOA", &mut s, &mut ui);
+        assert_eq!(s.win().first_task, 28);
+        press(b"\x1b[C\x1b[C", &mut s, &mut ui);
+        assert_eq!(s.win().shown_fields()[0], F::Pr);
+        press(b"\x1b[4~", &mut s, &mut ui);
+        assert_eq!((s.win().first_task, s.win().first_field), (30, 2));
+        press(b"\x1b[H", &mut s, &mut ui);
+        assert_eq!((s.win().first_task, s.win().first_field), (0, 0));
+        assert_eq!(keys(b"\x1b[5~\x1b[1~\x1b[F"), [(b'5', true), (b'1', true), (b'F', true)]);
+    }
+
+    #[test]
+    fn threads_in_the_forest() {
+        // Process 1 with thread 5; process 2 (under 1) with threads 3 and 4.
+        let t = |pid, lwp, ppid| Proc { pid, lwp, ppid, comm: alloc::format!("t{lwp}"), ..Default::default() };
+        let ps = [t(1, 1, 0), t(1, 5, 0), t(2, 2, 1), t(2, 3, 1), t(2, 4, 1)];
+        let rows: Vec<Row<'_>> = ps.iter().map(|p| Row::new(p, 0.0)).collect();
+        let shape: Vec<(u32, usize)> = forest(rows).iter().map(|r| (r.p.lwp, r.depth)).collect();
+        assert_eq!(shape, [(1, 0), (5, 1), (2, 1), (3, 2), (4, 2)]);
     }
 }

@@ -1076,3 +1076,16 @@ awk -M 'BEGIN { print 2^100, 100/7, 2^64 + 1, -7 % 3, 12345678901234567890123456
 echo 18446744073709551617 | awk -M '{ print $1 - 1, $1 * $1, ($1 > 18446744073709551616) }'
 awk '@load "readdir"; { print $2, $3 }' FS=/ tree | sort
 awk 'function f(p) { return p + 1 } BEGIN { print f(q), typeof(q); y = x; print typeof(x) }'
+# chattr and lsattr (e2fsprogs), on the host's file system: flags it can't hold fail on both sides alike
+if [ -x /usr/bin/lsattr ]; then mkdir at && touch at/f at/.h && mkdir at/d && ln -s f at/l && chattr +A at/f && chattr +d -- at/d && lsattr at/f; lsattr -l at/f; lsattr -d at/d; lsattr -dl at/d; lsattr -R at 2>&1; echo $?; lsattr -a at 2>&1 | sort; else echo skip; fi
+if [ -x /usr/bin/lsattr ]; then mkdir au && touch au/f && chattr -V +A au/f 2>/dev/null; chattr =d au/f; lsattr au/f; chattr -A +A au/f; echo $?; lsattr au/f; chattr -R -d au; lsattr au; else echo skip; fi
+if [ -x /usr/bin/lsattr ]; then touch av; chattr av; echo $?; chattr +q av; echo $?; chattr =A +d av; echo $?; chattr +A; echo $?; chattr +A nope; echo $?; lsattr nope; echo $?; lsattr -X; echo $?; else echo skip; fi
+if [ -x /usr/bin/lsattr ]; then mkfifo aw && lsattr aw; echo $?; chattr +A aw; echo $?; chattr -f +A aw; echo $?; else echo skip; fi
+# Checksums: escaped names, -z, --ignore-missing, and -c's reports
+mkdir sq && printf x > 'sq/a\b' && printf y > "$(printf 'sq/n\nl')" && printf r > "$(printf 'sq/c\rr')" && md5sum sq/* | od -c; sha256sum --tag sq/* | od -c; cksum -a sha1 sq/* | od -c; cksum --untagged -a md5 'sq/a\b'; cksum 'sq/a\b'; sum 'sq/a\b'
+mkdir sr && printf x > 'sr/a\b' && printf y > "$(printf 'sr/n\nl')" && md5sum -z sr/* d/a | od -c; md5sum --zero --tag d/a | od -c; cksum -z d/a d/nonl | od -c; b2sum -z -l 128 d/a | od -c
+mkdir ss && printf x > 'ss/a\b' && printf y > "$(printf 'ss/n\nl')" && md5sum ss/* d/a > ss.md5 && md5sum -c ss.md5; echo $?; sha1sum --tag ss/* > ss.sha1 && sha1sum -c ss.sha1; echo $?; cksum -a sha256 ss/* > ss.ck && cksum -c ss.ck; echo $?
+md5sum d/a d/nonl > m.md5 && mv d/nonl d/gone && md5sum -c m.md5; echo $?; md5sum -c --ignore-missing m.md5; echo $?; md5sum -c --status m.md5; echo $?; md5sum -c --quiet --ignore-missing m.md5; echo $?
+md5sum d/nonl > n.md5 && mv d/nonl d/gone && md5sum -c --ignore-missing n.md5; echo $?; md5sum --ignore-missing d/a; echo $?; md5sum -c -z n.md5; echo $?
+{ md5sum d/a; echo junk; echo junk2; echo '00000000000000000000000000000000  d/a'; echo 'abc  d/a'; } > j.md5; md5sum -c j.md5; echo $?; md5sum -c --status j.md5; echo $?; printf 'junk\n' > k.md5; md5sum -c k.md5; echo $?
+md5sum d/a | tr a-f A-F > u.md5 && md5sum -c u.md5; sed 's/  / /' u.md5 > u1.md5 && md5sum -c u1.md5; sha256sum --tag d/a > t.sum && md5sum -c t.sum; echo $?; md5sum nope d/a; echo $?; md5sum 'no pe'; echo $?

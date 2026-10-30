@@ -128,6 +128,23 @@ if [ -d /sys/firmware/efi ]; then
     check efivars_delete "$(ls $ev | grep -c '^SlateTest-')" 0
     # Vendor variables are immutable, appends append (tests/user/efivars.c).
     /test/efivars $ev
+    # Slate's own lsattr and chattr: a vendor variable seen through a new
+    # mount is immutable until `chattr -i`.
+    printf '\007\000\000\000x' > $t
+    mkdir -p /tmp/ev3 && mount -t efivarfs efivarfs /tmp/ev3
+    t3=/tmp/ev3/$(basename $t)
+    check lsattr_immutable "$(lsattr $t3)" "----i----------------- $t3"
+    check lsattr_long "$(lsattr -l $t3)" "$t3 Immutable"
+    check chattr_refused "$(rm $t3 2>/dev/null; ls $ev | grep -c '^SlateTest-')" 1
+    check chattr_clear "$(chattr -V -i $t3 2>/dev/null)" "Flags of $t3 set as ----------------------"
+    check chattr_cleared "$(rm $t3 && ls $ev | grep -c '^SlateTest-')" 0
+    check chattr_unknown "$(chattr +a /tmp/ev3 2>&1; echo $?)" "chattr: the 'a' flag is not supported on SlateOS
+1"
+    umount /tmp/ev3 && rmdir /tmp/ev3
+    : > /tmp/attrs
+    check lsattr_no_flags "$(lsattr /tmp/attrs 2>&1; echo $?)" "lsattr: Operation not supported While reading flags on /tmp/attrs
+1"
+    rm /tmp/attrs
     check slate_boot_list "$(slate-boot list | grep -c '^BootOrder ')" 1
 else
     check efivars_bios "$(ls /sys/firmware 2>/dev/null | grep -c efi)" 0

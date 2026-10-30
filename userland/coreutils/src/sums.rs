@@ -8,13 +8,22 @@
 //! `--base64`, `--raw`, `-l`, `-c`); and sum's BSD (`-r`, the default) and System V (`-s`)
 //! checksums. Hashes come from libs/hash, files are read a block at a
 //! time, and the output follows what GNU's programs print.
+//!
+//! As GNU's do (observed): a digest line whose file name holds a
+//! backslash, a newline or a carriage return escapes them (`\\`, `\n`,
+//! `\r`) and starts with a backslash; `-z` ends lines with NUL instead and
+//! escapes nothing. `-c` reads escaped lines back, says which files it
+//! couldn't read (`FAILED open or read`) and which lines were improperly
+//! formatted, and with `--ignore-missing` passes over files that aren't
+//! there.
 
 use alloc::string::String;
 use alloc::vec::Vec;
 
 use slate_rt::{Errno, fs, io, lossy, println};
 
-use crate::util::{Opt, Parser, bad_option, error, error_path, lines, read_input};
+use crate::printf::quote_gnu;
+use crate::util::{Opt, Parser, bad_option, error, lines, read_input};
 
 pub use slate_hash::{hex, md5, sha1, sha224, sha256, sha384, sha512};
 
@@ -61,6 +70,20 @@ impl Algo {
     /// one of the old checksums.
     fn is_digest(self) -> bool {
         !matches!(self, Algo::Sysv | Algo::Bsd | Algo::Crc | Algo::Crc32b)
+    }
+
+    /// A digest's length in bytes (None for the old checksums).
+    fn digest_len(self) -> Option<usize> {
+        Some(match self {
+            Algo::Md5 => 16,
+            Algo::Sha1 => 20,
+            Algo::Sha224 => 28,
+            Algo::Sha256 | Algo::Sm3 => 32,
+            Algo::Sha384 => 48,
+            Algo::Sha512 => 64,
+            Algo::Blake2b(n) | Algo::Sha3(n) => n,
+            _ => return None,
+        })
     }
 
     /// The name tagged lines start with.
@@ -269,6 +292,60 @@ fn base64(b: &[u8]) -> String {
     s
 }
 
+/// `prog: 'name': error`, the name quoted as GNU's messages quote it.
+fn error_name(name: &[u8], e: Errno) {
+    error(format_args!("{}: {}", lossy(&quote_gnu(name)), e));
+}
+
+/// A file name as a digest line holds it: `\`, newline and carriage
+/// return escaped; whether anything was (the line then starts with `\`).
+pub fn escape_name(name: &[u8]) -> (Vec<u8>, bool) {
+    let mut out = Vec::with_capacity(name.len());
+    let mut escaped = false;
+    for &c in name {
+        let e = match c {
+            b'\\' => b'\\',
+            b'\n' => b'n',
+            b'\r' => b'r',
+            c => {
+                out.push(c);
+                continue;
+            }
+        };
+        out.extend_from_slice(&[b'\\', e]);
+        escaped = true;
+    }
+    (out, escaped)
+}
+
+/// An escaped name read back; None for an escape GNU doesn't write.
+pub fn unescape_name(name: &[u8]) -> Option<Vec<u8>> {
+    let mut out = Vec::with_capacity(name.len());
+    let mut it = name.iter();
+    while let Some(&c) = it.next() {
+        if c != b'\\' {
+            out.push(c);
+            continue;
+        }
+        out.push(match it.next()? {
+            b'\\' => b'\\',
+            b'n' => b'\n',
+            b'r' => b'\r',
+            _ => return None,
+        });
+    }
+    Some(out)
+}
+
+/// Whether `want` is a digest of `len` bytes, in hexadecimal (either
+/// case) or base64.
+fn well_formed(want: &[u8], len: usize) -> bool {
+    let hex = want.len() == 2 * len && want.iter().all(u8::is_ascii_hexdigit);
+    let b64 =
+        want.len() == 4 * len.div_ceil(3) && want.iter().all(|&c| c.is_ascii_alphanumeric() || b"+/=".contains(&c));
+    hex || b64
+}
+
 /// How a digest is written.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Style {
@@ -280,14 +357,17 @@ enum Style {
 
 /// One file's line: `name` is None for standard input given as no file
 /// (the checksums leave it out).
-fn line(algo: Algo, sum: &Sum, name: Option<&[u8]>, style: Style, b64: bool) -> String {
+/// With `zero` (`-z`) names are not escaped.
+fn line(algo: Algo, sum: &Sum, name: Option<&[u8]>, style: Style, b64: bool, zero: bool) -> String {
     match sum {
         Sum::Digest(d) => {
             let hash = if b64 { base64(d) } else { hex(d) };
-            let name = lossy(name.unwrap_or(b"-")).into_owned();
+            let raw = name.unwrap_or(b"-");
+            let (name, escaped) = if zero { (raw.to_vec(), false) } else { escape_name(raw) };
+            let (name, mark) = (lossy(&name).into_owned(), if escaped { "\\" } else { "" });
             match style {
-                Style::Tagged => alloc::format!("{} ({name}) = {hash}", algo.tag()),
-                Style::Untagged => alloc::format!("{hash}  {name}"),
+                Style::Tagged => alloc::format!("{mark}{} ({name}) = {hash}", algo.tag()),
+                Style::Untagged => alloc::format!("{mark}{hash}  {name}"),
             }
         }
         Sum::Check(c, size) => {
@@ -305,66 +385,131 @@ fn line(algo: Algo, sum: &Sum, name: Option<&[u8]>, style: Style, b64: bool) -> 
     }
 }
 
+/// How `-c` reports.
+#[derive(Clone, Copy, Default)]
+struct CheckOpts {
+    quiet: bool,
+    status_only: bool,
+    ignore_missing: bool,
+}
+
+/// `N thing` or `N things`.
+fn count(n: usize, one: &str, many: &str) -> String {
+    if n == 1 { alloc::format!("1 {one}") } else { alloc::format!("{n} {many}") }
+}
+
+/// One line of a checksum list: its algorithm, the digest it wants and
+/// the file (unescaped); None if it isn't one `algo` (None: cksum's, any
+/// tagged line) can check.
+fn parse_check_line(l: &[u8], algo: Option<Algo>) -> Option<(Algo, &[u8], Vec<u8>)> {
+    let (l, escaped) = match l.strip_prefix(b"\\") {
+        Some(rest) => (rest, true),
+        None => (l, false),
+    };
+    // `NAME (FILE) = HASH`, or `HASH  FILE` for a program's own.
+    let tagged = l.iter().position(|&c| c == b' ').and_then(|sp| {
+        let a = Algo::by_tag(&l[..sp])?;
+        let r = l[sp..].strip_prefix(b" (")?;
+        let eq = r.windows(4).rposition(|w| w == b") = ")?;
+        Some((a, &r[eq + 4..], &r[..eq]))
+    });
+    let (a, want, target): (Algo, &[u8], &[u8]) = match (tagged, algo) {
+        (Some((a, _, _)), Some(own)) if !matches!((a, own), (Algo::Blake2b(_), Algo::Blake2b(_))) && a != own => {
+            return None;
+        }
+        (Some(t), _) => t,
+        (None, Some(own)) => {
+            let sp = l.iter().position(|&c| c == b' ')?;
+            let (want, rest) = (&l[..sp], &l[sp + 1..]);
+            // `HASH  FILE`, `HASH *FILE` (binary) or `HASH FILE`.
+            let target = rest.strip_prefix(b" ").or_else(|| rest.strip_prefix(b"*")).unwrap_or(rest);
+            // b2sum's length is the digest's.
+            let own = match own {
+                Algo::Blake2b(_) if want.len() % 2 == 0 && want.len() <= 128 && !want.is_empty() => {
+                    Algo::Blake2b(want.len() / 2)
+                }
+                o => o,
+            };
+            (own, want, target)
+        }
+        (None, None) => return None,
+    };
+    if target.is_empty() || !well_formed(want, a.digest_len()?) {
+        return None;
+    }
+    let target = if escaped { unescape_name(target)? } else { target.to_vec() };
+    Some((a, want, target))
+}
+
 /// `-c`: check the lines of each file, `algo` the program's own (None:
 /// cksum's, which reads the algorithm from each tagged line).
-fn check(files: &[Vec<u8>], algo: Option<Algo>, quiet: bool, status_only: bool) -> i32 {
+fn check(files: &[Vec<u8>], algo: Option<Algo>, o: CheckOpts) -> i32 {
     let mut status = 0;
     for file in files {
         let data = match read_input(file) {
             Ok(d) => d,
             Err(e) => {
-                error_path(file, e);
+                error_name(file, e);
                 status = 1;
                 continue;
             }
         };
-        let mut bad = 0;
+        let (mut bad, mut unread, mut improper, mut proper, mut verified) = (0, 0, 0, 0, 0);
         for l in lines(&data, b'\n') {
-            // `NAME (FILE) = HASH`, or `HASH  FILE` for a program's own.
-            let tagged = l.iter().position(|&c| c == b' ').and_then(|sp| {
-                let a = Algo::by_tag(&l[..sp])?;
-                let r = l[sp..].strip_prefix(b" (")?;
-                let eq = r.windows(4).rposition(|w| w == b") = ")?;
-                Some((a, &r[eq + 4..], &r[..eq]))
-            });
-            let (a, want, target): (Algo, &[u8], &[u8]) = match (tagged, algo) {
-                (Some((a, _, _)), Some(own))
-                    if !matches!((a, own), (Algo::Blake2b(_), Algo::Blake2b(_))) && a != own =>
-                {
+            let Some((a, want, target)) = parse_check_line(l, algo) else {
+                improper += 1;
+                continue;
+            };
+            proper += 1;
+            let (shown, escaped) = escape_name(&target);
+            let shown = alloc::format!("{}{}", if escaped { "\\" } else { "" }, lossy(&shown));
+            let ok = match sum_file(&target, a) {
+                Ok(Sum::Digest(d)) => hex(&d).as_bytes().eq_ignore_ascii_case(want) || base64(&d).as_bytes() == want,
+                Ok(Sum::Check(..)) => false,
+                Err(Errno::ENOENT) if o.ignore_missing => continue,
+                Err(e) => {
+                    // In order with the lines before it, on a terminal too.
+                    io::flush_stdout();
+                    error_name(&target, e);
+                    if !o.status_only {
+                        println!("{shown}: FAILED open or read");
+                    }
+                    unread += 1;
                     continue;
                 }
-                (Some(t), _) => t,
-                (None, Some(own)) => {
-                    let Some(sp) = l.iter().position(|&c| c == b' ') else { continue };
-                    let (want, rest) = (&l[..sp], &l[sp..]);
-                    let target = rest.strip_prefix(b"  ").or_else(|| rest.strip_prefix(b" *")).unwrap_or(rest);
-                    // b2sum's length is the digest's.
-                    let own = match own {
-                        Algo::Blake2b(_) if want.len() % 2 == 0 && want.len() <= 128 => Algo::Blake2b(want.len() / 2),
-                        o => o,
-                    };
-                    (own, want, target)
-                }
-                (None, None) => continue,
             };
-            let ok = match sum_file(target, a) {
-                Ok(Sum::Digest(d)) => hex(&d).as_bytes() == want || base64(&d).as_bytes() == want,
-                _ => false,
-            };
+            verified += 1;
             if !ok {
                 bad += 1;
             }
-            if !status_only && (!ok || !quiet) {
-                println!("{}: {}", lossy(target), if ok { "OK" } else { "FAILED" });
+            if !o.status_only && (!ok || !o.quiet) {
+                println!("{shown}: {}", if ok { "OK" } else { "FAILED" });
             }
         }
-        if bad > 0 {
-            if !status_only {
-                error(format_args!(
-                    "WARNING: {bad} computed checksum{} did NOT match",
-                    if bad == 1 { "" } else { "s" }
-                ));
+        io::flush_stdout();
+        if proper == 0 {
+            error(format_args!("{}: no properly formatted checksum lines found", lossy(&quote_gnu(file))));
+            status = 1;
+            continue;
+        }
+        if !o.status_only {
+            if improper > 0 {
+                let what = count(improper, "line is", "lines are");
+                error(format_args!("WARNING: {what} improperly formatted"));
             }
+            if unread > 0 {
+                error(format_args!("WARNING: {} could not be read", count(unread, "listed file", "listed files")));
+            }
+            if bad > 0 {
+                let what = count(bad, "computed checksum", "computed checksums");
+                error(format_args!("WARNING: {what} did NOT match"));
+            }
+        }
+        if o.ignore_missing && verified == 0 {
+            error(format_args!("{}: no file was verified", lossy(&quote_gnu(file))));
+            status = 1;
+        }
+        if bad > 0 || unread > 0 {
             status = 1;
         }
     }
@@ -372,9 +517,29 @@ fn check(files: &[Vec<u8>], algo: Option<Algo>, quiet: bool, status_only: bool) 
     status
 }
 
+/// Print one output line, ending in NUL with `-z`.
+fn emit(l: &str, zero: bool) {
+    io::out(l.as_bytes());
+    io::out(if zero { b"\0" } else { b"\n" });
+}
+
+/// `-z` and `--ignore-missing` against `-c`: GNU's usage errors.
+fn check_only(checking: bool, zero: bool, ignore_missing: bool) -> Option<i32> {
+    let msg = if checking && zero {
+        "the --zero option is not supported when verifying checksums"
+    } else if !checking && ignore_missing {
+        "the --ignore-missing option is meaningful only when verifying checksums"
+    } else {
+        return None;
+    };
+    error(msg);
+    slate_rt::eprintln!("Try '{} --help' for more information.", slate_rt::prog_name());
+    Some(1)
+}
+
 /// md5sum, sha*sum and b2sum (`blake2b`: `-l BITS` is allowed).
 fn sum_main(args: &[Vec<u8>], mut algo: Algo) -> i32 {
-    let (mut checking, mut quiet, mut status_only, mut tag) = (false, false, false, false);
+    let (mut checking, mut opts, mut tag, mut zero) = (false, CheckOpts::default(), false, false);
     let mut files = Vec::new();
     let blake = matches!(algo, Algo::Blake2b(_));
     let mut p = Parser::new(args, if blake { b"l" } else { b"" });
@@ -391,27 +556,33 @@ fn sum_main(args: &[Vec<u8>], mut algo: Algo) -> i32 {
                 None => return 1,
             },
             Opt::Long(l) if l == "check" => checking = true,
-            Opt::Long(l) if l == "quiet" => quiet = true,
-            Opt::Long(l) if l == "status" => status_only = true,
+            Opt::Long(l) if l == "quiet" => opts.quiet = true,
+            Opt::Long(l) if l == "status" => opts.status_only = true,
+            Opt::Long(l) if l == "ignore-missing" => opts.ignore_missing = true,
+            Opt::Short(b'z') => zero = true,
+            Opt::Long(l) if l == "zero" => zero = true,
             Opt::Long(l) if l == "tag" => tag = true,
             Opt::Long(l) if l == "binary" || l == "text" || l == "untagged" => {}
             Opt::Operand(x) => files.push(x),
             o => return bad_option(&o),
         }
     }
+    if let Some(r) = check_only(checking, zero, opts.ignore_missing) {
+        return r;
+    }
     if files.is_empty() {
         files.push(b"-".to_vec());
     }
     if checking {
-        return check(&files, Some(algo), quiet, status_only);
+        return check(&files, Some(algo), opts);
     }
     let style = if tag { Style::Tagged } else { Style::Untagged };
     let mut status = 0;
     for file in &files {
         match sum_file(file, algo) {
-            Ok(s) => println!("{}", line(algo, &s, Some(file), style, false)),
+            Ok(s) => emit(&line(algo, &s, Some(file), style, false, zero), zero),
             Err(e) => {
-                error_path(file, e);
+                error_name(file, e);
                 status = 1;
             }
         }
@@ -481,7 +652,7 @@ enum Named {
 /// cksum: POSIX's CRC, or `-a`'s algorithm.
 pub fn cksum(args: &[Vec<u8>]) -> i32 {
     let mut named = Named::One(Algo::Crc);
-    let (mut checking, mut quiet, mut status_only) = (false, false, false);
+    let (mut checking, mut opts, mut zero) = (false, CheckOpts::default(), false);
     let (mut untagged, mut b64, mut raw) = (false, false, false);
     let mut length_arg: Option<Vec<u8>> = None;
     let mut files = Vec::new();
@@ -522,8 +693,11 @@ pub fn cksum(args: &[Vec<u8>]) -> i32 {
             Opt::Long(l) if l == "length" => length_arg = p.value(),
             Opt::Short(b'c') => checking = true,
             Opt::Long(l) if l == "check" => checking = true,
-            Opt::Long(l) if l == "quiet" => quiet = true,
-            Opt::Long(l) if l == "status" => status_only = true,
+            Opt::Long(l) if l == "quiet" => opts.quiet = true,
+            Opt::Long(l) if l == "status" => opts.status_only = true,
+            Opt::Long(l) if l == "ignore-missing" => opts.ignore_missing = true,
+            Opt::Short(b'z') => zero = true,
+            Opt::Long(l) if l == "zero" => zero = true,
             Opt::Long(l) if l == "untagged" => untagged = true,
             Opt::Long(l) if l == "tag" => untagged = false,
             Opt::Long(l) if l == "base64" => b64 = true,
@@ -567,6 +741,9 @@ pub fn cksum(args: &[Vec<u8>]) -> i32 {
             }
         }
     };
+    if let Some(r) = check_only(checking, zero, opts.ignore_missing) {
+        return r;
+    }
     let named = !files.is_empty();
     if files.is_empty() {
         files.push(b"-".to_vec());
@@ -576,7 +753,7 @@ pub fn cksum(args: &[Vec<u8>]) -> i32 {
             error("--check is not supported with --algorithm={bsd,sysv,crc,crc32b}");
             return 1;
         }
-        return check(&files, if algo == Algo::Crc { None } else { Some(algo) }, quiet, status_only);
+        return check(&files, if algo == Algo::Crc { None } else { Some(algo) }, opts);
     }
     if raw && files.len() > 1 {
         error("the --raw option is not supported with multiple files");
@@ -594,9 +771,9 @@ pub fn cksum(args: &[Vec<u8>]) -> i32 {
                 };
                 io::out(&bytes);
             }
-            Ok(s) => println!("{}", line(algo, &s, named.then_some(file.as_slice()), style, b64)),
+            Ok(s) => emit(&line(algo, &s, named.then_some(file.as_slice()), style, b64, zero), zero),
             Err(e) => {
-                error_path(file, e);
+                error_name(file, e);
                 status = 1;
             }
         }
@@ -626,9 +803,9 @@ pub fn sum(args: &[Vec<u8>]) -> i32 {
     let mut status = 0;
     for file in &files {
         match sum_file(file, algo) {
-            Ok(s) => println!("{}", line(algo, &s, named.then_some(file.as_slice()), Style::Untagged, false)),
+            Ok(s) => println!("{}", line(algo, &s, named.then_some(file.as_slice()), Style::Untagged, false, false)),
             Err(e) => {
-                error_path(file, e);
+                error_name(file, e);
                 status = 1;
             }
         }
@@ -652,6 +829,32 @@ mod tests {
             "ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f"
         );
         assert_eq!(hex(&sha512(&[b'a'; 200])).len(), 128);
+    }
+
+    #[test]
+    fn escaped_names() {
+        assert_eq!(escape_name(b"plain"), (b"plain".to_vec(), false));
+        assert_eq!(escape_name(b"a\\b\nc\rd"), (b"a\\\\b\\nc\\rd".to_vec(), true));
+        assert_eq!(unescape_name(b"a\\\\b\\nc\\rd").unwrap(), b"a\\b\nc\rd");
+        assert_eq!(unescape_name(b"a\\qb"), None);
+        assert_eq!(unescape_name(b"a\\"), None);
+    }
+
+    #[test]
+    fn check_lines() {
+        let h = "9dd4e461268c8034f5c8564e155c67a6";
+        let p = |l: &str| parse_check_line(l.as_bytes(), Some(Algo::Md5)).map(|(_, w, t)| (w.to_vec(), t));
+        assert_eq!(p(&alloc::format!("{h}  f")).unwrap().1, b"f");
+        assert_eq!(p(&alloc::format!("{h} *f")).unwrap().1, b"f");
+        assert_eq!(p(&alloc::format!("{h} f")).unwrap().1, b"f");
+        assert_eq!(p(&alloc::format!("\\{h}  a\\\\b\\nc")).unwrap().1, b"a\\b\nc");
+        assert_eq!(p(&alloc::format!("{}  f", h.to_uppercase())).unwrap().0, h.to_uppercase().as_bytes());
+        assert_eq!(p(&alloc::format!("\\MD5 (a\\\\b) = {h}")).unwrap().1, b"a\\b");
+        // Wrong length, a bad escape, another program's tag: improper.
+        assert!(p("abc  f").is_none());
+        assert!(p(&alloc::format!("\\{h}  a\\qb")).is_none());
+        assert!(p(&alloc::format!("SHA1 (f) = {h}")).is_none());
+        assert!(p("junk").is_none());
     }
 
     #[test]

@@ -739,6 +739,15 @@ fn browser_setup() -> Result<(), String> {
     if !RUNTIME_NEEDS.iter().all(|p| fs::exists(p.as_bytes())) {
         run_saying(&["/bin/slate-linux", "setup", "flatpak"])?;
     }
+    // Setup said it was done: what the browser needs must be there now,
+    // or the next step fails with less to go on.
+    for p in RUNTIME_NEEDS {
+        if let Err(e) = fs::lstat(p.as_bytes()) {
+            let said = format!("the Linux runtime was set up, but {p} isn't there ({e})");
+            slate_rt::eprintln!("slate-brokerd: browser=setup: {said}");
+            return Err(said);
+        }
+    }
     Ok(())
 }
 
@@ -1316,13 +1325,13 @@ fn action(f: &[&[u8]], pid: i32, uid: u32, agent: &mut Option<Agent>) -> Result<
         // Full graphics starts on trial (ADR 0173): the next start asks
         // whether to keep it (slate-graphics-trial), and goes back to
         // standard graphics without an answer.
-        ("graphics", Some("full")) => run_action(&["/bin/quarry", "install", "slate-firmware-gpu"]).and_then(|()| {
+        ("graphics", Some("full")) => run_saying(&["/bin/quarry", "install", "slate-firmware-gpu"]).and_then(|()| {
             let _ = fs::mkdir(b"/var/lib/slate", 0o755);
             fs::write_file(GRAPHICS_TRIAL.as_bytes(), b"full\n", 0o644).map_err(|e| format!("{GRAPHICS_TRIAL}: {e}"))
         }),
         ("graphics", Some(_)) => {
             let _ = fs::unlink(GRAPHICS_TRIAL.as_bytes());
-            run_action(&["/bin/quarry", "remove", "slate-firmware-gpu"])
+            run_saying(&["/bin/quarry", "remove", "slate-firmware-gpu"])
         }
         ("compat", Some(a)) => run_action(&["/bin/slate-compat", a, "--yes"]),
         ("disk", Some(words)) => {

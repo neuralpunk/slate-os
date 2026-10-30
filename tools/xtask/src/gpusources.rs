@@ -11,7 +11,9 @@
 //! directories are fetched; and, family `mediatek` (not fetched by
 //! default), drivers/bluetooth for MediaTek's Bluetooth firmware download,
 //! of which only btmtk.c, btmtk.h and btusb.c's MediaTek parts may be read
-//! (ADR 0176).
+//! (ADR 0176); and, family `intel-nic` (not fetched by default),
+//! drivers/net/ethernet/intel/igc for Intel's I225 and I226 network
+//! controllers (ADR 0178).
 
 use std::path::Path;
 use std::process::Command;
@@ -72,6 +74,13 @@ const SOURCES: &[Source] = &[
         url: "https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git",
         version: "v7.2.12",
         paths: &["drivers/bluetooth"],
+    },
+    Source {
+        family: "intel-nic",
+        name: "linux",
+        url: "https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git",
+        version: "v7.2.12",
+        paths: &["drivers/net/ethernet/intel/igc"],
     },
     Source {
         family: "dp",

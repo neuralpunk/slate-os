@@ -79,6 +79,9 @@ pub fn bluetooth_scenario(o: &Opts) -> Result {
         con.wait_for("strata-settings: bluetooth: Paired with Ada's Phone.", 15)?;
         con.run("ls /var/lib/slate/bluetooth/devices | tr '\\n' ,", &format!("{keyboard},{phone},"), 10)?;
         con.run("stat -c %a /var/lib/slate/bluetooth/devices/*", "600", 10)?;
+        // The store is root's alone, the folder above it everyone's way to
+        // the Linux runtime's.
+        con.run("stat -c %a /var/lib/slate /var/lib/slate/bluetooth | tr '\\n' -", "755-700-", 10)?;
         // Forget the keyboard: now second among the paired (by name),
         // where the keyboard's row stays; Delete asks, Enter does it.
         pause(1200);
