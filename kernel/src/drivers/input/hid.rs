@@ -119,6 +119,9 @@ fn key_of(u: u32) -> Option<Key> {
 fn all_keys() -> Vec<u16> {
     let mut v = input::keyboard_keys();
     v.extend(CONSUMER_KEYS.iter().chain(SYSTEM_KEYS).map(|e| e.1));
+    // (The volume keys are in both.)
+    v.sort_unstable();
+    v.dedup();
     v
 }
 
@@ -151,12 +154,12 @@ fn press(st: &mut State, code: u16, release: bool, kbd: Option<&input::Device>) 
         st.caps = st.decoder.caps_lock();
         input::console_caps_lock(st.caps);
     }
-    if input::console_input()
-        && let Some(tty) = crate::fs::tty::console_if_ready()
-    {
-        for b in bytes {
-            tty.receive(b);
-        }
+    // To the virtual console in front, unless the key switches VTs (ADR
+    // 0185).
+    let console = input::console_input();
+    let set1 = (code as u8) | if release { 0x80 } else { 0 };
+    if !crate::fs::vt::key(set1, code > 0xFF, console) && console {
+        crate::fs::vt::type_bytes(&bytes);
     }
 }
 

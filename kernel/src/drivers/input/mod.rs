@@ -87,8 +87,14 @@ pub fn set1_to_evdev(code: u8, extended: bool) -> u16 {
     if !extended {
         return if (0x01..=0x58).contains(&code) { u16::from(code) } else { 0 };
     }
+    // The multimedia keys' extended codes are Microsoft's Keyboard Scan
+    // Code Specification's (its USB HID to PS/2 table: Mute E0 20, Volume
+    // Down E0 2E, Volume Up E0 30; ADR 0186).
     match code {
         0x1C => 96,  // <KPEN> 104
+        0x20 => 113, // <MUTE> 121
+        0x2E => 114, // <VOL-> 122
+        0x30 => 115, // <VOL+> 123
         0x1D => 97,  // <RCTL> 105
         0x35 => 98,  // <KPDV> 106
         0x37 => 99,  // <PRSC> 107
@@ -113,7 +119,7 @@ pub fn set1_to_evdev(code: u8, extended: bool) -> u16 {
 /// Every key code a PC keyboard can send through [`set1_to_evdev`].
 pub fn keyboard_keys() -> Vec<u16> {
     let mut v: Vec<u16> = (1..=0x58).collect();
-    v.extend([96, 97, 98, 99, 100, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 125, 126, 127]);
+    v.extend([96, 97, 98, 99, 100, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 113, 114, 115, 125, 126, 127]);
     v
 }
 
@@ -456,6 +462,10 @@ impl Device {
     }
 
     pub fn key(&self, code: u16, down: bool) {
+        // Esc ends the boot splash (ADR 0186).
+        if down && code == 1 {
+            crate::drivers::fbcon::splash_esc();
+        }
         if code != 0 {
             self.emit(EV_KEY, code, i32::from(down));
             if down && is_ctrl_alt_del(&self.state.lock().keys, code) {

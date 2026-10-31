@@ -37,8 +37,9 @@ use crate::qemu::{Console, PROMPT};
 use crate::{Result, run_cmd, target_dir};
 
 /// Alpine packages for the Flatpak workbench: Flatpak (with bubblewrap
-/// and OSTree), D-Bus for its session bus, and Sway for its windows.
-pub const PACKAGES: &str = "sway xwayland font-dejavu flatpak dbus";
+/// and OSTree), D-Bus for its session bus, Sway for its windows, and the
+/// person's sound server (ADR 0185).
+pub const PACKAGES: &str = "sway xwayland font-dejavu flatpak dbus pipewire wireplumber pipewire-pulse";
 
 /// The app the acceptance installs: small, and a window of its own.
 const APP: &str = "fi.skyjake.Lagrange";
@@ -250,6 +251,7 @@ fn checks(con: &mut Console, mon: &std::path::Path) -> Result<Vec<(&'static str,
         con.run(&as_person(&format!("slate-flatpak rollback {APP}")), &format!("back to {parent}"), 1200).is_ok(),
     ));
     out.push(("rolled-back", con.run(&as_person("slate-flatpak list"), &parent[..12], 120).is_ok()));
+    out.push(("sound", sound_check(con)?));
     // Its window in the person's own Strata, from Flatpak's sandbox,
     // titled by the app: root logs out, the person logs in on the console
     // (a console session, which seatd gives the display), their profile
@@ -318,6 +320,43 @@ fn checks(con: &mut Console, mon: &std::path::Path) -> Result<Vec<(&'static str,
     system_checks(con, &mut out)?;
     browser_checks(con, &mut out)?;
     Ok(out)
+}
+
+/// The person's sound server (ADR 0185) as Strata starts it at login,
+/// and the app's sandbox playing a 660 Hz tone through it for 2 s (Flatpak
+/// hands the sandbox its PulseAudio socket; the tone is looked for in
+/// QEMU's recording afterwards). The server stops after.
+fn sound_check(con: &mut Console) -> Result<bool> {
+    con.run(
+        &format!(
+            "usermod -aG seat {PERSON} && mkdir -p -m 0755 /run/user && \
+             install -d -m 0700 -o {PERSON} -g {PERSON} /run/user/$(id -u {PERSON}) && echo rundir$((1+1))"
+        ),
+        "rundir2",
+        30,
+    )?;
+    con.run(
+        &format!(
+            "su {PERSON} -c 'slate-linux sound' > /tmp/person-sound.log 2>&1 & \
+             for i in $(seq 100); do [ -S /run/user/$(id -u {PERSON})/pulse/native ] && break; sleep 0.2; done; \
+             ls /run/user/$(id -u {PERSON})/pulse"
+        ),
+        "native",
+        40,
+    )?;
+    let played = con
+        .run(
+            &as_person(&format!(
+                "slate-linux run flatpak run --command=sh {APP} -c 'pactl info | grep -i server.name; \
+                 gst-launch-1.0 -q audiotestsrc freq=660 num-buffers=86 ! audio/x-raw,rate=44100 ! pulsesink \
+                 && echo played-$((600+60))'"
+            )),
+            "played-660",
+            180,
+        )
+        .is_ok();
+    con.run("kill %1; wait; echo quiet$((1+1))", "quiet2", 20)?;
+    Ok(played)
 }
 
 /// The system installation (ADR 0114's addendum): root installs the app
@@ -636,7 +675,10 @@ pub fn accept() -> Result {
     // A monitor, for the keys typed into the person's Strata.
     let mon = dir().join("accept-monitor.sock");
     let _ = std::fs::remove_file(&mon);
-    let mut con = crate::desktop::boot(&disk, Some(&mon), false)?;
+    // The person's sound server plays into a recording (ADR 0185).
+    let wav = dir().join("accept-sound.wav");
+    let _ = std::fs::remove_file(&wav);
+    let mut con = crate::desktop::boot_with_sound(&disk, Some(&mon), &wav)?;
     let mut failed = Vec::new();
     let r = (|| -> Result {
         con.login()?;
@@ -656,6 +698,12 @@ pub fn accept() -> Result {
         con.kill();
         return Err(format!("flatpak: {e} (transcript in target/flatpak/accept.log)"));
     }
+    let heard = crate::sound::find_tones(&wav, &[660.0]).map(|t| t[0]).unwrap_or(0.0);
+    let ok = heard >= 1.5;
+    println!("ACCEPT: {} m30::sound::flatpak_app_heard ({heard:.2} s of 660 Hz)", if ok { "PASS" } else { "FAIL" });
+    if !ok {
+        failed.push("flatpak_app_heard");
+    }
     if !failed.is_empty() {
         return Err(format!(
             "M28 Flatpak acceptance checks failed: {} (transcript in target/flatpak/accept.log)",
@@ -664,7 +712,8 @@ pub fn accept() -> Result {
     }
     println!(
         "xtask: accept: Flatpak and AppImage passed (install, update, rollback, a window in Strata, an AppImage; an app for everyone; \
-         Firefox from Flathub through the Web Browser, a page under its own sandbox, a background update; {:.0}s)",
+         Firefox from Flathub through the Web Browser, a page under its own sandbox, a background update; the app's \
+         sound through the person's sound server; {:.0}s)",
         started.elapsed().as_secs_f64()
     );
     Ok(())

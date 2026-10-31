@@ -11,8 +11,15 @@ su:S1:wait:/bin/login -f root
 # graphics without an answer, before anyone logs in.
 gt:2345:wait:/bin/slate-graphics-trial
 
-# Multi-user: log in on the console.
+# Multi-user: log in on the console (virtual console 1, and the serial
+# port), and on virtual consoles 2 to 6 (Alt+F2 to F6; ADR 0185). Desktop
+# sessions take 7 to 12.
 c1:2345:respawn:/bin/getty -L console linux
+c2:2345:respawn:/bin/getty tty2 linux
+c3:2345:respawn:/bin/getty tty3 linux
+c4:2345:respawn:/bin/getty tty4 linux
+c5:2345:respawn:/bin/getty tty5 linux
+c6:2345:respawn:/bin/getty tty6 linux
 
 # The system booted: confirm it, so an update on trial is kept (ADR 0027).
 ok:2345:once:/bin/slate-update boot-ok

@@ -39,7 +39,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 /// The protocol's version, in `Hello`.
-pub const VERSION: u32 = 8;
+pub const VERSION: u32 = 10;
 /// The largest record accepted.
 pub const MAX_RECORD: usize = 64 * 1024;
 /// The most clipboard text a record carries (longer text is cut, at a
@@ -146,6 +146,50 @@ pub enum Request {
         win: u32,
         paths: String,
     },
+    /// The pointer's shape over the window's content from now on
+    /// (`cursor::*`; since version 9, ADR 0186).
+    Cursor {
+        win: u32,
+        shape: u8,
+    },
+    /// A notification (since version 10, ADR 0186): from `app`, a summary
+    /// and a body, at an urgency (`urgency::*`). `key` is the app's own
+    /// number for it: another with the same key (not 0) replaces it.
+    Notify {
+        key: u32,
+        app: String,
+        summary: String,
+        body: String,
+        urgency: u8,
+    },
+    /// The app's notification `key` is no longer wanted.
+    Unnotify {
+        key: u32,
+    },
+}
+
+/// How urgent a notification is (`Notify`), as the Desktop
+/// Notifications Specification's urgency hint has it.
+pub mod urgency {
+    pub const LOW: u8 = 0;
+    pub const NORMAL: u8 = 1;
+    /// Shown until dismissed, even with Do Not Disturb on.
+    pub const CRITICAL: u8 = 2;
+}
+
+/// Pointer shapes an app may ask for (`Cursor`).
+pub mod cursor {
+    pub const ARROW: u8 = 0;
+    /// A link or a button.
+    pub const HAND: u8 = 1;
+    /// Text that can be selected or typed in.
+    pub const TEXT: u8 = 2;
+    /// The app is busy.
+    pub const BUSY: u8 = 3;
+    /// Something being moved.
+    pub const MOVE: u8 = 4;
+    /// What is under the pointer won't take it.
+    pub const NOT_ALLOWED: u8 = 5;
 }
 
 /// Modifier bits in `Key`.
@@ -209,6 +253,9 @@ const HINTS: u16 = 9;
 const INHIBIT: u16 = 10;
 const STEPS: u16 = 11;
 const DRAG: u16 = 12;
+const CURSOR: u16 = 13;
+const NOTIFY: u16 = 14;
+const UNNOTIFY: u16 = 15;
 const CONFIGURE: u16 = 101;
 const KEY: u16 = 102;
 const POINTER: u16 = 103;
@@ -318,6 +365,11 @@ impl Request {
                 Out::new(HINTS).u32(*win).u32(*min_width).u32(*min_height).u32(*width).u32(*height)
             }
             Request::Inhibit { win, on } => Out::new(INHIBIT).u32(*win).u8(u8::from(*on)),
+            Request::Cursor { win, shape } => Out::new(CURSOR).u32(*win).u8(*shape),
+            Request::Notify { key, app, summary, body, urgency } => {
+                Out::new(NOTIFY).u32(*key).str(app).str(summary).str(body).u8(*urgency)
+            }
+            Request::Unnotify { key } => Out::new(UNNOTIFY).u32(*key),
             Request::Steps { win, base_width, base_height, width, height } => {
                 Out::new(STEPS).u32(*win).u32(*base_width).u32(*base_height).u32(*width).u32(*height)
             }
@@ -353,6 +405,11 @@ impl Request {
                 height: r.u32()?,
             },
             INHIBIT => Request::Inhibit { win: r.u32()?, on: r.u8()? != 0 },
+            CURSOR => Request::Cursor { win: r.u32()?, shape: r.u8()? },
+            NOTIFY => {
+                Request::Notify { key: r.u32()?, app: r.str()?, summary: r.str()?, body: r.str()?, urgency: r.u8()? }
+            }
+            UNNOTIFY => Request::Unnotify { key: r.u32()? },
             STEPS => Request::Steps {
                 win: r.u32()?,
                 base_width: r.u32()?,
@@ -508,6 +565,15 @@ mod tests {
             Request::Inhibit { win: 1, on: true },
             Request::Steps { win: 1, base_width: 3200, base_height: 2400, width: 780, height: 2100 },
             Request::Drag { win: 1, paths: "/root/a.txt\n/root/b c".to_string() },
+            Request::Cursor { win: 1, shape: cursor::TEXT },
+            Request::Notify {
+                key: 3,
+                app: "Clock".to_string(),
+                summary: "Alarm".to_string(),
+                body: "07:30 Wake up".to_string(),
+                urgency: urgency::CRITICAL,
+            },
+            Request::Unnotify { key: 3 },
         ];
         let mut stream: Vec<u8> = reqs.iter().flat_map(|r| r.encode()).collect();
         // Fed in two halves: the first gives what is complete.

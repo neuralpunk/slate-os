@@ -65,6 +65,10 @@ pub struct UeventSocket {
     /// The socket filter, and whether SO_LOCK_FILTER fixed it.
     filter: IrqSpinLock<Option<Arc<Vec<slate_bpf::SockFilter>>>>,
     filter_locked: AtomicBool,
+    /// The network namespace it was made in (ADR 0185): programs' messages
+    /// stay in theirs; the kernel's reach namespaces the initial user
+    /// namespace owns.
+    ns: Arc<crate::proc::ns::NetNs>,
 }
 
 /// Every open uevent socket, for delivery.
@@ -105,6 +109,11 @@ pub struct Received {
 
 impl UeventSocket {
     pub fn new(flags: u32) -> Arc<UeventSocket> {
+        Self::new_in(flags, crate::net::current_ns())
+    }
+
+    /// A socket in network namespace `ns`.
+    fn new_in(flags: u32, ns: Arc<crate::proc::ns::NetNs>) -> Arc<UeventSocket> {
         let s = Arc::new(UeventSocket {
             port: AtomicU32::new(0),
             groups: AtomicU32::new(0),
@@ -116,6 +125,7 @@ impl UeventSocket {
             opts: crate::net::socket::SockOpts::default(),
             filter: IrqSpinLock::new(None),
             filter_locked: AtomicBool::new(false),
+            ns,
         });
         SOCKETS.lock().push(Arc::downgrade(&s));
         s
@@ -253,13 +263,16 @@ impl UeventSocket {
             }
             for s in live() {
                 let mask = s.groups.load(Ordering::Relaxed) & groups;
-                if mask != 0 && !core::ptr::eq(&*s, self) {
+                if mask != 0 && !core::ptr::eq(&*s, self) && s.ns.id == self.ns.id {
                     s.deliver(Message { data: data.to_vec(), from, group: mask, cred });
                 }
             }
         }
         if port != 0 {
-            let target = live().into_iter().find(|s| s.port.load(Ordering::Relaxed) == port).ok_or(ECONNREFUSED)?;
+            let target = live()
+                .into_iter()
+                .find(|s| s.port.load(Ordering::Relaxed) == port && s.ns.id == self.ns.id)
+                .ok_or(ECONNREFUSED)?;
             target.deliver(Message { data: data.to_vec(), from, group: 0, cred });
         }
         poll_notify();
@@ -322,10 +335,19 @@ impl File for UeventSocket {
     }
 }
 
+/// Whether any socket listens to the kernel's group: announcing costs
+/// nothing when none does (devices set up at boot, before devd).
+pub fn listening() -> bool {
+    let bit = 1 << (KERNEL_GROUP - 1);
+    SOCKETS.lock().iter().filter_map(Weak::upgrade).any(|s| s.groups.load(Ordering::Relaxed) & bit != 0)
+}
+
 /// The kernel announces `action` ("add", "remove", "change") for the
 /// device at `devpath` (under /sys, with a leading '/') to group 1;
 /// `env` is the rest of its environment (SUBSYSTEM, its uevent file's
-/// lines).
+/// lines). Sockets in network namespaces owned by a user namespace other
+/// than the initial one (an unprivileged sandbox's) hear nothing, as on
+/// Linux (ADR 0185).
 pub fn announce(action: &str, devpath: &str, env: &[String]) {
     let seq = SEQNUM.fetch_add(1, Ordering::Relaxed);
     let mut data = Vec::new();
@@ -341,9 +363,10 @@ pub fn announce(action: &str, devpath: &str, env: &[String]) {
     }
     put(&alloc::format!("SEQNUM={seq}"));
     let bit = 1 << (KERNEL_GROUP - 1);
+    let host = crate::proc::ns::initial_user();
     let mut any = false;
     for s in live() {
-        if s.groups.load(Ordering::Relaxed) & bit != 0 {
+        if s.groups.load(Ordering::Relaxed) & bit != 0 && Arc::ptr_eq(&s.ns.owner, &host) {
             s.deliver(Message { data: data.clone(), from: 0, group: bit, cred: Cred::default() });
             any = true;
         }
@@ -351,4 +374,31 @@ pub fn announce(action: &str, devpath: &str, env: &[String]) {
     if any {
         poll_notify();
     }
+}
+
+/// The kernel's messages reach namespaces the initial user namespace owns,
+/// not an unprivileged sandbox's (ADR 0185).
+pub const TESTS: &[crate::ktest::Test] =
+    &[crate::ktest::Test { name: "net::uevent::kernel_messages_by_namespace", run: kernel_messages_by_namespace }];
+
+fn kernel_messages_by_namespace() -> core::result::Result<(), &'static str> {
+    use crate::proc::ns;
+    let cred = crate::proc::cred::Cred::root();
+    let cgroup = crate::fs::cgroup::root();
+    let initial = ns::initial();
+    let boxed = initial.unshare(ns::CLONE_NEWUSER | ns::CLONE_NEWNET, &cred, &cgroup).map_err(|_| "unshare")?;
+    let rooted = initial.unshare(ns::CLONE_NEWNET, &cred, &cgroup).map_err(|_| "unshare")?;
+    let bind = |s: &Arc<UeventSocket>| s.bind(&sockaddr(0, 1 << (KERNEL_GROUP - 1))).map_err(|_| "bind");
+    let host = UeventSocket::new_in(O_NONBLOCK, initial.net.clone());
+    let sandbox = UeventSocket::new_in(O_NONBLOCK, boxed.ns.net.clone());
+    let root_ns = UeventSocket::new_in(O_NONBLOCK, rooted.ns.net.clone());
+    for s in [&host, &sandbox, &root_ns] {
+        bind(s)?;
+    }
+    announce("change", "/devices/virtual/slate-test", &[String::from("SUBSYSTEM=slate-test")]);
+    let mut b = [0u8; 256];
+    let heard = |s: &Arc<UeventSocket>, b: &mut [u8]| s.recv(b, false, true).is_ok();
+    crate::ktest::ensure(heard(&host, &mut b), "the host's socket heard nothing")?;
+    crate::ktest::ensure(heard(&root_ns, &mut b), "a namespace root made heard nothing")?;
+    crate::ktest::ensure(!heard(&sandbox, &mut b), "a sandbox's socket heard the kernel")
 }

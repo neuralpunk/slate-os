@@ -230,6 +230,84 @@ impl Canvas {
         }
     }
 
+    /// Composite `from`, a part of `layer` (the same size), over this
+    /// canvas stretched to fill `to` (device pixels: x, y, width,
+    /// height, fractional), at `opacity`, within the clip: windows
+    /// scaling as they open and close, and gliding to a new place (ADR
+    /// 0186). Bilinear, each sample weighed by its alpha, so a window's
+    /// edge doesn't darken; outside `from` is transparent.
+    pub fn composite_mapped(&mut self, layer: &Canvas, from: Rect, to: (f32, f32, f32, f32), opacity: f32) {
+        use crate::math::{ceil, floor};
+        let k = (opacity.clamp(0.0, 1.0) * 255.0 + 0.5) as u32;
+        let from = from.intersect(&layer.bounds());
+        let (tx, ty, tw, th) = to;
+        if k == 0 || from.is_empty() || tw < 1.0 || th < 1.0 {
+            return;
+        }
+        let (x0, y0) = (floor(tx) as i32, floor(ty) as i32);
+        let area = self.clip.intersect(&Rect::new(x0, y0, ceil(tx + tw) as i32 - x0, ceil(ty + th) as i32 - y0));
+        if area.is_empty() {
+            return;
+        }
+        let (sx, sy) = (from.w as f32 / tw, from.h as f32 / th);
+        // Where each column samples: its left source pixel and the right
+        // one's weight (of 256).
+        let cols: Vec<(i32, u32)> = (area.x..area.right())
+            .map(|px| {
+                let fx = from.x as f32 + (px as f32 + 0.5 - tx) * sx - 0.5;
+                let x = floor(fx);
+                (x as i32, ((fx - x) * 256.0) as u32)
+            })
+            .collect();
+        let at = |x: i32, y: i32| -> u32 {
+            if x < from.x || y < from.y || x >= from.right() || y >= from.bottom() {
+                0
+            } else {
+                layer.pixels[(y * layer.width + x) as usize]
+            }
+        };
+        for py in area.y..area.bottom() {
+            let fy = from.y as f32 + (py as f32 + 0.5 - ty) * sy - 0.5;
+            let y = floor(fy);
+            let (sy0, wy) = (y as i32, ((fy - y) * 256.0) as u32);
+            let row = (py * self.width + area.x) as usize;
+            for (i, &(sx0, wx)) in cols.iter().enumerate() {
+                let samples = [
+                    (at(sx0, sy0), (256 - wx) * (256 - wy)),
+                    (at(sx0 + 1, sy0), wx * (256 - wy)),
+                    (at(sx0, sy0 + 1), (256 - wx) * wy),
+                    (at(sx0 + 1, sy0 + 1), wx * wy),
+                ];
+                // Alpha-weighted sums (weights of 65536 in all).
+                let (mut a, mut r, mut g, mut b) = (0u64, 0u64, 0u64, 0u64);
+                for (s, w) in samples {
+                    let aw = u64::from(s >> 24) * u64::from(w);
+                    if aw == 0 {
+                        continue;
+                    }
+                    a += aw;
+                    r += aw * u64::from((s >> 16) & 0xFF);
+                    g += aw * u64::from((s >> 8) & 0xFF);
+                    b += aw * u64::from(s & 0xFF);
+                }
+                if a == 0 {
+                    continue;
+                }
+                let col = (((r / a) as u32) << 16) | (((g / a) as u32) << 8) | (b / a) as u32;
+                let alpha = div255(((a + 32768) >> 16) as u32 * k + 127);
+                if alpha == 0 {
+                    continue;
+                }
+                let d = &mut self.pixels[row + i];
+                *d = if *d >> 24 == 255 {
+                    over_opaque(*d, col, alpha)
+                } else {
+                    blend(*d, Color(col | (alpha << 24)), 255)
+                };
+            }
+        }
+    }
+
     /// `src` (the same size) within the clip, with `c` blended over it
     /// at its alpha: copying a picture and dimming it in one pass, as
     /// [`Canvas::fill_rect`] over a copy would (M32 phase 2).
@@ -466,5 +544,40 @@ mod tests {
         d.composite(&l, 0.5, 0);
         let v = d.pixel(1, 0) & 0xFF;
         assert!((120..=135).contains(&v), "{v}");
+    }
+
+    #[test]
+    fn mapped_layers() {
+        // A white 4x4 square on a transparent layer.
+        let mut l = Canvas::new(16, 16, Color::rgb(0));
+        l.clear();
+        l.fill_rect(Rect::new(4, 4, 4, 4), Color::rgb(0xFFFFFF));
+        // Mapped onto itself: the same pixels.
+        let mut c = Canvas::new(16, 16, Color::rgb(0));
+        c.composite_mapped(&l, Rect::new(4, 4, 4, 4), (4.0, 4.0, 4.0, 4.0), 1.0);
+        assert_eq!(c.pixel(4, 4), 0xFFFF_FFFF);
+        assert_eq!(c.pixel(7, 7), 0xFFFF_FFFF);
+        assert_eq!(c.pixel(3, 4), 0xFF00_0000);
+        assert_eq!(c.pixel(8, 7), 0xFF00_0000);
+        // Twice the size, elsewhere: the middle is white, outside untouched.
+        let mut c = Canvas::new(16, 16, Color::rgb(0));
+        c.composite_mapped(&l, Rect::new(4, 4, 4, 4), (6.0, 6.0, 8.0, 8.0), 1.0);
+        assert_eq!(c.pixel(9, 9), 0xFFFF_FFFF);
+        assert_eq!(c.pixel(5, 9), 0xFF00_0000);
+        assert_eq!(c.pixel(14, 9), 0xFF00_0000);
+        // Its edge is grey, not darker than the mix of white and what is under.
+        let e = c.pixel(6, 9) & 0xFF;
+        assert!(e > 0x40, "{e:x}");
+        // Half opacity.
+        let mut c = Canvas::new(16, 16, Color::rgb(0));
+        c.composite_mapped(&l, Rect::new(4, 4, 4, 4), (4.0, 4.0, 4.0, 4.0), 0.5);
+        let v = c.pixel(5, 5) & 0xFF;
+        assert!((120..=135).contains(&v), "{v}");
+        // Within the clip only.
+        let mut c = Canvas::new(16, 16, Color::rgb(0));
+        c.set_clip(Rect::new(0, 0, 6, 16));
+        c.composite_mapped(&l, Rect::new(4, 4, 4, 4), (4.0, 4.0, 4.0, 4.0), 1.0);
+        assert_eq!(c.pixel(5, 5), 0xFFFF_FFFF);
+        assert_eq!(c.pixel(6, 5), 0xFF00_0000);
     }
 }

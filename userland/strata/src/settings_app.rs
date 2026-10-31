@@ -69,11 +69,15 @@ pub enum Section {
     Security,
     Session,
     Displays,
+    Sound,
     Boxes,
+    Mouse,
+    NightLight,
+    Power,
     About,
 }
 
-pub const SECTIONS: [Section; 11] = [
+pub const SECTIONS: [Section; 15] = [
     Section::Appearance,
     Section::Accessibility,
     Section::DateTime,
@@ -83,11 +87,36 @@ pub const SECTIONS: [Section; 11] = [
     Section::Security,
     Section::Session,
     Section::Displays,
+    Section::Sound,
     Section::Boxes,
+    Section::Mouse,
+    Section::NightLight,
+    Section::Power,
     Section::About,
 ];
 
 impl Section {
+    /// Its name on the command line (`strata-settings network`).
+    pub fn key(self) -> &'static str {
+        match self {
+            Section::Appearance => "appearance",
+            Section::Accessibility => "accessibility",
+            Section::DateTime => "datetime",
+            Section::Network => "network",
+            Section::Bluetooth => "bluetooth",
+            Section::Users => "users",
+            Section::Security => "security",
+            Section::Session => "session",
+            Section::Displays => "displays",
+            Section::Sound => "sound",
+            Section::Boxes => "boxes",
+            Section::Mouse => "mouse",
+            Section::NightLight => "nightlight",
+            Section::Power => "power",
+            Section::About => "about",
+        }
+    }
+
     pub fn title(self) -> &'static str {
         match self {
             Section::Appearance => "Appearance",
@@ -99,7 +128,11 @@ impl Section {
             Section::Security => "Security",
             Section::Session => "Session",
             Section::Displays => "Displays",
+            Section::Sound => "Sound",
             Section::Boxes => "Linux boxes",
+            Section::Mouse => "Mouse and touchpad",
+            Section::NightLight => "Night Light",
+            Section::Power => "Power",
             Section::About => "About",
         }
     }
@@ -107,7 +140,7 @@ impl Section {
     fn blurb(self) -> &'static str {
         match self {
             Section::Appearance => "The theme of the desktop and its wallpaper.",
-            Section::Accessibility => "Contrast, focus and motion.",
+            Section::Accessibility => "Contrast, focus, motion, and the sizes of text and the pointer.",
             Section::DateTime => "The computer's time zone, for everyone on it.",
             Section::Network => "How this computer gets its address.",
             Section::Bluetooth => "Devices nearby, and the ones paired with this computer.",
@@ -115,7 +148,11 @@ impl Section {
             Section::Security => "How Slate keeps programs apart, and the system intact.",
             Section::Session => "Locking the screen, and the desktop itself.",
             Section::Displays => "Where each display is, its resolution and refresh rate, and the scale.",
+            Section::Sound => "The sound cards SlateOS found, and a short tune to test them.",
             Section::Boxes => "Your Linux systems for software built from source, and the disk they take.",
+            Section::Mouse => "How fast the pointer goes, which way the wheel scrolls, and the buttons.",
+            Section::NightLight => "Warmer colours in the evening, gentler on the eyes.",
+            Section::Power => "When the screen turns off, and the battery in the top bar.",
             Section::About => "This computer.",
         }
     }
@@ -131,7 +168,11 @@ impl Section {
             Section::Security => Icon::Shield,
             Section::Session => Icon::Lock,
             Section::Displays => Icon::Display,
+            Section::Sound => Icon::Speaker,
             Section::Boxes => Icon::SplitPane,
+            Section::Mouse => Icon::Mouse,
+            Section::NightLight => Icon::Moon,
+            Section::Power => Icon::Power,
             Section::About => Icon::Info,
         }
     }
@@ -427,6 +468,9 @@ pub enum Effect {
     /// Run `slate-box` with these words (ADR 0183: `remove NAME`, `clean
     /// NAME`, `remove-base DISTRO`).
     Boxes(String),
+    /// Play the self-test tune on this sound card (`slate-sound test N`,
+    /// ADR 0184).
+    SoundTest(u32),
     /// Make the picture at this path the wallpaper.
     Wallpaper(String),
     /// Make the picture at this path one's own account's (empty: none).
@@ -531,6 +575,10 @@ pub struct View {
     /// What slate-boxd says of the person's Linux boxes (ADR 0183; None:
     /// it isn't running).
     pub boxes: Option<Boxes>,
+    /// The sound cards (ADR 0184), read as the Sound page opens.
+    pub sound: Vec<slate_sound::Card>,
+    /// The card whose test tune is playing.
+    pub playing: Option<u32>,
 }
 
 /// The person's Linux boxes and their disk, as slate-boxd's `usage`
@@ -692,6 +740,8 @@ impl View {
             picture: None,
             faces: Vec::new(),
             boxes: None,
+            sound: Vec::new(),
+            playing: None,
         }
     }
 
@@ -727,7 +777,10 @@ impl View {
         match self.current() {
             // The designs, then a picture of one's own.
             Section::Appearance => STYLES + Design::ALL.len() + 1,
-            Section::Accessibility => 3,
+            Section::Accessibility => 5,
+            Section::Mouse => 4,
+            Section::NightLight => 3,
+            Section::Power => 2,
             Section::DateTime => 1,
             // Every card, then each card.
             Section::Network => 1 + self.cards.len(),
@@ -742,6 +795,8 @@ impl View {
             // Each display, then the scale, then full graphics where
             // there is an AMD card.
             Section::Displays => self.displays.displays.len() + 1 + usize::from(self.graphics.is_some()),
+            // Each card: its test.
+            Section::Sound => self.sound.len(),
             // Each box (remove, then empty its cache), then each base.
             Section::Boxes => self.boxes.as_ref().map_or(0, |b| b.boxes.len() * 2 + b.bases.len()),
             Section::About => 0,
@@ -849,7 +904,35 @@ impl View {
             Section::Accessibility => match row {
                 0 => s.high_contrast = !s.high_contrast,
                 1 => s.dim = !s.dim,
-                _ => s.reduced_motion = !s.reduced_motion,
+                2 => s.reduced_motion = !s.reduced_motion,
+                3 => s.text = next_of(&crate::settings::TEXT_SIZES, s.text),
+                _ => s.cursor = next_of(&crate::settings::CURSOR_SIZES, s.cursor),
+            },
+            Section::Mouse => match row {
+                0 => s.pointer = if s.pointer >= 2 { -2 } else { s.pointer + 1 },
+                1 => s.natural = !s.natural,
+                2 => s.left_handed = !s.left_handed,
+                _ => s.tap = !s.tap,
+            },
+            Section::NightLight => match row {
+                0 => {
+                    use crate::settings::Night;
+                    s.night = match s.night {
+                        Night::Off => Night::On,
+                        Night::On => Night::Scheduled,
+                        Night::Scheduled => Night::Off,
+                    }
+                }
+                1 => {
+                    let hours = crate::settings::NIGHT_HOURS;
+                    let i = hours.iter().position(|h| *h == (s.night_from, s.night_to)).map_or(0, |i| i + 1);
+                    (s.night_from, s.night_to) = hours[i % hours.len()];
+                }
+                _ => s.warmth = if s.warmth >= 5 { 1 } else { s.warmth + 1 },
+            },
+            Section::Power => match row {
+                0 => s.blank = next_of(&crate::settings::BLANK_CHOICES, s.blank),
+                _ => s.battery_percent = !s.battery_percent,
             },
             Section::DateTime => {
                 self.go(Page::Zones { query: LineEdit::new("").with_max(64), selected: 0, first: 0 });
@@ -1018,6 +1101,18 @@ impl View {
                     true,
                 );
                 return Effect::Redraw;
+            }
+            Section::Sound => {
+                let Some((index, name)) = self.sound.get(row).map(|c| (c.index, c.name.clone())) else {
+                    return Effect::None;
+                };
+                if self.playing.is_some() {
+                    self.say("The test tune is still playing.", false);
+                    return Effect::Redraw;
+                }
+                self.playing = Some(index);
+                self.say(&alloc::format!("Playing the test tune on {name}…"), false);
+                return Effect::SoundTest(index);
             }
             Section::About => return Effect::None,
         }
@@ -2067,6 +2162,62 @@ fn main_page(
                 switch(p, pal, a.right() - 12.0 - 36.0, a.y + 19.0, *on);
                 y += ROW_H + 4.0;
             }
+            let size = |pct: u8| match pct {
+                0..=100 => "default",
+                101..=140 => "large",
+                _ => "larger",
+            };
+            let a = row(p, hits, 3, y, "Text size", "Text in SlateOS's own apps and the desktop.");
+            value(p, a, size(s.text), false);
+            y += ROW_H + 4.0;
+            let a = row(p, hits, 4, y, "Pointer size", "The mouse pointer.");
+            value(p, a, size(s.cursor.saturating_sub(40)), false);
+        }
+        Section::Mouse => {
+            let speeds = ["slowest", "slower", "normal", "faster", "fastest"];
+            let a = row(p, hits, 0, y, "Pointer speed", "How far the pointer goes for the mouse's movement.");
+            value(p, a, speeds[(s.pointer.clamp(-2, 2) + 2) as usize], false);
+            y += ROW_H + 4.0;
+            let items = [
+                ("Natural scrolling", "The wheel moves the content, as a touchscreen does.", s.natural),
+                ("Left-handed", "The mouse's right button clicks and its left one opens menus.", s.left_handed),
+                ("Tap to click", "On touchpads: a tap is a click.", s.tap),
+            ];
+            for (i, (n, d, on)) in items.iter().enumerate() {
+                let a = row(p, hits, i + 1, y, n, d);
+                switch(p, pal, a.right() - 12.0 - 36.0, a.y + 19.0, *on);
+                y += ROW_H + 4.0;
+            }
+        }
+        Section::NightLight => {
+            use crate::settings::{Night, hhmm};
+            let mode = match s.night {
+                Night::Off => "off",
+                Night::On => "on",
+                Night::Scheduled => "scheduled",
+            };
+            let a = row(p, hits, 0, y, "Night Light", "Off, on, or on during the hours below.");
+            value(p, a, mode, false);
+            y += ROW_H + 4.0;
+            let a = row(p, hits, 1, y, "Hours", "When it is on, if scheduled.");
+            value(p, a, &alloc::format!("{} to {}", hhmm(s.night_from), hhmm(s.night_to)), false);
+            y += ROW_H + 4.0;
+            let warmth = ["slightly warm", "warm", "warmer", "very warm", "warmest"];
+            let a = row(p, hits, 2, y, "Warmth", "How far the colours go toward a candle's.");
+            value(p, a, warmth[usize::from(s.warmth.clamp(1, 5) - 1)], false);
+        }
+        Section::Power => {
+            let a = row(p, hits, 0, y, "Turn the screen off", "After this long without the keyboard or the pointer.");
+            value(p, a, &crate::settings::lock_text(s.blank), false);
+            y += ROW_H + 4.0;
+            let a = row(p, hits, 1, y, "Battery percentage", "The battery's charge in numbers in the top bar.");
+            switch(p, pal, a.right() - 12.0 - 36.0, a.y + 19.0, s.battery_percent);
+            y += ROW_H + 4.0 + 8.0;
+            let note = "The power button shuts SlateOS down in order. Suspending comes with laptop support.";
+            let text = p.style(&f.regular, 12.5, pal.text_3);
+            for (k, l) in slate_ui::text::wrap(&text, note, (w - 20.0) * p.scale).iter().enumerate() {
+                p.line(&text, x, y + 20.0 * k as f32, 20.0, l);
+            }
         }
         Section::DateTime => {
             let now = zone_line(&v.zone, z.table, z.now);
@@ -2309,6 +2460,38 @@ fn main_page(
                     "SlateOS only, or full graphics with AMD's firmware.",
                 );
                 value(p, a, g.words(v.removing), false);
+            }
+        }
+        Section::Sound => {
+            // Early days, said plainly, in steel (STRATA_COLORS.md:
+            // information).
+            let steel = pal.accents.steel;
+            let note = "Sound in SlateOS is in its early stages. Built-in sound and USB speakers and headsets \
+                        play, and so do Linux apps from Flathub. The volume is in the top bar's menu at the \
+                        right, and on the volume keys. There is no sound over HDMI or DisplayPort yet, and no \
+                        recording from USB headsets.";
+            let text = p.style(&f.regular, 12.5, pal.text_1);
+            let lines = slate_ui::text::wrap(&text, note, (w - 40.0) * p.scale);
+            let card = Area::new(x - 12.0, y, w + 24.0, 30.0 + 20.0 * lines.len() as f32);
+            p.fill(card, 10.0, steel.tint);
+            p.border(card, 10.0, 1.0, steel.border);
+            p.icon(Icon::Info, x, y + 14.0, 16.0, steel.text);
+            for (k, l) in lines.iter().enumerate() {
+                p.line(&text, x + 28.0, y + 12.0 + 20.0 * k as f32, 20.0, l);
+            }
+            y = card.bottom() + 18.0;
+            if v.sound.is_empty() {
+                p.line(&st.desc, x, y, 18.0, "No sound cards were found.");
+                return;
+            }
+            p.line(&st.label, x, y, 18.0, "sound cards");
+            y += 28.0;
+            for (i, c) in v.sound.iter().enumerate() {
+                let desc = if c.longname.is_empty() { c.driver.as_str() } else { c.longname.as_str() };
+                let a = row(p, hits, i, y, &c.name, desc);
+                let right = if v.playing == Some(c.index) { "playing…" } else { "play test" };
+                value(p, a, right, false);
+                y += ROW_H + 4.0;
             }
         }
         Section::Boxes => {
@@ -2906,6 +3089,59 @@ fn slate_box(words: &str) -> (bool, String) {
     }
 }
 
+/// Start `slate-sound test CARD` (ADR 0184) with its output on a pipe:
+/// (its pid, the pipe's reading end). The tune plays while Settings goes
+/// on; the loop looks for its end.
+fn start_sound_test(card: u32) -> Result<(i32, i32), String> {
+    let argv: Vec<Vec<u8>> =
+        alloc::vec![b"/bin/slate-sound".to_vec(), b"test".to_vec(), alloc::format!("{card}").into_bytes()];
+    let (r, w) = slate_rt::process::pipe(slate_rt::fs::O_CLOEXEC).map_err(|e| alloc::format!("{e}"))?;
+    let env: Vec<Vec<u8>> = slate_rt::env::vars().to_vec();
+    match slate_rt::process::fork() {
+        Ok(0) => {
+            let _ = slate_rt::process::dup2(w, 1);
+            let _ = slate_rt::process::dup2(w, 2);
+            if let Ok(null) = slate_rt::fs::open(b"/dev/null", slate_rt::fs::O_RDONLY, 0) {
+                let _ = slate_rt::process::dup2(null, 0);
+            }
+            let _ = slate_rt::process::execve(b"/bin/slate-sound", &argv, &env);
+            slate_rt::process::exit_now(127)
+        }
+        Ok(pid) => {
+            let _ = slate_rt::io::close(w);
+            Ok((pid, r))
+        }
+        Err(e) => {
+            let _ = slate_rt::io::close(r);
+            let _ = slate_rt::io::close(w);
+            Err(alloc::format!("{e}"))
+        }
+    }
+}
+
+/// What the Sound page says when `slate-sound test` ended with `code`
+/// and `output` on card `name`.
+pub fn sound_outcome(name: &str, code: i32, output: &str) -> (String, bool) {
+    match code {
+        0 => (
+            alloc::format!(
+                "Played the test tune on {name}. Heard nothing? Check that speakers or headphones are plugged in and turned up."
+            ),
+            false,
+        ),
+        2 => (alloc::format!("{name} is in use by another program; close it and try again."), true),
+        _ => {
+            let last = output.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("").trim();
+            let last = last.strip_prefix("slate-sound: ").unwrap_or(last);
+            if last.is_empty() {
+                (alloc::format!("The test tune didn't play on {name}."), true)
+            } else {
+                (alloc::format!("The test tune didn't play: {last}."), true)
+            }
+        }
+    }
+}
+
 /// Ask slate-btd (ADR 0113), keep what it says now, and say on stderr
 /// what changed: devices found, a pairing's question, an outcome.
 fn bluetooth(v: &mut View, words: &str) {
@@ -2964,6 +3200,12 @@ fn ask(action: &str, secret: &str, done: &str, not: &str) -> (bool, String) {
     }
 }
 
+/// The choice after `now` among `choices`, round to the first.
+fn next_of<T: Copy + PartialEq>(choices: &[T], now: T) -> T {
+    let i = choices.iter().position(|c| *c == now).map_or(0, |i| (i + 1) % choices.len());
+    choices[i]
+}
+
 pub fn main() -> i32 {
     let files = match crate::session::load_fonts() {
         Ok(f) => f,
@@ -2979,7 +3221,7 @@ pub fn main() -> i32 {
     let run = || -> Result<(), String> {
         let mut conn = Connection::connect()?;
         let mut win = conn.create("settings", None)?;
-        conn.set_hints(&win, (720, 560), (900, 660))?;
+        conn.set_hints(&win, (720, 660), (900, 720))?;
         // The size asked for arrives as a configure, in the loop.
         let mut cache = GlyphCache::new();
         let mut v = View::new(Settings::load(), &system_zone());
@@ -2995,9 +3237,21 @@ pub fn main() -> i32 {
         v.graphics = Graphics::now();
         v.displays = crate::displays::Now::load();
         let mut bt_open = false;
+        // `strata-settings SECTION` opens at that section (quick settings'
+        // tiles; ADR 0186).
+        let asked = slate_rt::env::args().get(1).map(|a| String::from(slate_rt::lossy(a)));
+        if let Some(i) = asked.and_then(|k| SECTIONS.iter().position(|s| s.key() == k)) {
+            v.open_section(i);
+        }
         let mut boxes_open = false;
+        let mut sound_open = false;
+        // The test tune playing: its process, the pipe of its output, the
+        // card.
+        let mut sound_job: Option<(i32, i32, u32)> = None;
         let paint = |v: &View, win: &Window, cache: &mut GlyphCache| -> (Canvas, Hits) {
             let pal = v.settings.palette();
+            // The person's text size, as chosen (ADR 0186).
+            slate_ui::paint::set_text_scale(f32::from(v.settings.text) / 100.0);
             let mut canvas = win.canvas(pal.window);
             let mut p = Painter::new(&mut canvas, cache, win.scale);
             let (w, h) = p.size();
@@ -3012,7 +3266,13 @@ pub fn main() -> i32 {
             let mut effect = Effect::None;
             // Redraw at least every half minute, for the times shown (each
             // second on the Bluetooth page).
-            let wait = if v.current() == Section::Bluetooth { 1000 } else { 30_000 };
+            let wait = if sound_job.is_some() {
+                200
+            } else if v.current() == Section::Bluetooth {
+                1000
+            } else {
+                30_000
+            };
             for e in conn.poll(wait)? {
                 let e2 = match e {
                     Event::Close { .. } => return Ok(()),
@@ -3221,6 +3481,16 @@ pub fn main() -> i32 {
                     v.row = v.row.min(v.rows().saturating_sub(1));
                     v.say(&text, !ok);
                 }
+                Effect::SoundTest(card) => match start_sound_test(card) {
+                    Ok((pid, fd)) => {
+                        slate_rt::eprintln!("strata-settings: sound: test tune on card {card}");
+                        sound_job = Some((pid, fd, card));
+                    }
+                    Err(e) => {
+                        v.playing = None;
+                        v.say(&alloc::format!("The test tune didn't play: {e}."), true);
+                    }
+                },
                 Effect::Wallpaper(path) => match crate::faces::set_wallpaper(&path) {
                     Ok(()) => {
                         v.settings.picture = true;
@@ -3278,6 +3548,35 @@ pub fn main() -> i32 {
                 Effect::Paste => conn.paste(&win, slate_strata_client::clipboard::CLIPBOARD)?,
                 Effect::None | Effect::Redraw => {}
             }
+            // The test tune's end: what it says goes on the status line.
+            if let Some((pid, fd, card)) = sound_job
+                && let Ok((done, status)) = slate_rt::process::wait(pid, slate_rt::process::WNOHANG)
+                && done == pid
+            {
+                let out = slate_rt::io::read_to_end(fd).unwrap_or_default();
+                let _ = slate_rt::io::close(fd);
+                sound_job = None;
+                v.playing = None;
+                let code = slate_rt::process::exit_code(status);
+                let name = v
+                    .sound
+                    .iter()
+                    .find(|c| c.index == card)
+                    .map_or_else(|| alloc::format!("card {card}"), |c| c.name.clone());
+                let (text, bad) = sound_outcome(&name, code, &String::from(slate_rt::lossy(&out)));
+                slate_rt::eprintln!(
+                    "strata-settings: sound: test tune on card {card}: {}",
+                    if code == 0 { "played" } else { "failed" }
+                );
+                v.say(&text, bad);
+            }
+            // The Sound page reads the cards when it opens.
+            let sound_page = v.current() == Section::Sound;
+            if sound_page && !sound_open {
+                v.sound = slate_sound::cards();
+                v.row = v.row.min(v.rows().saturating_sub(1));
+            }
+            sound_open = sound_page;
             // The Linux boxes page reads slate-boxd when it opens.
             let boxes_page = v.current() == Section::Boxes;
             if boxes_page && !boxes_open {
@@ -3323,6 +3622,37 @@ mod tests {
     fn section(v: &mut View, s: Section, n: &[String]) {
         v.open_section(SECTIONS.iter().position(|x| *x == s).unwrap());
         v.key(KEY_RIGHT, None, 0, n);
+    }
+
+    #[test]
+    fn the_sound_page() {
+        let n = names();
+        let mut v = View::new(Settings::default(), "UTC");
+        section(&mut v, Section::Sound, &n);
+        // No cards: Enter does nothing.
+        assert_eq!(v.key(KEY_ENTER, None, 0, &n), Effect::None);
+        let mut v = View::new(Settings::default(), "UTC");
+        v.sound = slate_sound::parse_cards(
+            " 0 [Intel          ]: HDA-Intel - HDA Intel\n                      HDA Intel at 0xf000\n \
+             2 [Audio          ]: USB-Audio - USB Headset\n                      Maker USB Headset at usb-3\n",
+        );
+        section(&mut v, Section::Sound, &n);
+        v.key(KEY_DOWN, None, 0, &n);
+        assert_eq!(v.key(KEY_ENTER, None, 0, &n), Effect::SoundTest(2));
+        assert_eq!(v.playing, Some(2));
+        // One at a time.
+        v.key(KEY_UP, None, 0, &n);
+        assert_eq!(v.key(KEY_ENTER, None, 0, &n), Effect::Redraw);
+        assert!(v.status.contains("still playing"));
+        assert!(!sound_outcome("HDA Intel", 0, "").1);
+        assert_eq!(
+            sound_outcome("USB Headset", 2, "").0,
+            "USB Headset is in use by another program; close it and try again."
+        );
+        assert_eq!(
+            sound_outcome("HDA Intel", 1, "slate-sound: card 0: playing: I/O error\n").0,
+            "The test tune didn't play: card 0: playing: I/O error."
+        );
     }
 
     #[test]

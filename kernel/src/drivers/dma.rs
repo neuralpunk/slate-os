@@ -121,6 +121,26 @@ impl Mmio {
         unsafe { self.0.add(off).cast::<u32>().write_volatile(v) }
     }
 
+    pub fn read16(&self, off: usize) -> u16 {
+        // SAFETY: As in `read32`; the register is 16 bits wide.
+        unsafe { self.0.add(off).cast::<u16>().read_volatile() }
+    }
+
+    pub fn write16(&self, off: usize, v: u16) {
+        // SAFETY: As in `read32`.
+        unsafe { self.0.add(off).cast::<u16>().write_volatile(v) }
+    }
+
+    pub fn read8(&self, off: usize) -> u8 {
+        // SAFETY: As in `read32`; the register is 8 bits wide.
+        unsafe { self.0.add(off).read_volatile() }
+    }
+
+    pub fn write8(&self, off: usize, v: u8) {
+        // SAFETY: As in `read32`.
+        unsafe { self.0.add(off).write_volatile(v) }
+    }
+
     /// A 64-bit register as two 32-bit accesses, low half first (which
     /// every device here accepts).
     pub fn read64(&self, off: usize) -> u64 {

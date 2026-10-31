@@ -34,7 +34,8 @@ pub struct SockOpts {
     /// SO_REUSEADDR, SO_BROADCAST, SO_DONTROUTE, IP_RECVERR and the
     /// control-message options (bits 0 to 7), IP_TOS
     /// (bits 8 to 15) and IP_MTU_DISCOVER plus one (bits 16 to 23; 0: not
-    /// set, which reads back as IP_PMTUDISC_WANT).
+    /// set, which reads back as IP_PMTUDISC_WANT), more flags (24 to 28),
+    /// SO_PRIORITY (bits 32 to 39).
     bits: AtomicU64,
     /// SO_SNDTIMEO in nanoseconds, for sockets that keep it here (Unix
     /// sockets wait by it; the others' sends never block).
@@ -94,6 +95,16 @@ impl SockOpts {
 
     pub fn set_tos(&self, tos: u8) {
         self.set_field(8, tos);
+    }
+
+    /// SO_PRIORITY (socket(7)): kept and read back; Slate's interfaces
+    /// have one queue each, so it orders nothing.
+    pub fn priority(&self) -> u8 {
+        self.field(32)
+    }
+
+    pub fn set_priority(&self, p: u8) {
+        self.set_field(32, p);
     }
 
     pub fn pmtudisc(&self) -> u8 {

@@ -194,6 +194,8 @@ impl PtyLink {
 #[derive(Debug)]
 enum Kind {
     Console,
+    /// Virtual console 2 to 12 (ADR 0185; VT 1 is the console).
+    Vt(u8),
     Pty(PtyLink),
 }
 
@@ -247,6 +249,7 @@ pub fn times_of(rdev: u64) -> Option<(super::vfs::Timespec, super::vfs::Timespec
     let (major, minor) = (super::vfs::major(rdev), super::vfs::minor(rdev));
     let tty = match (major, minor) {
         (TTYAUX_MAJOR, CONSOLE_MINOR) | (TTY_MAJOR, TTYS0_MINOR) => console().clone(),
+        (TTY_MAJOR, n @ 1..=12) => super::vt::tty(n as usize)?,
         (PTS_MAJOR, n) => PTYS.lock().get(&n)?.upgrade()?,
         _ => return None,
     };
@@ -264,6 +267,12 @@ pub fn console() -> &'static Arc<Tty> {
         drop(t);
         Arc::new(tty)
     })
+}
+
+/// Virtual console `n`'s terminal (2 to 12), the console's size.
+pub fn new_vt(n: u8) -> Arc<Tty> {
+    let (rows, cols) = crate::console::size();
+    Arc::new(new_tty(Kind::Vt(n), Winsize { ws_row: rows, ws_col: cols, ws_xpixel: 0, ws_ypixel: 0 }))
 }
 
 /// The console terminal if it exists yet (for interrupt handlers).
@@ -306,6 +315,7 @@ impl Tty {
     pub fn rdev(&self) -> u64 {
         match &self.kind {
             Kind::Console => makedev(super::devices::TTYAUX_MAJOR, super::devices::CONSOLE_MINOR),
+            Kind::Vt(n) => makedev(super::devices::TTY_MAJOR, u32::from(*n)),
             Kind::Pty(l) => makedev(PTS_MAJOR, l.index),
         }
     }
@@ -327,6 +337,11 @@ impl Tty {
     fn emit(&self, bytes: &[u8]) {
         match &self.kind {
             Kind::Console => crate::console::tty_output(bytes),
+            Kind::Vt(n) => {
+                for b in crate::drivers::fbcon::write_vt(usize::from(*n), bytes) {
+                    self.receive(b);
+                }
+            }
             Kind::Pty(l) => {
                 if l.master_open.load(Ordering::Acquire) {
                     let mut q = l.to_master.lock();
@@ -564,6 +579,17 @@ impl Tty {
 
     fn read(self: &Arc<Self>, buf: &mut [u8], nonblock: bool) -> Result<usize> {
         self.job_check(SIGTTIN)?;
+        // Someone waits for typing on the console (the splash's screen,
+        // VT 1; the gettys on VTs 2 to 6 aren't in front): the boot splash
+        // steps aside (ADR 0186), but for the programs that take the
+        // screen themselves and read the console beside it.
+        if matches!(self.kind, Kind::Console) && crate::drivers::fbcon::splash_showing() {
+            let name = crate::proc::current().map(|p| p.name.lock().clone()).unwrap_or_default();
+            let screen_taker = ["strata-login", "slate-unlock", "slate-install"].iter().any(|n| name.starts_with(n));
+            if !screen_taker && crate::drivers::fbcon::splash_read() {
+                crate::kprintln!("splash: {name} reads a console");
+            }
+        }
         if buf.is_empty() {
             return Ok(0);
         }
@@ -794,7 +820,15 @@ impl Tty {
                 let n = self.input.lock().ready.len() as u32;
                 write_user(arg, &n).map_err(fault)?;
             }
-            _ => return Err(EINVAL),
+            // A virtual console's own (ADR 0185).
+            _ => {
+                let vt = match &self.kind {
+                    Kind::Console => 1,
+                    Kind::Vt(n) => usize::from(*n),
+                    Kind::Pty(_) => return Err(EINVAL),
+                };
+                return super::vt::ioctl(vt, cmd, arg).unwrap_or(Err(EINVAL));
+            }
         }
         Ok(0)
     }
@@ -812,6 +846,9 @@ impl TtyFile {
         if let Kind::Pty(l) = &tty.kind {
             l.slave_opens.fetch_add(1, Ordering::AcqRel);
             l.slave_seen.store(true, Ordering::Release);
+        }
+        if let Kind::Vt(n) = &tty.kind {
+            super::vt::opened(usize::from(*n), true);
         }
         TtyFile { tty, flags: AtomicU32::new(flags) }
     }
@@ -890,6 +927,9 @@ impl Drop for TtyFile {
             l.master_wq.wake_all();
             poll_notify();
         }
+        if let Kind::Vt(n) = &self.tty.kind {
+            super::vt::opened(usize::from(*n), false);
+        }
     }
 }
 
@@ -906,7 +946,7 @@ impl PtyMaster {
     fn link(&self) -> &PtyLink {
         match &self.tty.kind {
             Kind::Pty(l) => l,
-            Kind::Console => unreachable!("console has no master"),
+            Kind::Console | Kind::Vt(_) => unreachable!("a console has no master"),
         }
     }
 }
@@ -946,7 +986,7 @@ fn pty_link<R>(index: u32, f: impl FnOnce(&PtyLink) -> R) -> Option<R> {
     let tty = PTYS.lock().get(&index).and_then(Weak::upgrade)?;
     match &tty.kind {
         Kind::Pty(l) => Some(f(l)),
-        Kind::Console => None,
+        Kind::Console | Kind::Vt(_) => None,
     }
 }
 

@@ -248,10 +248,12 @@ fn keyboard_byte(ev: &mut Evdev, code: u8) {
         }
         return;
     }
+    let mut ext = false;
     if code == 0xE0 {
         ev.extended = true;
     } else {
         let extended = core::mem::take(&mut ev.extended);
+        ext = extended;
         let key = input::set1_to_evdev(code & 0x7F, extended);
         if key != 0 {
             ev.keyboard.key(key, code & 0x80 == 0);
@@ -266,12 +268,11 @@ fn keyboard_byte(ev: &mut Evdev, code: u8) {
     if CAPS.swap(caps, core::sync::atomic::Ordering::Relaxed) != caps {
         input::console_caps_lock(caps);
     }
-    if input::console_input()
-        && let Some(tty) = crate::fs::tty::console_if_ready()
-    {
-        for b in bytes {
-            tty.receive(b);
-        }
+    // To the virtual console in front, unless the key switches VTs (ADR
+    // 0185).
+    let console = input::console_input();
+    if code != 0xE0 && !crate::fs::vt::key(code, ext, console) && console {
+        crate::fs::vt::type_bytes(&bytes);
     }
 }
 

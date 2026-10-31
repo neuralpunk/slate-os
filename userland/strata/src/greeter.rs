@@ -214,6 +214,68 @@ fn someone_else_row(p: &mut Painter<'_>, pal: &Palette, f: &Fonts<'_>, a: Area, 
 
 /// Draw the whole screen: the lock screen's composition (ADR 0124), the
 /// people where the lock screen has the person.
+/// The login screen's backdrop alone (the default wallpaper, the mark, the
+/// computer's name): what it leaves when a login succeeds, and what
+/// Strata's desktop fades in from (ADR 0186).
+pub fn backdrop_canvas(
+    pal: &Palette,
+    f: &Fonts<'_>,
+    host: &str,
+    w: i32,
+    h: i32,
+    scale: f32,
+    cache: &mut GlyphCache,
+) -> Canvas {
+    let mut c = Canvas::new(w, h, pal.desktop);
+    let mut p = Painter::new(&mut c, cache, scale);
+    crate::lock::backdrop(&mut p, pal, f, None, host, None, None);
+    c
+}
+
+/// The login screen's first frame `first` fading in from a screen of
+/// `colour`, in about 200 ms (at once with reduced motion).
+fn fade_in(d: &mut Display, first: &Canvas, colour: slate_ui::Color) {
+    if !crate::settings::Settings::system().reduced_motion {
+        let mut c = Canvas::new(first.width, first.height, colour);
+        let plain = Canvas::new(first.width, first.height, colour);
+        const STEPS: u32 = 12;
+        for i in 1..STEPS {
+            let t = crate::motion::ease_out(i as f32 / STEPS as f32);
+            c.pixels.copy_from_slice(&plain.pixels);
+            c.composite(first, t, 0);
+            d.present(&c.pixels);
+            slate_rt::time::sleep_ns(16_000_000);
+        }
+    }
+    d.present(&first.pixels);
+}
+
+/// The login screen's last frame `last` fading to its backdrop, in about
+/// 200 ms (at once with reduced motion).
+fn fade_to_backdrop(
+    d: &mut Display,
+    last: Canvas,
+    pal: &Palette,
+    f: &Fonts<'_>,
+    host: &str,
+    scale: f32,
+    cache: &mut GlyphCache,
+) {
+    if crate::settings::Settings::system().reduced_motion {
+        return;
+    }
+    let back = backdrop_canvas(pal, f, host, last.width, last.height, scale, cache);
+    let mut c = Canvas::new(last.width, last.height, pal.desktop);
+    const STEPS: u32 = 12;
+    for i in 1..=STEPS {
+        let t = crate::motion::ease_out(i as f32 / STEPS as f32);
+        c.pixels.copy_from_slice(&back.pixels);
+        c.composite(&last, 1.0 - t, 0);
+        d.present(&c.pixels);
+        slate_rt::time::sleep_ns(16_000_000);
+    }
+}
+
 pub fn draw(p: &mut Painter<'_>, pal: &Palette, f: &Fonts<'_>, v: &View<'_>) -> Hits {
     use crate::lock::{self, FIELD_W};
     let (w, h) = p.size();
@@ -471,6 +533,8 @@ fn run(fonts: &Fonts<'_>, people: &[Person], screen: Screen) -> Result<(), Strin
     // The time zone, worked out again when its files change.
     let mut zone = crate::watch::Watcher::new(b"", crate::watch::ZONE);
     let mut dirty = true;
+    // Whether the login screen has been shown (its first frame fades in).
+    let mut shown_once = false;
     let rows = people.len() + 1;
     slate_rt::eprintln!("strata-login: showing the login screen ({} to choose from)", people.len());
     console_prompt(&alloc::format!("\n{host} login: "), true);
@@ -507,7 +571,14 @@ fn run(fonts: &Fonts<'_>, people: &[Person], screen: Screen) -> Result<(), Strin
                 change: expired.as_ref().map(|_| (&new_pw, &again_pw)),
             };
             hits = draw(&mut p, &pal, fonts, &v);
-            s.display.present(&c.pixels);
+            // The first frame fades in from the boot splash's colour, the
+            // desktop's graphite (ADR 0186).
+            if shown_once {
+                s.display.present(&c.pixels);
+            } else {
+                shown_once = true;
+                fade_in(&mut s.display, &c, Palette::GRAPHITE.desktop);
+            }
             dirty = false;
         }
         let mut con = alloc::vec![io::PollFd { fd: 0, events: io::POLLIN, revents: 0 }];
@@ -709,6 +780,7 @@ fn run(fonts: &Fonts<'_>, people: &[Person], screen: Screen) -> Result<(), Strin
             }
         }
         let Some((who, mut pw, on_screen, mut new)) = attempt else { continue };
+        let mut last_frame: Option<Canvas> = None;
         status = Status::Working;
         if let Some(s) = screen.as_mut() {
             let mut c = Canvas::new(w, h, pal.desktop);
@@ -729,6 +801,7 @@ fn run(fonts: &Fonts<'_>, people: &[Person], screen: Screen) -> Result<(), Strin
             };
             draw(&mut p, &pal, fonts, &v);
             s.display.present(&c.pixels);
+            last_frame = Some(c);
         }
         let fd = connect_broker()?;
         // A login on the screen is Strata alone; one typed on the console
@@ -744,13 +817,32 @@ fn run(fonts: &Fonts<'_>, people: &[Person], screen: Screen) -> Result<(), Strin
         match r {
             Ok(()) => {
                 pw.fill(0);
+                // The column fades away, leaving the backdrop the
+                // desktop fades in from (ADR 0186).
+                if let (Some(sc), Some(c)) = (screen.as_mut(), last_frame.take()) {
+                    fade_to_backdrop(&mut sc.display, c, &pal, fonts, &host, scale, &mut cache);
+                }
                 // Let go of the display and the input devices, then the
-                // broker starts the session; wait for it to end.
+                // broker starts the session. One on the screen goes to a
+                // virtual console of its own (ADR 0185): this login screen
+                // ends, and getty starts a fresh one, which waits on the
+                // first virtual console for "Switch person". One on the
+                // console waits for the session to end.
                 drop(screen.take());
                 slate_rt::eprintln!("strata-login: session for {who}");
                 let started = io::write_all(fd, b"start\n\n");
                 let mut b = [0u8; 64];
-                while started.is_ok() && matches!(io::read(fd, &mut b), Ok(n) if n > 0) {}
+                while !on_screen && started.is_ok() && matches!(io::read(fd, &mut b), Ok(n) if n > 0) {}
+                let _ = io::close(fd);
+                return Ok(());
+            }
+            // Their session is running (switched away from): the broker
+            // brings it to the front once this login screen has gone; its
+            // lock screen asks for the password.
+            Err(e) if e.starts_with("switch ") => {
+                pw.fill(0);
+                drop(screen.take());
+                slate_rt::eprintln!("strata-login: back to {who}'s session");
                 let _ = io::close(fd);
                 return Ok(());
             }

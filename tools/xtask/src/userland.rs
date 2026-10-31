@@ -147,6 +147,8 @@ pub const PROGRAMS: &[Program] = &[
     Program { package: "slate-nettools", binary: "lookup", links: Some(&[]), mode: 0o755, dir: "bin", system: true },
     Program { package: "slate-nettools", binary: "ip", links: Some(&[]), mode: 0o755, dir: "bin", system: true },
     Program { package: "slate-hwtools", binary: "lspci", links: Some(&[]), mode: 0o755, dir: "bin", system: true },
+    // Sound (ADR 0184): the cards, and Settings › Sound's self-test.
+    Program { package: "slate-sound", binary: "slate-sound", links: Some(&[]), mode: 0o755, dir: "bin", system: true },
     Program { package: "slate-hwtools", binary: "lsusb", links: Some(&[]), mode: 0o755, dir: "bin", system: true },
     Program {
         package: "slate-nettools",
@@ -176,6 +178,14 @@ pub const PROGRAMS: &[Program] = &[
     },
     Program { package: "slate-strata", binary: "strata", links: Some(&[]), mode: 0o755, dir: "bin", system: true },
     Program { package: "slate-strata", binary: "strata-keys", links: Some(&[]), mode: 0o755, dir: "bin", system: true },
+    Program {
+        package: "slate-strata",
+        binary: "strata-notify",
+        links: Some(&[]),
+        mode: 0o755,
+        dir: "bin",
+        system: true,
+    },
     Program {
         package: "slate-strata",
         binary: "strata-settings",

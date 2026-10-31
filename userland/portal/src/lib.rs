@@ -19,6 +19,7 @@ extern crate alloc;
 #[cfg(test)]
 extern crate std;
 
+pub mod notify;
 pub mod service;
 pub mod settings;
 pub mod wire;

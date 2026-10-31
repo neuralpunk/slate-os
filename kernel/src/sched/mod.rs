@@ -135,6 +135,10 @@ pub struct CpuSched {
     acct_mark: AtomicU64,
     /// Time spent in user mode, in the kernel, and idle (/proc/stat).
     pub times: CpuTimes,
+    /// What runs here, for placing real-time threads (ADR 0184): 0 the
+    /// idle thread, 1 a normal thread, a real-time thread's rank (101 to
+    /// 199) with its boost.
+    running_rank: AtomicU32,
     /// The page-table root this CPU has loaded (0 before the first
     /// switch). Page tables are freed only when no CPU has them loaded
     /// ([`wait_root_unused`]).
@@ -269,6 +273,7 @@ pub fn init(apic_ids: &[u32]) {
                 acct_mark: AtomicU64::new(0),
                 active_root: AtomicU64::new(0),
                 times: CpuTimes::default(),
+                running_rank: AtomicU32::new(0),
             })
             .collect()
     });
@@ -448,7 +453,9 @@ pub fn reprioritize(t: &Arc<Thread>) {
 /// Set a thread's policy, real-time priority and nice value (sched(7)).
 /// The caller has checked them and the caller's right to.
 pub fn set_params(t: &Arc<Thread>, policy: u8, rt_priority: u8, nice: i8, reset_on_fork: bool) {
-    t.policy.store(policy, Ordering::Relaxed);
+    if t.policy.swap(policy, Ordering::Relaxed) != policy {
+        t.rt_restart();
+    }
     t.rt_priority.store(rt_priority, Ordering::Relaxed);
     t.nice.store(nice.clamp(-20, 19), Ordering::Relaxed);
     t.reset_on_fork.store(reset_on_fork, Ordering::Relaxed);
@@ -476,8 +483,16 @@ pub fn wake(t: &Arc<Thread>) -> bool {
     let last = t.cpu.load(Ordering::Relaxed) as usize;
     let target = match t.pinned {
         Some(c) => c as usize,
-        None if allowed(t, last) => last,
-        None => least_loaded_cpu_for(t),
+        None => {
+            let usual = if allowed(t, last) { last } else { least_loaded_cpu_for(t) };
+            // A real-time thread goes where it runs at once (ADR 0184).
+            match t.class() {
+                Class::RealTime { priority, .. } => {
+                    rt_target(t, 100 + u32::from(priority), Some(usual)).unwrap_or(usual)
+                }
+                Class::Fair { .. } => usual,
+            }
+        }
     };
     let cpu = &cpus()[target];
     enqueue(cpu, t.clone(), Place::Wake);
@@ -487,6 +502,36 @@ pub fn wake(t: &Arc<Thread>) -> bool {
         cpu.need_resched.store(true, Ordering::Relaxed);
     }
     true
+}
+
+/// What a CPU's `running_rank` says for `t` running there.
+fn running_rank_of(t: &Thread) -> u32 {
+    match t.class() {
+        Class::RealTime { priority, .. } => 100 + u32::from(priority),
+        Class::Fair { .. } => 1,
+    }
+}
+
+/// Where a real-time thread of rank `rank` runs at once: `prefer` if what
+/// runs there ranks lower, else the online CPU it may use whose running
+/// thread ranks lowest (idle first, then normal threads, then lower
+/// real-time ones; ties to the shorter queue). None if every CPU runs
+/// something at least as high. Linux's real-time scheduler is said to
+/// push and pull its threads between CPUs the same way (sched(7)
+/// describes only the per-CPU rules; this placement is Slate's own).
+fn rt_target(t: &Thread, rank: u32, prefer: Option<usize>) -> Option<usize> {
+    let cs = cpus();
+    let usable = |i: usize| cs[i].online.load(Ordering::Acquire) && allowed(t, i);
+    let below = |i: usize| cs[i].running_rank.load(Ordering::Relaxed) < rank;
+    if let Some(p) = prefer
+        && usable(p)
+        && below(p)
+    {
+        return Some(p);
+    }
+    (0..cs.len())
+        .filter(|&i| usable(i) && below(i))
+        .min_by_key(|&i| (cs[i].running_rank.load(Ordering::Relaxed), cs[i].queued.load(Ordering::Relaxed)))
 }
 
 /// A thread in another CPU's queue that this CPU may take.
@@ -655,7 +700,33 @@ pub fn schedule() {
             enqueue(&cpus()[least_loaded_cpu_for(&prev)], prev.clone(), Place::Tail);
         }
     }
+    if !still_runnable && !prev_idle {
+        prev.rt_restart();
+    }
     let next = pick_next(cpu, if yielding { Some(&prev) } else { None }).unwrap_or_else(|| idle.clone());
+    let next_rank = if Arc::ptr_eq(&next, &idle) { 0 } else { running_rank_of(&next) };
+    cpu.running_rank.store(next_rank, Ordering::Relaxed);
+    // A real-time thread something higher preempted moves to a CPU where
+    // it runs at once, if there is one (ADR 0184).
+    if still_runnable
+        && !prev_idle
+        && !yielding
+        && !Arc::ptr_eq(&next, &prev)
+        && prev.pinned.is_none()
+        && let Class::RealTime { priority, .. } = prev.class()
+        && let Some(other) = rt_target(&prev, 100 + u32::from(priority), None)
+        && other != here
+    {
+        let moved = {
+            let mut q = cpu.queue.lock();
+            let moved = q.remove(&prev);
+            cpu.queued.store(q.len(), Ordering::Relaxed);
+            moved
+        };
+        if moved {
+            enqueue(&cpus()[other], prev.clone(), Place::Tail);
+        }
+    }
     let slice = match next.class() {
         Class::RealTime { rr: true, .. } => policy::RR_SLICE_TICKS,
         Class::RealTime { rr: false, .. } => u32::MAX,
@@ -848,6 +919,9 @@ pub fn tick() {
         update_curr(cpu, &t);
         if let Some(p) = &t.process {
             crate::proc::check_cpu_limit(p);
+            if matches!(t.policy.load(Ordering::Relaxed), policy::SCHED_FIFO | policy::SCHED_RR) {
+                crate::proc::rlimit::check_rt_limit(p, t.rt_ran_ns(), &t.rt_signalled);
+            }
         }
     }
     if cpu.slice_left.fetch_sub(1, Ordering::Relaxed) <= 1 {

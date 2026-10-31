@@ -101,7 +101,43 @@ pub const TESTS: &[Test] = &[
     Test { name: "time::rtc_matches_wall_clock", run: rtc_matches },
     Test { name: "time::set_wall_clock_and_rtc", run: set_wall_clock },
     Test { name: "fbcon::draws_glyphs", run: fbcon_draws },
+    Test { name: "fbcon::splash_layout", run: splash_layout },
 ];
+
+/// The boot splash's line (ADR 0186): under the mark, on the screen, its
+/// moving part within the track, sweeping across and back.
+fn splash_layout() -> Result<(), &'static str> {
+    use crate::drivers::fbcon::{splash_segment, splash_track};
+    for (w, h, size) in [(1280, 800, 96), (3840, 2160, 192), (640, 480, 96)] {
+        let (x, y, tw, th) = splash_track(w, h, size);
+        ensure(x + tw <= w && y + th <= h, "the track leaves the screen")?;
+        ensure(y > h * 2 / 5 + size / 2, "the track isn't under the mark")?;
+        for n in 0..200 {
+            let (start, len) = splash_segment(tw, n);
+            ensure(start + len <= tw && len > 0, "the moving part leaves the track")?;
+        }
+        ensure(splash_segment(tw, 0).0 == 0 && splash_segment(tw, 40).0 == tw - tw / 4, "it doesn't sweep across")?;
+    }
+    // A test boot isn't quiet: no splash in the way of the console.
+    ensure(!crate::drivers::fbcon::splash_showing(), "a splash on a test boot")?;
+    // Shown for a moment: graphite in the corner, the mark's chalk in the
+    // middle of its slab, the track under it; then the console again.
+    use crate::drivers::fbcon;
+    let Some(fb) = fbcon::framebuffer() else { return Ok(()) };
+    let (w, h) = (fb.width, fb.height);
+    fbcon::splash_start("quiet");
+    let corner = fbcon::pixel_rgb(2, 2);
+    let size = if h >= 1400 { 192 } else { 96 };
+    // The slab's top face, a third of the way down the mark.
+    let slab = fbcon::pixel_rgb(w / 2, h * 2 / 5 - size / 2 + size * 9 / 32);
+    let (tx, ty, _, _) = splash_track(w, h, size);
+    let track = fbcon::pixel_rgb(tx + 2, ty);
+    fbcon::splash_end("the test");
+    ensure(!fbcon::splash_showing(), "the splash didn't end")?;
+    ensure(corner == Some((0x12, 0x12, 0x11)), "the splash's background isn't graphite")?;
+    ensure(slab.is_some_and(|(r, _, _)| r > 0xC0), "no mark in the middle")?;
+    ensure(track.is_some_and(|(r, _, _)| r > 0x20 && r < 0xA0), "no track under the mark")
+}
 
 /// The framebuffer console draws Slate's font in the right colors.
 fn fbcon_draws() -> Result<(), &'static str> {

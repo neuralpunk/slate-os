@@ -15,7 +15,8 @@
 //! light or dark theme as it changes, with its icon and Strata's fonts
 //! (`flatpak::themed`). M33: source packages (autotools, CMake, Meson,
 //! Cargo, setuptools) built, tested, installed and run in an Arch Linux
-//! box (`boxes::accept`).
+//! box (`boxes::accept`). M30 phase 1: alsa-lib's tools, PipeWire and
+//! the PulseAudio server play sound (`sound::pipewire`).
 //! M20: Slate's own tools on the real network: names with IPv4 and IPv6
 //! addresses, a download over IPv4 from the internet and over IPv6 (from
 //! the host's server through QEMU's network, and from the internet when
@@ -246,6 +247,8 @@ pub fn run(o: &Opts) -> Result {
     crate::flatpak::themed()?;
     // M33: Linux from source in an Arch box (ADR 0183).
     crate::boxes::accept()?;
+    // M30 phase 1: PipeWire plays sound (ADR 0184).
+    crate::sound::pipewire(false, true)?;
     println!(
         "xtask: accept: M12 passed (ssh, git over HTTP and HTTPS, C with GCC and Clang, Rust, Python; \
          workbench passes e2fsck), M13's DNS check, M15 (podman rootful and rootless, docker), M18a (Sway \

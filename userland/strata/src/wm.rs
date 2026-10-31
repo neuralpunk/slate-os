@@ -218,6 +218,8 @@ pub enum Command {
     /// alt + space: the keyboard focus to the focused window's title bar
     /// buttons (ADR 0124's addendum).
     TitleButtons,
+    /// super + s: quick settings (ADR 0186).
+    QuickSettings,
 }
 
 /// What a key does while a title bar's buttons have the keyboard focus.
@@ -278,6 +280,7 @@ pub fn binding(code: u16, logo: bool, shift: bool, alt: bool) -> Option<Command>
         KEY_SPACE => Command::Launcher,
         KEY_E if shift => Command::Quit,
         KEY_L => Command::Lock,
+        KEY_S => Command::QuickSettings,
         _ => return None,
     })
 }
@@ -297,6 +300,8 @@ pub struct Wm {
     pub others: Vec<Area>,
     /// The theme's title bar height, its groove included (ADR 0167).
     pub title_h: f32,
+    /// Windows removed while shown, for their closing motion.
+    closed: Vec<(Window, Area)>,
 }
 
 impl Wm {
@@ -311,6 +316,7 @@ impl Wm {
             work: Area::new(0.0, BAR_H, w, h - BAR_H),
             others: Vec::new(),
             title_h: draw::TITLE_H,
+            closed: Vec::new(),
         }
     }
 
@@ -424,14 +430,26 @@ impl Wm {
             .map(|w| w.id)
     }
 
-    /// Remove a window; the focus goes to the window below it.
+    /// Remove a window; the focus goes to the window below it. One that
+    /// was shown is kept, with its frame, for its closing motion
+    /// ([`Wm::take_closed`]).
     pub fn remove(&mut self, id: WinId) {
         let Some(i) = self.windows.iter().position(|w| w.id == id) else { return };
         let ws = self.windows[i].workspace;
+        let shown = ws == self.active && self.windows[i].state != State::Minimized;
+        if let Some(a) = self.frame(id).filter(|_| shown) {
+            self.closed.push((self.windows[i].clone(), a));
+        }
         self.windows.remove(i);
         if self.focus[ws] == Some(id) {
             self.focus[ws] = self.top_on(ws, None);
         }
+    }
+
+    /// The windows removed while shown since the last call, with their
+    /// frames.
+    pub fn take_closed(&mut self) -> Vec<(Window, Area)> {
+        core::mem::take(&mut self.closed)
     }
 
     /// The windows on workspace `ws`, bottom first (the window list's

@@ -32,12 +32,12 @@ needs:
 | Hardware | What works |
 |---|---|
 | Disks | NVMe drives, SATA drives (with the firmware's SATA mode set to AHCI) and USB drives |
-| Wired network | Intel I210, I211 and 82576 network cards, and USB Ethernet adapters of the standard (CDC Ethernet) kind |
+| Wired network | Intel I210, I211 and 82576 network cards, the 2.5 Gigabit I225 and I226, and USB Ethernet adapters of the standard (CDC Ethernet) kind |
 | Wi-Fi | Not supported yet. Use a wired connection or a USB Ethernet adapter |
 | Keyboard and mouse | USB (through the PC's USB 3 controller) and PS/2 |
 | Graphics | Any graphics card, at the resolution the PC starts with. Some AMD Radeon graphics can also run at your monitor's own resolution (see "Full graphics on AMD Radeon") |
 | Bluetooth | USB Bluetooth adapters can pair with devices, but Bluetooth keyboards, mice and headphones can't be used yet |
-| Sound | Not supported yet |
+| Sound | Built-in sound (Intel HD Audio, on most PCs) and USB speakers and headsets, tested in virtual machines so far. Not over HDMI or DisplayPort yet, and no recording from USB headsets |
 | Sleep | Not supported yet. A short press of the power button shuts the PC down cleanly |
 
 Many PCs have built-in Ethernet from Realtek or another maker that

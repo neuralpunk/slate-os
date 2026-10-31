@@ -46,11 +46,18 @@ pub const ALPINE_VERSION: &str = "3.22.6";
 pub const ALPINE_SHA256: &str = "27694aaa55fd7a9e3ef596e0ad4eb66802308bb20172b17030cd5f4d8ae9bac2";
 pub const DEFAULT_MIRROR: &str = "http://dl-cdn.alpinelinux.org/alpine";
 /// What a graphical runtime needs: the kiosk compositor, Xwayland for X
-/// programs, the browser and a font.
-pub const DEFAULT_PACKAGES: &[&str] = &["sway", "xwayland", "firefox", "font-dejavu"];
+/// programs, the browser, a font, and the person's sound server (ADR
+/// 0185).
+pub const DEFAULT_PACKAGES: &[&str] =
+    &["sway", "xwayland", "firefox", "font-dejavu", "dbus", "pipewire", "wireplumber", "pipewire-pulse"];
 /// What Flatpak's apps need beside it (ADR 0114): their windows go
-/// through the kiosk compositor, and Flatpak wants a session bus.
-pub const FLATPAK_NEEDS: &[&str] = &["sway", "xwayland", "font-dejavu", "dbus"];
+/// through the kiosk compositor, Flatpak wants a session bus, and their
+/// sound goes to the person's PipeWire (ADR 0185).
+pub const FLATPAK_NEEDS: &[&str] =
+    &["sway", "xwayland", "font-dejavu", "dbus", "pipewire", "wireplumber", "pipewire-pulse"];
+/// The sound server's packages, which an upgrade adds to a runtime made
+/// before them.
+pub const SOUND_PACKAGES: &[&str] = &["dbus", "pipewire", "wireplumber", "pipewire-pulse"];
 
 /// `setup`'s command line.
 #[derive(Debug, PartialEq, Eq)]
@@ -613,7 +620,13 @@ pub fn upgrade(args: &[String]) -> Result<(), String> {
     if u.simulate {
         argv.push("--simulate");
     }
-    let done = in_runtime(root, &["/sbin/apk", "update", "--no-progress"]).and_then(|()| in_runtime(root, &argv));
+    let mut done = in_runtime(root, &["/sbin/apk", "update", "--no-progress"]).and_then(|()| in_runtime(root, &argv));
+    // A runtime made before the sound server (ADR 0185) gets it.
+    if done.is_ok() && !u.simulate && !fs::exists(format!("{root}/usr/bin/pipewire-pulse").as_bytes()) {
+        let mut add = alloc::vec!["/sbin/apk", "add", "--no-progress"];
+        add.extend_from_slice(SOUND_PACKAGES);
+        done = in_runtime(root, &add);
+    }
     if let Err(e) = done {
         if !kept {
             return Err(e);
@@ -630,6 +643,7 @@ pub fn upgrade(args: &[String]) -> Result<(), String> {
     } else {
         // Strata's fonts as the system has them now, and their cache.
         copy_fonts(root);
+        sound_config(root);
         let _ = in_runtime(root, &["/usr/bin/fc-cache", "-s"]);
         println!("slate-linux: the runtime in {root} is up to date: Alpine {after}");
         if kept {
@@ -693,6 +707,7 @@ fn setup(s: &Setup) -> Result<(), String> {
     // Strata's fonts, for the Settings portal's font names (M31 phase 4):
     // Flatpak's sandboxes see the runtime's fonts (/run/host/fonts).
     copy_fonts(root);
+    sound_config(root);
     // The fonts' cache, made now rather than by each program's first
     // start (M31 phase 2); Flatpak's sandboxes use the runtime's too
     // (/run/host/fonts-cache).
@@ -704,6 +719,35 @@ fn setup(s: &Setup) -> Result<(), String> {
     }
     println!("slate-linux: the Linux runtime in {root} is ready");
     Ok(())
+}
+
+/// The person's sound server's settings (ADR 0185): PipeWire's
+/// configuration directories' drop-ins (`*.conf.d/*.conf`, in SPA's JSON).
+/// Buffers no shorter than 1024 frames at 48 kHz (21 ms): Firefox asks
+/// for a few milliseconds, which PipeWire without real-time priority (none
+/// on Slate yet) can't keep, and its sound broke up (200 gaps in 3.6 s;
+/// 2 with these).
+pub const SOUND_CONFIG: &[(&str, &str)] = &[
+    ("etc/pipewire/pipewire.conf.d/50-slate.conf", "context.properties = { default.clock.min-quantum = 1024 }\n"),
+    (
+        "etc/pipewire/pipewire-pulse.conf.d/50-slate.conf",
+        "pulse.properties = { pulse.min.req = 1024/48000 pulse.min.frag = 1024/48000 pulse.min.quantum = 1024/48000 }\n",
+    ),
+];
+
+/// Write [`SOUND_CONFIG`] into the runtime at `root`.
+pub fn sound_config(root: &str) {
+    for (path, text) in SOUND_CONFIG {
+        let at = format!("{root}/{path}");
+        if let Some((dir, _)) = at.rsplit_once('/') {
+            let parent = dir.rsplit_once('/').map_or(dir, |(p, _)| p);
+            let _ = fs::mkdir(parent.as_bytes(), 0o755);
+            let _ = fs::mkdir(dir.as_bytes(), 0o755);
+        }
+        if let Err(e) = fs::write_file(at.as_bytes(), text.as_bytes(), 0o644) {
+            println!("slate-linux: {at}: {e}");
+        }
+    }
 }
 
 /// Strata's fonts, from Slate's system into the runtime's
@@ -782,7 +826,7 @@ mod tests {
         assert_eq!((s.root.as_str(), s.packages.clone()), ("/w", a(&["foot"])));
         assert_eq!(
             parse(&a(&["flatpak", "dbus"])).unwrap().packages,
-            a(&["flatpak", "dbus", "sway", "xwayland", "font-dejavu"])
+            a(&["flatpak", "dbus", "sway", "xwayland", "font-dejavu", "pipewire", "wireplumber", "pipewire-pulse"])
         );
         assert!(parse(&a(&["--mirror"])).is_err());
         assert!(parse(&a(&["-x"])).is_err());
@@ -792,6 +836,17 @@ mod tests {
         );
         assert_eq!(repositories("http://m/alpine"), "http://m/alpine/v3.22/main\nhttp://m/alpine/v3.22/community\n");
         assert!(verify(b"not alpine").is_err());
+    }
+
+    #[test]
+    fn sound_settings() {
+        // Drop-ins where PipeWire and pipewire-pulse read them, each a
+        // properties block with the 1024-frame floor.
+        for (path, text) in SOUND_CONFIG {
+            assert!(path.starts_with("etc/pipewire/") && path.ends_with(".conf"), "{path}");
+            assert!(text.contains("properties = {") && text.contains("1024"), "{text}");
+        }
+        assert_eq!(SOUND_CONFIG.len(), 2);
     }
 
     #[test]

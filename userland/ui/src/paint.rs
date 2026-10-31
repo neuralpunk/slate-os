@@ -33,6 +33,21 @@ impl core::fmt::Debug for Painter<'_> {
     }
 }
 
+/// Every text's size is multiplied by this (the person's text size;
+/// ADR 0186), as an `f32`'s bits: the program's, set once its settings
+/// are read.
+static TEXT_SCALE: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0x3F80_0000);
+
+/// Make text this much bigger (1 as designed).
+pub fn set_text_scale(k: f32) {
+    TEXT_SCALE.store(k.clamp(0.5, 3.0).to_bits(), core::sync::atomic::Ordering::Relaxed);
+}
+
+/// The text scale now.
+pub fn text_scale() -> f32 {
+    f32::from_bits(TEXT_SCALE.load(core::sync::atomic::Ordering::Relaxed))
+}
+
 impl<'a> Painter<'a> {
     pub fn new(canvas: &'a mut Canvas, cache: &'a mut GlyphCache, scale: f32) -> Painter<'a> {
         Painter { canvas, cache, scale, origin: (0.0, 0.0), view: None }
@@ -195,7 +210,7 @@ impl<'a> Painter<'a> {
 
     /// A style for `face` at a logical size, with tracking in ems.
     pub fn style<'s, 'f>(&self, face: &'s Face<'f>, size: f32, c: Color) -> Style<'s, 'f> {
-        Style::new(face, size * self.scale, c)
+        Style::new(face, size * self.scale * text_scale(), c)
     }
 
     /// Draw text with its baseline at logical `baseline`; returns the

@@ -21,11 +21,13 @@
 /* The guide: the website's graphite palette and type, set as a long manual.
    A chapter rail on the left (a drawer on phones), the text in a reading column. */
 :root {
-  --desktop: #121211; --well: #161615; --window: #1A1A19; --overlay: #1C1C1B;
-  --header: #222221; --divider: #262625; --raised: #262625; --active: #2A2A28;
-  --border: #333331; --border-strong: #3A3A38;
-  --chalk: #E3E1DC; --focus: #A9A7A2; --text-1: #C9C7C2; --text-2: #BEBCB7; --text-3: #A3A29F;
-  --text-4: #9B9994; --muted: #85837E; --inactive: #75736F; --decor: #5F5D59;
+  --desktop: #121211; --well: #161514; --window: #1A1918; --overlay: #1D1B19;
+  --header: #23201D; --divider: #2A2725; --raised: #2C2621; --active: #302B27;
+  --border: #38332F; --border-strong: #403A35;
+  --chalk: #E9E3DA; --focus: #A57553; --text-1: #D6CFC5; --text-2: #C9C2B8; --text-3: #B8B0A6;
+  --text-4: #A49C92; --muted: #8E877E; --inactive: #77706A; --decor: #5F5A54;
+  /* Copper Noir's copper, rationed: focus, the active, the selected, the one action */
+  --copper: #D39466; --copper-hi: #DFA77E; --copper-on: #1A1310; --copper-dim: #7A5232;
   --sage: #A4B38C; --sage-t: #2D2F29; --sage-b: #4A5041;
   --moss: #8FB2A4; --moss-t: #2A2F2C; --moss-b: #434F4A;
   --clay: #D0907E; --clay-t: #332B27; --clay-b: #5A433C;
@@ -208,6 +210,14 @@ footer { border-top: 1px solid var(--divider); padding-block: 40px calc(40px + e
   .nav, .rail, .search, .search-note, .copy, .top-link, body::after { display: none !important; }
   .layout { display: block; } body { background: #fff; color: #222; } .ch > h2, .ch h3, .ch strong, code, td:first-child { color: #000; }
 }
+
+/* ── Copper Noir ─────────────────────────────── */
+::selection { background: var(--copper); color: var(--copper-on); }
+:focus-visible { outline-color: var(--copper); }
+.head h1 .serif, .ch > h2 .serif { color: var(--copper); }
+.ch a:hover { color: var(--copper); }
+.rail a.on span, .ch > h2 .n { color: var(--copper); }
+.nav-links a[aria-current] { color: var(--copper); }
 </style>
 </head>
 <body>
@@ -352,7 +362,7 @@ footer { border-top: 1px solid var(--divider); padding-block: 40px calc(40px + e
       <tr><td>Keyboard and mouse</td><td>USB (through the PC's USB 3 controller), PS/2, and Bluetooth Low Energy mice and keyboards</td></tr>
       <tr><td>Graphics</td><td>Any card, at the resolution the PC starts with. Some AMD Radeon graphics can run at your monitor's own resolution (<a href="#displays">full graphics</a>)</td></tr>
       <tr><td>Bluetooth</td><td>USB adapters, and the Bluetooth half of MediaTek's MT7961, MT7922, MT7902 and MT7925 cards</td></tr>
-      <tr><td>Sound</td><td>Not yet</td></tr>
+      <tr><td>Sound</td><td>Built-in sound (Intel HD Audio, on most PCs) and USB speakers and headsets. Tested in virtual machines so far; not over HDMI or DisplayPort, and no recording from USB headsets yet</td></tr>
       <tr><td>Sleep</td><td>Not yet. A short press of the power button shuts down cleanly</td></tr>
     </tbody>
   </table></div>
@@ -393,6 +403,7 @@ make iso     <span class="c"># target/slate.iso, for DVDs and virtual machines</
   <h3>Start from the stick</h3>
   <p>Press the boot menu key while the PC starts (often <kbd>F12</kbd>, <kbd>F11</kbd>, <kbd>F8</kbd> or <kbd>Esc</kbd>) and choose the stick. If it's listed twice, the entry starting "UEFI:" is the one to choose.</p>
   <p>SlateOS's boot menu shows <span class="ui">Install Slate</span> for three seconds, then starts it. <span class="ui">Install Slate (text mode)</span> starts the text installer instead.</p>
+  <p>While it starts, a dark screen shows SlateOS's mark with a line moving under it. Press <kbd>Esc</kbd> to see the start-up messages instead; if anything goes wrong, they show by themselves.</p>
   <figure><img src="assets/shot-boot-menu.webp" alt="SlateOS's boot menu" loading="lazy" width="1280" height="800"><figcaption>slate-loader, SlateOS's own bootloader. Press e on an entry to edit its kernel command line.</figcaption></figure>
   <h3>Try SlateOS without installing</h3>
   <p>On the installer's welcome screen, <span class="ui">Try SlateOS</span> starts the whole Strata desktop from the stick, as the user <code>live</code> with no password. Nothing on the computer's disks changes, and everything is gone when you restart. When you're ready, <span class="ui">Install SlateOS</span> on the top bar (or in the launcher) brings the installer back.</p>
@@ -456,6 +467,7 @@ slate-install --disk sda --password-file /tmp/pw --yes</pre></div>
     <figure><img src="assets/shot-login.webp" alt="The login screen" loading="lazy" width="1440" height="900"><figcaption>The login screen.</figcaption></figure>
     <figure><img src="assets/shot-lock.webp" alt="The lock screen" loading="lazy" width="1440" height="900"><figcaption>The lock screen: super + l, or after a while idle.</figcaption></figure>
   </div>
+  <p>The login screen fades away into your desktop. To let someone else use the computer, lock the screen and choose <span class="ui">Switch person</span>: your desktop stays open, locked, while they log in, and logging in as yourself again brings it back as you left it.</p>
   <p>With the command line only, the console shows a login prompt and the PC's address (<code>Network address: 192.168.1.50</code>). Log in as yourself; <code>su -</code> with your own password gives a root shell.</p>
   <div class="note"><svg><use href="#i-info"/></svg><div><b class="k">good to know</b><p>If the login screen ever doesn't work, press <kbd>e</kbd> in the boot menu and add <code>slate.login=text</code> to the command line for a text login.</p></div></div>
 </section>
@@ -471,8 +483,14 @@ slate-install --disk sda --password-file /tmp/pw --yes</pre></div>
   <ul>
     <li><strong>Left:</strong> the <span class="ui">Applications</span> menu (or press <kbd>super</kbd> on its own) and the workspaces <span class="ui">1</span>–<span class="ui">4</span>.</li>
     <li><strong>Middle:</strong> the open windows. Click one to bring it up, or to minimise it if it's already in front.</li>
-    <li><strong>Right:</strong> the mode (<span class="ui">slate mode</span> or Linux compatibility), the network, the clock, and the power button.</li>
+    <li><strong>Right:</strong> the mode (<span class="ui">slate mode</span> or Linux compatibility), the status icons (the volume, the network and the battery), the clock, and the power button.</li>
   </ul>
+  <p>An app that's starting shows <span class="ui">Opening …</span> in the top bar until its window appears.</p>
+  <h3>Quick settings and notifications</h3>
+  <p>Click the status icons (or press <kbd>super</kbd> + <kbd>s</kbd>) for <strong>quick settings</strong>: the volume and mute, the network, Bluetooth, the dark style, <span class="ui">Do Not Disturb</span>, the battery, your latest notifications, and buttons for Settings, locking and the power options.</p>
+  <p><strong>Notifications</strong> from apps slide in at the top right for a few seconds; urgent ones, like the Clock's alarms, stay until you close them. Click one to bring its app forward. A dot on the speaker icon means there are ones you haven't seen; they wait in quick settings until you clear them. With Do Not Disturb on, only urgent ones show. From the command line: <code>strata-notify "Backup done" "3 files"</code>.</p>
+  <h3>Sound</h3>
+  <p>The keyboard's volume and mute keys change the volume, with a small pop-up showing the level; the slider is in quick settings, and <code>slate-sound volume</code> sets it from the command line. Linux apps, Firefox among them, play sound too. Settings › Sound lists your sound cards and plays a short test tune.</p>
   <h3>Windows</h3>
   <p>Drag a window by its title bar and resize it from its edges. The title bar's buttons minimise, maximise and close. Drag a window to a screen edge or corner to fill that half or quarter. A terminal resizes by whole characters, showing its size as you drag.</p>
   <p>Linux programs' windows carry a <strong>linux</strong> tag in their title bar, so you always know what's SlateOS's and what isn't.</p>
@@ -510,6 +528,9 @@ slate-install --disk sda --password-file /tmp/pw --yes</pre></div>
       <tr><td><kbd>super</kbd> + <kbd>1</kbd>–<kbd>4</kbd></td><td>switch workspace (with <kbd>shift</kbd>: send the window there)</td></tr>
       <tr><td><kbd>super</kbd> + <kbd>q</kbd></td><td>close the focused window</td></tr>
       <tr><td><kbd>super</kbd> + <kbd>l</kbd></td><td>lock the screen</td></tr>
+      <tr><td><kbd>super</kbd> + <kbd>s</kbd></td><td>quick settings</td></tr>
+      <tr><td>volume and mute keys</td><td>change the volume, with a pop-up</td></tr>
+      <tr><td><kbd>ctrl</kbd> + <kbd>alt</kbd> + <kbd>F2</kbd>–<kbd>F6</kbd></td><td>a text console, for when the desktop won't answer (<kbd>alt</kbd> + <kbd>F7</kbd> comes back)</td></tr>
       <tr><td><kbd>super</kbd> + <kbd>shift</kbd> + <kbd>e</kbd></td><td>leave Strata for the text console</td></tr>
     </tbody>
   </table></div>
@@ -570,7 +591,7 @@ slate-install --disk sda --password-file /tmp/pw --yes</pre></div>
     <thead><tr><th>section</th><th>what's there</th></tr></thead>
     <tbody>
       <tr><td>Appearance</td><td>The theme (Graphite, Light, Copper Noir or Sediment) and the wallpaper: a built-in design or your own picture</td></tr>
-      <tr><td>Accessibility</td><td>High contrast, dimming the windows you aren't using, and less motion</td></tr>
+      <tr><td>Accessibility</td><td>High contrast, dimming the windows you aren't using, less motion, and larger text and a larger pointer</td></tr>
       <tr><td>Date and time</td><td>The computer's time zone, for everyone</td></tr>
       <tr><td>Network</td><td>Automatic or a fixed address, for every card or each card on its own</td></tr>
       <tr><td>Bluetooth</td><td>Devices nearby, pairing and forgetting them</td></tr>
@@ -578,7 +599,11 @@ slate-install --disk sda --password-file /tmp/pw --yes</pre></div>
       <tr><td>Security</td><td>Slate mode and Linux compatibility, the firewall and its open ports, the system image, disk encryption</td></tr>
       <tr><td>Session</td><td>When the screen locks; removing the desktop if you want the command line only</td></tr>
       <tr><td>Displays</td><td>Where each display is, its resolution, refresh rate and scale; full graphics on supported AMD Radeon graphics</td></tr>
+      <tr><td>Sound</td><td>Your sound cards, and a short test tune</td></tr>
       <tr><td>Linux boxes</td><td>The disk space your Linux systems use, and cleaning or removing them (<a href="#source">chapter 23</a>)</td></tr>
+      <tr><td>Mouse and touchpad</td><td>The pointer's speed, natural scrolling, left-handed buttons, and tap to click</td></tr>
+      <tr><td>Night Light</td><td>Warmer colours in the evening: on, off, or on a schedule, in five strengths</td></tr>
+      <tr><td>Power</td><td>When the screen turns off, and the battery's percentage in the top bar</td></tr>
       <tr><td>About</td><td>This computer</td></tr>
     </tbody>
   </table></div>
@@ -735,7 +760,7 @@ ssh ada@192.168.1.50 'mkdir -p .ssh &amp;&amp; cat &gt;&gt; .ssh/authorized_keys
     <li><strong>Mice and keyboards</strong> using Bluetooth Low Energy work, with their pairings kept.</li>
     <li><strong>A mouse pairs by itself</strong>: put it in pairing mode and the pointer appears, even in "Try SlateOS". A device paired this way can move and click but never type; pair it from Settings to give it everything. <code>/etc/slate/bluetooth</code> sets <code>autopair=always</code> (default), <code>auto</code> or <code>never</code>.</li>
     <li><strong>Pairings made while trying SlateOS</strong> carry over to the installed system.</li>
-    <li>Headphones and other audio can't be used yet (no sound support).</li>
+    <li>Bluetooth headphones and speakers can't play sound yet.</li>
   </ul>
   <div class="cmd"><div class="bar">slate-bt<button class="copy" type="button">copy</button></div><pre>slate-bt status
 slate-bt scan

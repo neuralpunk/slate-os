@@ -58,6 +58,8 @@ fn kernel_main() -> ! {
     arch::init_bsp_late();
     if let Some(fb) = boot::framebuffer() {
         drivers::fbcon::init(fb);
+        // The boot splash, on a quiet boot (ADR 0186).
+        drivers::fbcon::splash_start(info.cmdline);
     }
 
     let stack = mm::vmap::KernelStack::new().expect("out of memory for the boot stack");
@@ -88,6 +90,7 @@ extern "C" fn kernel_main_on_own_stack() -> ! {
     arch::smp::start_aps();
     mm::reclaim_bootloader_memory();
     mm::vmap::start_stack_reaper();
+    drivers::fbcon::splash_animate();
     proc::aslr::configure(boot::info().cmdline);
     mm::canary::start_quarantine(boot::info().cmdline);
     drivers::pci::init();

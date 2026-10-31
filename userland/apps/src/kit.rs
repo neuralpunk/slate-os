@@ -12,7 +12,7 @@ use alloc::vec::Vec;
 
 use slate_strata::fonts::Fonts;
 use slate_strata::settings::{self, Settings};
-use slate_strata_client::{Connection, Event, PointerKind, clipboard};
+use slate_strata_client::{Connection, Event, PointerKind, clipboard, cursor};
 use slate_ui::color::Color;
 use slate_ui::edit::{EditKey, LineEdit};
 use slate_ui::graphite::Palette;
@@ -169,6 +169,33 @@ pub fn run(program: &str, name: &str, path: Option<&str>, hints: Hints, app: &mu
     }
 }
 
+/// Where the last frame's controls were drawn, with the pointer's shape
+/// over each (`cursor::*`): buttons and tabs a hand, fields a text beam
+/// (ADR 0186). The window loop asks Strata for the shape under the
+/// pointer.
+static HOT: slate_rt::sync::Mutex<Vec<(Area, u8)>> = slate_rt::sync::Mutex::new(Vec::new());
+/// Where the first button went down, while it is held: the control there
+/// looks pressed.
+static PRESS: slate_rt::sync::Mutex<Option<(f32, f32)>> = slate_rt::sync::Mutex::new(None);
+
+/// Say that `a` is a control the pointer takes `shape` over. Apps with
+/// controls of their own call it from [`App::draw`].
+pub fn mark(a: Area, shape: u8) {
+    HOT.lock().push((a, shape));
+}
+
+/// Whether `a` is being pressed (the first button went down in it and
+/// is held).
+pub fn pressed(a: Area) -> bool {
+    PRESS.lock().is_some_and(|(x, y)| a.contains(x, y))
+}
+
+/// The pointer's shape at (x, y) by the last frame's marks: the last
+/// drawn on top.
+fn shape_at(x: f32, y: f32) -> u8 {
+    HOT.lock().iter().rev().find(|(a, _)| a.contains(x, y)).map_or(cursor::ARROW, |m| m.1)
+}
+
 /// How often the person's settings are looked at (ms).
 const SETTINGS_MS: i64 = 2000;
 /// Two clicks within this long (ms) are a double click.
@@ -182,7 +209,11 @@ fn window(name: &str, path: Option<&str>, hints: Hints, app: &mut dyn App, fonts
     let mut win = conn.create(name, path)?;
     conn.set_hints(&win, hints.min, hints.size)?;
     let mut cache = GlyphCache::new();
-    let mut pal = Settings::load().palette();
+    let first = Settings::load();
+    let mut pal = first.palette();
+    // The person's text size (ADR 0186).
+    let mut text = first.text;
+    slate_ui::paint::set_text_scale(f32::from(text) / 100.0);
     let mut stamp = settings::stamp();
     let mut checked = Now::read().mono;
     let mut title: Option<(String, Option<String>)> = None;
@@ -190,6 +221,8 @@ fn window(name: &str, path: Option<&str>, hints: Hints, app: &mut dyn App, fonts
     // drags and double clicks.
     let mut held = false;
     let mut last_click = (i64::MIN / 2, 0.0f32, 0.0f32);
+    // The pointer shape last asked for.
+    let mut shape = cursor::ARROW;
     loop {
         if let Some(t) = app.title().filter(|t| title.as_ref() != Some(t)) {
             conn.set_title(&win, &t.0, t.1.as_deref(), 0)?;
@@ -197,6 +230,7 @@ fn window(name: &str, path: Option<&str>, hints: Hints, app: &mut dyn App, fonts
         }
         app.tick(Now::read());
         let mut canvas = win.canvas(pal.window);
+        HOT.lock().clear();
         {
             let mut p = Painter::new(&mut canvas, &mut cache, win.scale);
             let (w, h) = p.size();
@@ -215,9 +249,12 @@ fn window(name: &str, path: Option<&str>, hints: Hints, app: &mut dyn App, fonts
                 checked = now.mono;
                 if settings::stamp() != stamp {
                     stamp = settings::stamp();
-                    let new = Settings::load().palette();
-                    redraw |= new != pal;
+                    let s = Settings::load();
+                    let new = s.palette();
+                    redraw |= new != pal || s.text != text;
                     pal = new;
+                    text = s.text;
+                    slate_ui::paint::set_text_scale(f32::from(text) / 100.0);
                 }
             }
             redraw |= app.tick(now) || app.wake(now).is_some_and(|w| w <= 0);
@@ -243,6 +280,9 @@ fn window(name: &str, path: Option<&str>, hints: Hints, app: &mut dyn App, fonts
                     Event::Pointer { kind: PointerKind::Down, button: 1, x, y, mods, .. } => {
                         let (x, y) = (x as f32 / win.scale, y as f32 / win.scale);
                         held = true;
+                        // A control pressed is drawn so.
+                        *PRESS.lock() = Some((x, y));
+                        redraw |= shape_at(x, y) == cursor::HAND;
                         let t = Now::read().mono;
                         let near = (x - last_click.1).abs() < 5.0 && (y - last_click.2).abs() < 5.0;
                         if t - last_click.0 < DOUBLE_CLICK_MS && near {
@@ -256,8 +296,19 @@ fn window(name: &str, path: Option<&str>, hints: Hints, app: &mut dyn App, fonts
                     Event::Pointer { kind: PointerKind::Move, x, y, mods, .. } if held => {
                         app.drag_mods(x as f32 / win.scale, y as f32 / win.scale, mods)
                     }
+                    Event::Pointer { kind: PointerKind::Move, x, y, .. } => {
+                        let at = shape_at(x as f32 / win.scale, y as f32 / win.scale);
+                        if at != shape {
+                            shape = at;
+                            conn.set_cursor(&win, at)?;
+                        }
+                        Effect::None
+                    }
                     Event::Pointer { kind: PointerKind::Up, button: 1, mods, .. } => {
                         held = false;
+                        if let Some((x, y)) = PRESS.lock().take() {
+                            redraw |= shape_at(x, y) == cursor::HAND;
+                        }
                         app.release_mods(mods)
                     }
                     Event::Scroll { lines, .. } => app.scroll(lines),
@@ -290,7 +341,12 @@ fn window(name: &str, path: Option<&str>, hints: Hints, app: &mut dyn App, fonts
 /// A button: a raised block with its label centred, outlined when it is
 /// the one the keyboard or the last key pressed points at.
 pub fn button(p: &mut Painter<'_>, pal: &Palette, f: &Fonts<'_>, a: Area, label: &str, strong: bool, lit: bool) {
-    p.fill(a, 8.0, if strong { pal.chalk } else { pal.raised });
+    mark(a, cursor::HAND);
+    // Pressed (ADR 0186): a shade deeper, the label half a pixel lower.
+    let down = pressed(a);
+    let fill = if strong { pal.chalk } else { pal.raised };
+    p.fill(a, 8.0, if down { press_shade(pal, fill) } else { fill });
+    let a = if down { Area::new(a.x, a.y + 0.5, a.w, a.h) } else { a };
     if lit {
         p.border(a.grow(2.0), 10.0, 2.0, pal.chalk);
     }
@@ -303,6 +359,11 @@ pub fn button(p: &mut Painter<'_>, pal: &Palette, f: &Fonts<'_>, a: Area, label:
     let style = p.style(&f.medium, 15.0, ink);
     let w = p.measure(&style, label);
     p.line(&style, a.x + (a.w - w) / 2.0, a.y + (a.h - 20.0) / 2.0, 20.0, label);
+}
+
+/// A fill pressed: toward the window's colour, a step.
+pub fn press_shade(pal: &Palette, c: Color) -> Color {
+    slate_ui::graphite::mix(c, pal.window, 0.22)
 }
 
 /// Tabs across the top: their labels, which is chosen, and where each
@@ -323,8 +384,9 @@ pub fn tabs(
     for (i, l) in labels.iter().enumerate() {
         let w = p.measure(&style, l) + 24.0;
         let a = Area::new(x, y, w, 30.0);
-        if i == on {
-            p.fill(a, 6.0, pal.raised);
+        mark(a, cursor::HAND);
+        if i == on || pressed(a) {
+            p.fill(a, 6.0, if pressed(a) { press_shade(pal, pal.raised) } else { pal.raised });
         }
         p.line(if i == on { &chosen } else { &style }, x + 12.0, y + 5.0, 20.0, l);
         out.push(a);
@@ -766,6 +828,7 @@ pub fn output_reporting(path: &str, args: &[&str], report: &mut Report) -> Resul
 /// A text field: `edit` in a well, its caret shown when `focused`, and
 /// `ghost` (muted) when it is empty.
 pub fn field(p: &mut Painter<'_>, pal: &Palette, f: &Fonts<'_>, a: Area, edit: &LineEdit, focused: bool, ghost: &str) {
+    mark(a, cursor::TEXT);
     p.fill(a, 7.0, pal.well);
     p.border(a, 7.0, 1.0, if focused { pal.field_focus } else { pal.border });
     let mut typed = p.style(&f.regular, 13.5, pal.text_1);

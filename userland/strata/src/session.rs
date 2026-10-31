@@ -14,6 +14,7 @@
 //! shell), the launcher's "Log out" with 0 (the login session ends; see
 //! /etc/profile).
 
+use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
 
@@ -21,6 +22,7 @@ use slate_display::input::{Input, Inputs};
 use slate_display::kms::screens::Screens;
 use slate_display::seat::Seat;
 use slate_rt::{fs, lossy, process};
+use slate_ui::icon::Icon;
 use slate_ui::paint::Painter;
 use slate_ui::text::GlyphCache;
 use slate_ui::ui::Area;
@@ -49,12 +51,24 @@ const OVERLAY_SHADOW_REACH: f32 = 200.0;
 
 /// What super + enter starts.
 pub const NEW_WINDOW: &[u8] = b"/bin/terminal";
+/// Settings, opened from quick settings (at a section: its key).
+const SETTINGS_APP: &str = "/bin/strata-settings";
 
 /// The person's Flatpak apps updated in the background, when due (ADR
 /// 0115).
 const APP_UPDATES: &[u8] = b"/bin/slate-flatpak update --auto";
 /// What a Linux program's start needs, read ahead (M31 phase 2).
 const LINUX_WARM: &[u8] = b"/bin/slate-linux warm";
+/// The person's sound server for their Linux apps (ADR 0185): PipeWire
+/// in the Linux runtime, in a process group of its own.
+const LINUX_SOUND: &[u8] = b"/bin/slate-linux sound";
+
+/// Whether this session can have the person's sound server: the runtime
+/// has PipeWire and the login made their runtime directory.
+fn sound_wanted() -> bool {
+    let dir = alloc::format!("/run/user/{}", process::getuid());
+    fs::exists(alloc::format!("{LINUX_RUNTIME}/usr/bin/pipewire-pulse").as_bytes()) && fs::exists(dir.as_bytes())
+}
 /// The system's updates, checked in the background (ADR 0112): only the
 /// repositories' signed indexes are fetched, and the count is kept.
 const UPDATE_CHECK: &[u8] = b"/bin/software-updater --check";
@@ -275,7 +289,226 @@ fn status() -> Status {
         network: network(),
         battery: battery(),
         updates: updates(),
+        volume: volume_now(),
     }
+}
+
+/// Settings that take effect at once (ADR 0186): the pointer's feel and
+/// the text's size.
+fn apply_settings(s: &Settings, inputs: &mut Inputs) {
+    inputs.feel = slate_display::input::Feel { speed: s.pointer, natural: s.natural, left_handed: s.left_handed };
+    slate_ui::paint::set_text_scale(f32::from(s.text) / 100.0);
+}
+
+/// What a key of the keyboard's media keys is (ADR 0186).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum MediaKey {
+    Mute,
+    VolumeDown,
+    VolumeUp,
+    BrightnessDown,
+    BrightnessUp,
+}
+
+/// The media key an evdev code is (input-event-codes: KEY_MUTE 113,
+/// KEY_VOLUMEDOWN 114, KEY_VOLUMEUP 115, KEY_BRIGHTNESSDOWN 224,
+/// KEY_BRIGHTNESSUP 225).
+fn volume_key(code: u16) -> Option<MediaKey> {
+    Some(match code {
+        113 => MediaKey::Mute,
+        114 => MediaKey::VolumeDown,
+        115 => MediaKey::VolumeUp,
+        224 => MediaKey::BrightnessDown,
+        225 => MediaKey::BrightnessUp,
+        _ => return None,
+    })
+}
+
+/// Do what a media key asks: the volume a step (or muted), the
+/// backlight a step; the pop-up to show, if any.
+fn media_key(k: MediaKey, st: &mut Status, quick: &mut Option<crate::quick::Quick>) -> Option<crate::quick::Osd> {
+    use slate_sound::Change;
+    let since = now_ms();
+    let change = match k {
+        MediaKey::Mute => Change::Mute(None),
+        MediaKey::VolumeDown => Change::Step(-0.05),
+        MediaKey::VolumeUp => Change::Step(0.05),
+        MediaKey::BrightnessDown | MediaKey::BrightnessUp => {
+            let level = backlight_step(if k == MediaKey::BrightnessUp { 0.05 } else { -0.05 })?;
+            slate_rt::eprintln!("strata: brightness: {}%", slate_sound::mixer::percent(level));
+            return Some(crate::quick::Osd {
+                icon: Icon::Sun,
+                level: Some(level),
+                text: alloc::format!("{}%", slate_sound::mixer::percent(level)),
+                since,
+            });
+        }
+    };
+    let Some(card) = slate_sound::mixer::default_card() else {
+        slate_rt::eprintln!("strata: volume: no sound card");
+        return Some(crate::quick::Osd {
+            icon: Icon::SpeakerMuted,
+            level: None,
+            text: String::from("No sound card"),
+            since,
+        });
+    };
+    match slate_sound::change(card, change) {
+        Ok(v) => {
+            slate_rt::eprintln!("strata: volume: {}", slate_sound::mixer::words(&v));
+            st.volume = Some((slate_sound::mixer::percent(v.level), v.muted));
+            if let Some(q) = quick.as_mut() {
+                q.volume = Some(v);
+            }
+            Some(crate::quick::Osd {
+                icon: if v.muted { Icon::SpeakerMuted } else { Icon::Speaker },
+                level: Some(if v.muted { 0.0 } else { v.level }),
+                text: slate_sound::mixer::words(&v),
+                since,
+            })
+        }
+        Err(e) => {
+            slate_rt::eprintln!("strata: volume: {e}");
+            None
+        }
+    }
+}
+
+/// Move the first backlight (/sys/class/backlight) by `step` of its
+/// range: its level after, None without one or when it can't be set.
+fn backlight_step(step: f32) -> Option<f32> {
+    let dir = fs::read_dir(b"/sys/class/backlight").ok()?;
+    let e = dir.into_iter().next()?;
+    let base = fs::join(b"/sys/class/backlight", &e.name);
+    let read = |f: &[u8]| -> Option<f32> { lossy(&fs::read_file(&fs::join(&base, f)).ok()?).trim().parse().ok() };
+    let (now, max) = (read(b"brightness")?, read(b"max_brightness")?);
+    if max <= 0.0 {
+        return None;
+    }
+    let level = (now / max + step).clamp(0.02, 1.0);
+    let value = alloc::format!("{}", (level * max + 0.5) as u32);
+    match fs::write_file(&fs::join(&base, b"brightness"), value.as_bytes(), 0o644) {
+        Ok(()) => Some(level),
+        Err(e) => {
+            slate_rt::eprintln!("strata: brightness: {e}");
+            None
+        }
+    }
+}
+
+/// Quick settings as they are now.
+fn quick_now(st: &Status, settings: &Settings, notes: &mut crate::notes::Notes) -> crate::quick::Quick {
+    // Seen: the top bar's mark for unread ones goes.
+    notes.mark_read();
+    crate::quick::Quick {
+        quiet: settings.quiet,
+        notes: notes.newest(crate::quick::LISTED),
+        volume: slate_sound::mixer::default_card().and_then(|c| slate_sound::mixer::get(c).ok()),
+        dark: !settings.light(),
+        network: st.network,
+        battery: st.battery,
+        dragging: false,
+    }
+}
+
+/// Do what quick settings asked for.
+#[allow(clippy::too_many_arguments)]
+fn quick_do(
+    out: Option<crate::quick::Outcome>,
+    quick: &mut Option<crate::quick::Quick>,
+    st: &mut Status,
+    settings: &Settings,
+    notes: &mut crate::notes::Notes,
+    locked: &mut Option<crate::lock::Lock>,
+    power: &mut Option<Power>,
+    timed: &Option<Timed>,
+    live: bool,
+    socket: &[u8],
+) {
+    use crate::quick::Outcome;
+    let Some(out) = out else { return };
+    match out {
+        Outcome::Close => *quick = None,
+        Outcome::Volume(_) | Outcome::Mute => {
+            let Some(card) = slate_sound::mixer::default_card() else { return };
+            let change = match out {
+                Outcome::Volume(l) => slate_sound::Change::Level(l),
+                _ => slate_sound::Change::Mute(None),
+            };
+            match slate_sound::change(card, change) {
+                Ok(v) => {
+                    slate_rt::eprintln!("strata: volume: {}", slate_sound::mixer::words(&v));
+                    st.volume = Some((slate_sound::mixer::percent(v.level), v.muted));
+                    if let Some(q) = quick.as_mut() {
+                        q.volume = Some(v);
+                    }
+                }
+                Err(e) => slate_rt::eprintln!("strata: volume: {e}"),
+            }
+        }
+        Outcome::Dark => {
+            // The theme's partner: Graphite and Light, Copper Noir and
+            // Sediment.
+            use slate_ui::themes::Theme;
+            let theme = match settings.theme {
+                Theme::Graphite => Theme::Light,
+                Theme::Light => Theme::Graphite,
+                Theme::CopperNoir => Theme::Sediment,
+                Theme::Sediment => Theme::CopperNoir,
+            };
+            let new = Settings { theme, ..*settings };
+            match new.save() {
+                Ok(()) => {
+                    slate_rt::eprintln!("strata: quick settings: dark style {}", if new.light() { "off" } else { "on" })
+                }
+                Err(e) => slate_rt::eprintln!("strata: quick settings: {e}"),
+            }
+            if let Some(q) = quick.as_mut() {
+                q.dark = !new.light();
+            }
+        }
+        Outcome::Quiet => {
+            let new = Settings { quiet: !settings.quiet, ..*settings };
+            notes.quiet = new.quiet;
+            match new.save() {
+                Ok(()) => slate_rt::eprintln!("strata: do not disturb {}", if new.quiet { "on" } else { "off" }),
+                Err(e) => slate_rt::eprintln!("strata: quick settings: {e}"),
+            }
+            if let Some(q) = quick.as_mut() {
+                q.quiet = new.quiet;
+            }
+        }
+        Outcome::ClearNotes => {
+            slate_rt::eprintln!("strata: notifications cleared");
+            notes.clear();
+            if let Some(q) = quick.as_mut() {
+                q.notes.clear();
+            }
+        }
+        Outcome::Settings(section) => {
+            *quick = None;
+            let argv: Vec<Vec<u8>> =
+                [SETTINGS_APP, section].iter().filter(|a| !a.is_empty()).map(|a| a.as_bytes().to_vec()).collect();
+            spawn_argv(&argv, socket);
+        }
+        Outcome::Lock => {
+            *quick = None;
+            slate_rt::eprintln!("strata: locked");
+            *locked = Some(crate::lock::Lock::opened_at(now_ms()));
+        }
+        Outcome::Power => {
+            *quick = None;
+            slate_rt::eprintln!("strata: the power dialog");
+            let focus = timed.as_ref().map_or(PowerChoice::ShutDown, |t| t.0.choice);
+            *power = Some(power_dialog(focus, st.updates, live, timed, now_ms()));
+        }
+    }
+}
+
+/// The default card's volume for the top bar (ADR 0186).
+fn volume_now() -> Option<(u32, bool)> {
+    let v = slate_sound::mixer::get(slate_sound::mixer::default_card()?).ok()?;
+    Some((slate_sound::mixer::percent(v.level), v.muted))
 }
 
 /// How many updates the Software Updater's last check found
@@ -292,6 +525,37 @@ fn spawn(command: &[u8], socket: &[u8]) -> Option<i32> {
     let argv: Vec<Vec<u8>> = command.split(|&c| c == b' ').filter(|w| !w.is_empty()).map(<[u8]>::to_vec).collect();
     spawn_argv(&argv, socket)
 }
+
+/// The pointer shape for an app's `strata_proto::cursor` number.
+pub fn cursor_of(shape: u8) -> slate_ui::icon::Cursor {
+    use slate_ui::icon::Cursor;
+    use strata_proto::cursor;
+    match shape {
+        cursor::HAND => Cursor::Hand,
+        cursor::TEXT => Cursor::Text,
+        cursor::BUSY => Cursor::Busy(0),
+        cursor::MOVE => Cursor::Move,
+        cursor::NOT_ALLOWED => Cursor::NotAllowed,
+        _ => Cursor::Arrow,
+    }
+}
+
+/// An app being opened (ADR 0186): its name and when, until its first
+/// window comes or [`OPENING_MS`] pass.
+struct Opening {
+    name: String,
+    since: i64,
+}
+
+impl Opening {
+    fn new(name: &str) -> Opening {
+        slate_rt::eprintln!("strata: opening {name}");
+        Opening { name: String::from(name), since: now_ms() }
+    }
+}
+
+/// How long an app's opening is shown at most.
+const OPENING_MS: i64 = 30_000;
 
 /// Start a program with its arguments as an app of this session.
 /// Start what the desktop asks for (ADR 0156): icons opened, and
@@ -429,6 +693,17 @@ fn window_title(w: &crate::wm::Window) -> String {
 pub const LIVE: &str = "/etc/slate/live";
 
 /// The modifier bits of the protocol.
+/// The virtual console Ctrl+Alt and key `code` asks for: F1 to F12
+/// (evdev codes 59 to 68, 87 and 88; input-event-codes.h).
+fn vt_key(code: u16) -> Option<i32> {
+    match code {
+        59..=68 => Some(i32::from(code) - 58),
+        87 => Some(11),
+        88 => Some(12),
+        _ => None,
+    }
+}
+
 fn mod_bits(m: slate_display::input::Mods) -> u8 {
     use strata_proto::mods::*;
     (if m.shift { SHIFT } else { 0 })
@@ -545,6 +820,13 @@ pub fn main() -> i32 {
     // The Applications menu and the power dialog (ADR 0110), and where
     // they were drawn.
     let mut menu: Option<Menu> = None;
+    // Quick settings (ADR 0186), where its controls were drawn, and the
+    // volume keys' pop-up.
+    let mut quick: Option<crate::quick::Quick> = None;
+    let mut quick_hits = crate::quick::Hits::default();
+    let mut osd: Option<crate::quick::Osd> = None;
+    // Notifications (ADR 0186); Do Not Disturb as the settings say, below.
+    let mut notes = crate::notes::Notes::default();
     let mut menu_hits = draw::MenuHits::default();
     let mut power: Option<Power> = None;
     let mut power_hits = draw::PowerHits::default();
@@ -560,6 +842,10 @@ pub fn main() -> i32 {
     // New devices are opened when the kernel announces them; the rescan
     // is only a fallback.
     inputs.watch_uevents();
+    // A display plugged in or out before hotplugs were listened for.
+    if screens.heads_changed() {
+        inputs.displays_changed = true;
+    }
     inputs.rescan_ns = 10_000_000_000;
     slate_rt::eprintln!("strata: {w}x{h} at scale {scale}; input: {}", inputs.describe());
     let mut canvas = Canvas::new(w, h, Color::rgb(0));
@@ -577,6 +863,12 @@ pub fn main() -> i32 {
     // read again when a watch says they changed (or looked at every two
     // seconds where they can't be watched).
     let mut settings = Settings::load();
+    apply_settings(&settings, &mut inputs);
+    // Night Light as last applied, and whether the screen is off for
+    // want of input (ADR 0186).
+    let mut night_on = false;
+    let mut night_checked = 0i64;
+    let mut blanked = false;
     let mut settings_stamp = crate::settings::stamp();
     let mut settings_checked = now_ms();
     let mut pal = settings.palette();
@@ -599,6 +891,11 @@ pub fn main() -> i32 {
     // The Linux runtime warmed once, soon after the session starts, so the
     // first Linux program starts as fast as the later ones (M31 phase 2).
     let mut warm_at = Some(now_ms() + 3000);
+    // The sound server: its process, and when to start it (again).
+    let mut sound: Option<i32> = None;
+    let mut sound_at = Some(now_ms() + 2000);
+    // Whether it said it waits for the runtime (said once).
+    let mut sound_waiting = false;
     // The live system (M27): a way back to the installer.
     let live = fs::exists(LIVE.as_bytes());
     if live {
@@ -640,7 +937,48 @@ pub fn main() -> i32 {
     // Motion (ADR 0038): reduced with /etc/slate/motion or the settings
     // saying so.
     let mut motion = Motion::new(settings.reduced_motion);
+    notes.quiet = settings.quiet;
     let mut known: alloc::collections::BTreeSet<WinId> = alloc::collections::BTreeSet::new();
+    // Where each window of the shown workspace was at the last round: one
+    // that moved by itself glides (ADR 0186).
+    let mut placed: BTreeMap<WinId, Area> = BTreeMap::new();
+    let mut placed_ws = wm.active;
+    let mut snap_was = false;
+    // An app being opened, and the spinner's last step drawn.
+    let mut opening: Option<Opening> = None;
+    let mut spin_drawn = 0u8;
+    // Each kind of motion says so the first time (for the scenarios).
+    let mut motion_said = 0u8;
+    let say_motion = |said: &mut u8, bit: u8, what: &str| {
+        if *said & bit == 0 {
+            *said |= bit;
+            slate_rt::eprintln!("strata: motion: {what}");
+        }
+    };
+    // Closed windows still fading, and the last contents of those whose
+    // apps had drawn them.
+    let mut ghosts: Vec<desktop::Ghost> = Vec::new();
+    let mut ghost_buffers: BTreeMap<WinId, crate::server::Buffer> = BTreeMap::new();
+    // The screen as it was, fading out over the new one (a theme or
+    // wallpaper changed; the login screen's colour as the session begins).
+    let mut before: Option<Canvas> = None;
+    if !settings.reduced_motion {
+        // The login screen's backdrop, as it left it (one display: on
+        // several, its colour).
+        let system = Settings::system();
+        let gp = if system.high_contrast {
+            slate_ui::graphite::Palette::HIGH_CONTRAST
+        } else {
+            slate_ui::graphite::Palette::GRAPHITE
+        };
+        let (pw, ph) = (slate_ui::math::round(lw * scale) as i32, slate_ui::math::round(lh * scale) as i32);
+        before = Some(if (pw, ph) == (w, h) {
+            crate::greeter::backdrop_canvas(&gp, &fonts, &host, w, h, scale, &mut cache)
+        } else {
+            Canvas::new(w, h, gp.desktop)
+        });
+        motion.intro(now_ms());
+    }
     let mut overlay_was = false;
     let mut was_moving = false;
     // The title bar button with the keyboard focus (alt + space), and
@@ -671,7 +1009,13 @@ pub fn main() -> i32 {
     type MenuShown = (String, usize, usize, usize, bool);
     // (The launcher's part: its query, selection, first row shown and its
     // rows' signature.)
-    type Shown = (Option<(String, usize, usize, u64)>, Option<Dialog>, Option<MenuShown>, Option<Power>);
+    type Shown = (
+        Option<(String, usize, usize, u64)>,
+        Option<Dialog>,
+        Option<MenuShown>,
+        Option<Power>,
+        Option<crate::quick::Quick>,
+    );
     let mut overlay_shown: Option<Shown> = None;
     let mut overlay_bounds = Rect::new(0, 0, 0, 0);
     // The launcher is drawn once, unseen, after the first frame: its
@@ -703,6 +1047,13 @@ pub fn main() -> i32 {
         while let Ok((pid, status)) = process::wait(-1, process::WNOHANG) {
             if pid <= 0 {
                 break;
+            }
+            if sound == Some(pid) {
+                sound = None;
+                if inputs.seat_active() {
+                    slate_rt::eprintln!("strata: sound: the server ended; again in 5 s");
+                    sound_at = Some(now_ms() + 5000);
+                }
             }
             if let Some(l) = leaving.as_mut()
                 && l.stage == (Stage::Installing { pid })
@@ -798,7 +1149,9 @@ pub fn main() -> i32 {
             }
         }
         // Motion: the focus, new windows, minimised windows, the overlay.
-        let now = now_ms();
+        // Worked out for when the frame will be seen, the displays' next
+        // vblank, so its steps are even (ADR 0186).
+        let now = screens.next_vblank(now_ns()) / 1_000_000;
         if now - settings_checked >= 2000 {
             settings_checked = now;
             // (An unwatched zone is looked at by local_now itself.)
@@ -853,11 +1206,28 @@ pub fn main() -> i32 {
                 // were; Settings writes them again to say so.)
                 if new != settings || new.picture {
                     slate_rt::eprintln!("strata: settings changed: {new:?}");
+                    // A new look cross-fades from the screen as it was.
+                    let look_changed = new.picture || new.looks_different(&settings);
+                    if look_changed && !new.reduced_motion && !canvas_stale && locked.is_none() {
+                        let mut b = before
+                            .take()
+                            .filter(|b| b.width == w && b.height == h)
+                            .unwrap_or_else(|| Canvas::new(w, h, Color::rgb(0)));
+                        b.pixels.copy_from_slice(&canvas.pixels);
+                        before = Some(b);
+                        motion.crossfade(now);
+                        say_motion(&mut motion_said, 4, "the new look cross-fades");
+                    }
                     settings = new;
                     pal = settings.palette();
                     wm.shape(pal.shape.title_h, pal.shape.bar_h);
                     wall = desktop::wallpapers(&pal, &settings, &lay.rects, w, h, scale);
                     motion.reduced = settings.reduced_motion;
+                    notes.quiet = settings.quiet;
+                    apply_settings(&settings, &mut inputs);
+                    // Night Light looked at again (its warmth may be new).
+                    night_checked = 0;
+                    screens.tint = None;
                     overlay_shown = None;
                     damage.set_full();
                 }
@@ -867,9 +1237,135 @@ pub fn main() -> i32 {
         for id in wm.windows.iter().map(|w| w.id).collect::<Vec<_>>() {
             if known.insert(id) {
                 motion.fade_in(id, now);
+                if let Some(o) = opening.take() {
+                    slate_rt::eprintln!("strata: {} opened in {} ms", o.name, now_ms() - o.since);
+                    damage.set_full();
+                }
             }
         }
         known.retain(|id| wm.get(*id).is_some());
+        // Closed windows: their last picture fades and shrinks.
+        for (win, area) in wm.take_closed() {
+            motion.close(win.id, now);
+            if let Some(b) = server.take_gone(win.id) {
+                ghost_buffers.insert(win.id, b);
+            }
+            ghosts.push(desktop::Ghost { win, area });
+            if !motion.reduced {
+                say_motion(&mut motion_said, 1, "a closed window fades");
+            }
+            damage.set_full();
+        }
+        server.forget_gone();
+        if !ghosts.is_empty() {
+            ghosts.retain(|g| motion.closing(g.win.id, now));
+            ghost_buffers.retain(|id, _| ghosts.iter().any(|g| g.win.id == *id));
+        }
+        // Windows that moved by themselves (snapped, maximised, restored,
+        // tiled) glide there; a dragged one follows the pointer.
+        let dragged = match drag {
+            Drag::Move { id, .. } | Drag::Resize { id, .. } => Some(id),
+            _ => None,
+        };
+        let now_placed: BTreeMap<WinId, Area> = wm.layout().into_iter().collect();
+        if placed_ws == wm.active {
+            for (id, a) in &now_placed {
+                match placed.get(id) {
+                    _ if dragged == Some(*id) => motion.stop_glide(*id),
+                    Some(old) if old != a && motion.glide(*id, *old, *a, now) => {
+                        say_motion(&mut motion_said, 2, "a window glides");
+                    }
+                    _ => {}
+                }
+            }
+        }
+        (placed, placed_ws) = (now_placed, wm.active);
+        // An app being opened: given up on after a while; its spinner
+        // turns (ADR 0186).
+        if opening.as_ref().is_some_and(|o| now - o.since > OPENING_MS) {
+            opening = None;
+            damage.add(Area::new(0.0, 0.0, lw, pal.shape.bar_h));
+        }
+        let spin = opening.as_ref().map(|o| ((now - o.since).max(0) / 90 % 12) as u8);
+        if let Some(step) = spin
+            && step != spin_drawn
+        {
+            spin_drawn = step;
+            damage.add(Area::new(0.0, 0.0, lw, pal.shape.bar_h));
+        }
+        // Banners: gone when their time is up; redrawn while they slide in.
+        let banners_at = Area::new(lw - crate::notes::BANNER_W - 40.0, wm.work.y, crate::notes::BANNER_W + 40.0, 360.0);
+        if notes.expire(now) || notes.sliding(now) {
+            damage.add(banners_at);
+        }
+        // Night Light: on or off as the settings and the hour say.
+        let night = if now - night_checked >= 1000 {
+            night_checked = now;
+            let tm = local_now();
+            settings.night_now((tm.hour * 60 + tm.min) as u16)
+        } else {
+            night_on
+        };
+        if night != night_on || (night && screens.tint.is_none()) {
+            night_on = night;
+            screens.tint = night.then(|| slate_display::kms::screens::warmth_tint(settings.warmth));
+            slate_rt::eprintln!("strata: night light {}", if night { "on" } else { "off" });
+            damage.set_full();
+        }
+        // The volume keys' pop-up: redrawn while it fades, gone after.
+        if let Some(o) = &osd {
+            damage.add(crate::quick::osd_area(lw, lh).grow(2.0));
+            if o.opacity(now, settings.reduced_motion).is_none() {
+                osd = None;
+            }
+        }
+        // The pointer's shape: what it is over says.
+        let want = {
+            use slate_ui::icon::Cursor;
+            let (px, py) = (inputs.pointer.0 / scale + lay.origin.0, inputs.pointer.1 / scale + lay.origin.1);
+            let overlaid = locked.is_some()
+                || launcher.is_some()
+                || dialog.is_some()
+                || power.is_some()
+                || menu.is_some()
+                || quick.is_some();
+            let in_quick = quick.is_some() && quick_hits.controls().iter().any(|a| a.contains(px, py));
+            let want = match &drag {
+                _ if in_quick => Cursor::Hand,
+                Drag::Resize { edges, .. } => edges.cursor(),
+                Drag::Move { .. } => Cursor::Move,
+                Drag::Content { id } => server.cursor(*id),
+                _ if overlaid => Cursor::Arrow,
+                _ if wm.in_bar(px, py) => {
+                    if panel.control_at(px, py).is_some() {
+                        Cursor::Hand
+                    } else {
+                        Cursor::Arrow
+                    }
+                }
+                _ => match wm.hit(px, py) {
+                    Some(Hit::Edge(_, e)) => e.cursor(),
+                    Some(Hit::Close(_) | Hit::Maximize(_) | Hit::Minimize(_)) => Cursor::Hand,
+                    Some(Hit::Content(id)) => server.cursor(id),
+                    _ => Cursor::Arrow,
+                },
+            };
+            match (want, spin) {
+                (Cursor::Arrow, Some(step)) => Cursor::Busy(step),
+                (w, _) => w,
+            }
+        };
+        if want != cursor {
+            cursor = want;
+            if let Some(r) = pointer_at {
+                damage.add(r);
+            }
+        }
+        // The snap preview fades in as it appears.
+        if snap.is_some() != snap_was {
+            snap_was = snap.is_some();
+            motion.preview(snap_was, now);
+        }
         for id in motion.minimised(now) {
             wm.minimize(id);
             damage.set_full();
@@ -879,7 +1375,8 @@ pub fn main() -> i32 {
             motion.switch(last_ws, wm.active, now);
             last_ws = wm.active;
         }
-        let overlay_now = launcher.is_some() || dialog.is_some() || menu.is_some() || power.is_some();
+        let overlay_now =
+            launcher.is_some() || dialog.is_some() || menu.is_some() || power.is_some() || quick.is_some();
         if overlay_now != overlay_was {
             if overlay_now {
                 motion.overlay_in(now);
@@ -914,7 +1411,9 @@ pub fn main() -> i32 {
         // (its settling, whether the desktop stayed still, whether it is
         // whole): a held frame decided now would be drawn later as if
         // everything had changed.
-        let deferred = paced && screens.waiting() && locked.is_none();
+        // While something moves, frames that follow input wait too: each
+        // of motion's steps is seen at its own vblank (ADR 0186).
+        let deferred = (paced || moving) && screens.waiting() && locked.is_none();
         let mut desk_still = false;
         if !deferred {
             hover_was_fading = hover_fading;
@@ -994,6 +1493,14 @@ pub fn main() -> i32 {
                     let look = |id: WinId| motion.look(id, now);
                     let (px, py) = (inputs.pointer.0 / scale + lay.origin.0, inputs.pointer.1 / scale + lay.origin.1);
                     let preview = snap.map(|s| wm.snap_area_at(s, px, py));
+                    let preview_in = Some(motion.preview_in(now));
+                    let drawn_sizes: Vec<(WinId, (f32, f32))> = placed
+                        .keys()
+                        .filter(|id| motion.look(**id, now).at.is_some())
+                        .filter_map(|&id| {
+                            server.buffer_size(id).map(|(bw, bh)| (id, (bw as f32 / scale, bh as f32 / scale)))
+                        })
+                        .collect();
                     let slide = motion.slide(now, lw);
                     let ex = Extras {
                         wall: Some(&wall),
@@ -1010,6 +1517,14 @@ pub fn main() -> i32 {
                         resizing: if let Drag::Resize { id, .. } = drag { Some(id) } else { None },
                         hover_in: Some(motion.hover(now)),
                         keyed,
+                        ghosts: &ghosts,
+                        preview_in,
+                        drawn_sizes: &drawn_sizes,
+                        opening: opening.as_ref().map(|o| (o.name.as_str(), spin_drawn)),
+                        quick: quick.is_some(),
+                        hide_battery_percent: !settings.battery_percent,
+                        notes: Some((&notes, now, settings.reduced_motion)),
+                        osd: osd.as_ref().and_then(|o| o.opacity(now, settings.reduced_motion).map(|k| (o, k))),
                         ..extras
                     };
                     // A whole frame under an overlay: the desktop is drawn
@@ -1017,7 +1532,7 @@ pub fn main() -> i32 {
                     // copied out dimmed below, in one pass.
                     let whole = full_frame && motion.overlay(now).is_some();
                     let mut client = |p: &mut Painter<'_>, id: WinId, c: Area| {
-                        if let Some(b) = server.buffer(id) {
+                        if let Some(b) = server.buffer(id).or_else(|| ghost_buffers.get_mut(&id)) {
                             let r = p.device(&c);
                             let (bw, bh, serial, opaque) = (b.width as i32, b.height as i32, b.serial, b.opaque);
                             let px = b.pixels();
@@ -1100,6 +1615,10 @@ pub fn main() -> i32 {
                     };
                     if !whole {
                         panel = desktop::desktop(&mut p, &pal, &fonts, &wm, &st, ex, &mut client);
+                        // A cross-fade: the screen as it was, over the new one.
+                        if let (Some(v), Some(b)) = (motion.crossfading(now), &before) {
+                            p.canvas.composite(b, v, 0);
+                        }
                     } else if !(desk_still && under.is_some()) {
                         // Made with the warm-up; until then, here.
                         let u = under.get_or_insert_with(|| Canvas::new(w, h, Color::TRANSPARENT));
@@ -1125,6 +1644,7 @@ pub fn main() -> i32 {
                                     (m.query.clone(), m.category, m.item, m.first, m.pane == menu::Pane::Apps)
                                 }),
                                 power.clone(),
+                                quick.clone(),
                             );
                             if overlay_shown.as_ref() != Some(&shown) {
                                 // Only where it was last drawn: the layer is
@@ -1147,6 +1667,10 @@ pub fn main() -> i32 {
                                 if let Some(m) = &menu {
                                     menu_hits = draw::apps_menu(&mut lp, &pal, &fonts, m);
                                     overlay_bounds = lp.device(&menu_hits.area.grow(OVERLAY_SHADOW_REACH));
+                                }
+                                if let Some(q) = &quick {
+                                    quick_hits = crate::quick::draw(&mut lp, &pal, &fonts, q, lw);
+                                    overlay_bounds = lp.device(&quick_hits.area.grow(OVERLAY_SHADOW_REACH));
                                 }
                                 if let Some(pw) = &power {
                                     let v = draw::PowerView { name: &full, user: &user, power: pw };
@@ -1205,7 +1729,8 @@ pub fn main() -> i32 {
                 }
                 if inputs.pointer_seen {
                     let (x, y) = inputs.pointer;
-                    slate_ui::icon::cursor(&mut canvas, x, y, scale, cursor);
+                    let k = scale * f32::from(settings.cursor) / 100.0;
+                    slate_ui::icon::cursor(&mut canvas, x, y, k, cursor);
                 }
                 // Only what was drawn goes to the display (the pointer too
                 // is drawn within the damage).
@@ -1242,7 +1767,7 @@ pub fn main() -> i32 {
             // The launcher, as it will open, drawn ahead on the overlay's
             // layer once the screen is settled (again after each overlay
             // has gone): the first frame that shows it has only to blend it.
-            let idle = launcher.is_none() && menu.is_none() && power.is_none() && dialog.is_none();
+            let idle = launcher.is_none() && menu.is_none() && power.is_none() && dialog.is_none() && quick.is_none();
             if idle && overlay_shown.is_none() && motion.overlay(now).is_none() {
                 let l = Launcher::new(apps.clone()).with_recent(launcher::load_recent()).with_live(live);
                 overlay_layer.clear_area(overlay_bounds);
@@ -1256,7 +1781,7 @@ pub fn main() -> i32 {
                 overlay_bounds = lp.device(&draw::launcher_area(lw, lh, &view).grow(OVERLAY_SHADOW_REACH));
                 overlay_bounds = lp.canvas.drawn_within(overlay_bounds);
                 overlay_shown =
-                    Some((Some((l.query.clone(), l.selected, l.first, rows_signature(&l))), None, None, None));
+                    Some((Some((l.query.clone(), l.selected, l.first, rows_signature(&l))), None, None, None, None));
                 if !warmed {
                     warmed = true;
                     under = Some(Canvas::new(w, h, Color::rgb(0)));
@@ -1283,8 +1808,15 @@ pub fn main() -> i32 {
         // ended while this frame was drawn still needs the next round,
         // which hides minimised windows and draws the settled state.
         let tick = moving || motion.active(now_ms()) || hover_was_fading;
-        let timeout = if tick {
+        // (The volume keys' pop-up fades too.)
+        let timeout = if tick || osd.is_some() || notes.sliding(now_ms()) {
             16
+        } else if opening.is_some() {
+            // The spinner's next step.
+            90
+        } else if !notes.banners(now_ms()).is_empty() {
+            // A banner's time running out.
+            250
         } else if !damage.is_empty() {
             // A frame held for a vblank.
             20
@@ -1294,16 +1826,60 @@ pub fn main() -> i32 {
             1000
         };
         let events = inputs.wait_input_with(timeout, &mut fds);
+        // Another session came to the front, or this one came back (ADR
+        // 0185): the displays are lit again, the picture drawn whole.
+        match inputs.take_seat_change() {
+            Some(false) => {
+                slate_rt::eprintln!("strata: switched away");
+                // The cards go to whoever is in front now.
+                if let Some(pid) = sound.take() {
+                    let _ = process::kill(-pid, slate_rt::signal::SIGTERM);
+                    slate_rt::eprintln!("strata: sound: stopped while away");
+                }
+                sound_at = None;
+            }
+            Some(true) => {
+                sound_at = Some(now_ms() + 300);
+                slate_rt::eprintln!("strata: back in front");
+                inputs.displays_changed = true;
+                damage.set_full();
+                if locked.is_some() && crate::lock::unlocked_by_login() {
+                    slate_rt::eprintln!("strata: unlocked from the login screen");
+                    locked = None;
+                    face = None;
+                }
+            }
+            None => {}
+        }
         server.mods = mod_bits(inputs.mods());
         // Locking by itself after the idle time the settings give.
         let now = now_ms();
-        if !events.is_empty() {
+        // (Any key counts, a modifier alone too.)
+        let active = inputs.take_activity();
+        if !events.is_empty() || active {
             last_input = now;
         }
         // (An app showing something to watch holds it off: ADR 0102's
         // second addendum.)
         if server.inhibited() {
             last_input = now;
+        }
+        // The screen off after the time the settings give, on again with
+        // any input (ADR 0186).
+        if (!events.is_empty() || active) && blanked {
+            blanked = false;
+            if let Err(e) = screens.set_power(true) {
+                slate_rt::eprintln!("strata: the screen: {e}");
+            }
+            slate_rt::eprintln!("strata: the screen is on");
+            damage.set_full();
+        }
+        if !blanked && settings.blank > 0 && now - last_input >= i64::from(settings.blank) * 1000 {
+            blanked = true;
+            match screens.set_power(false) {
+                Ok(()) => slate_rt::eprintln!("strata: the screen is off"),
+                Err(e) => slate_rt::eprintln!("strata: the screen: {e}"),
+            }
         }
         if locked.is_none() && settings.lock > 0 && now - last_input >= i64::from(settings.lock) * 1000 {
             slate_rt::eprintln!("strata: locked (idle)");
@@ -1370,6 +1946,24 @@ pub fn main() -> i32 {
         if changes.windows {
             damage.set_full();
         }
+        // Notifications sent or taken back (ADR 0186).
+        for n in &changes.notes {
+            match n {
+                crate::server::NoteChange::Add { pid, key, app, summary, body, urgency } => {
+                    slate_rt::eprintln!("strata: notification from {app}: {summary}");
+                    notes.add(*pid, *key, app, summary, body, *urgency, now_ms(), &time_of_day(&local_now()));
+                }
+                crate::server::NoteChange::Remove { pid, key } => {
+                    notes.remove_key(*pid, *key);
+                }
+            }
+            damage.set_full();
+        }
+        if let Some(q) = quick.as_mut()
+            && !changes.notes.is_empty()
+        {
+            q.notes = notes.newest(crate::quick::LISTED);
+        }
         for (id, r) in changes.contents {
             stats.contents(id);
             if !frame_owed.contains(&id) {
@@ -1397,6 +1991,21 @@ pub fn main() -> i32 {
                 spawn(UPDATE_CHECK, &socket);
             }
         }
+        if sound_at.is_some_and(|t| now_ms() >= t) {
+            sound_at = None;
+            if sound.is_none() && sound_wanted() {
+                sound = spawn(LINUX_SOUND, &socket);
+                slate_rt::eprintln!("strata: sound: the sound server started");
+            } else if sound.is_none() && inputs.seat_active() {
+                // The runtime may come later in the session (the Web
+                // Browser sets it up): look again.
+                sound_at = Some(now_ms() + 5000);
+                if !sound_waiting && fs::exists(alloc::format!("/run/user/{}", process::getuid()).as_bytes()) {
+                    sound_waiting = true;
+                    slate_rt::eprintln!("strata: sound: waiting for the Linux runtime");
+                }
+            }
+        }
         if warm_at.is_some_and(|t| now_ms() >= t) {
             warm_at = None;
             if fs::exists(alloc::format!("{LINUX_RUNTIME}/usr/bin/sway").as_bytes()) {
@@ -1414,13 +2023,17 @@ pub fn main() -> i32 {
         if minute != alarm_minute {
             alarm_minute = minute;
             let tm = local_now();
-            if let Some(a) = alarms.iter().find(|a| a.rings(&tm))
-                && !wm.windows.iter().any(|w| w.app == "clock")
-                && fs::exists(CLOCK.as_bytes())
-            {
+            if let Some(a) = alarms.iter().find(|a| a.rings(&tm)) {
                 let at = alloc::format!("{:02}:{:02}", a.hour, a.min);
-                slate_rt::eprintln!("strata: the alarm at {at}: opening the Clock");
-                spawn_argv(&[CLOCK.as_bytes().to_vec(), b"--ring".to_vec(), at.into_bytes()], &socket);
+                // A notification, urgent: it stays until dismissed (ADR 0186).
+                slate_rt::eprintln!("strata: notification from Clock: Alarm {at}");
+                let body = alloc::format!("The alarm set for {at}");
+                notes.add(0, 0, "Clock", "Alarm", &body, strata_proto::urgency::CRITICAL, now_ms(), &at);
+                damage.set_full();
+                if !wm.windows.iter().any(|w| w.app == "clock") && fs::exists(CLOCK.as_bytes()) {
+                    slate_rt::eprintln!("strata: the alarm at {at}: opening the Clock");
+                    spawn_argv(&[CLOCK.as_bytes().to_vec(), b"--ring".to_vec(), at.into_bytes()], &socket);
+                }
             }
         }
         // The top bar's facts, once a second (not on every event).
@@ -1447,8 +2060,15 @@ pub fn main() -> i32 {
             }
         }
         // The pointer's old place, to draw over.
+        // (At the person's pointer size.)
+        let ck = f32::from(settings.cursor) / 100.0;
         let pointer_rect = |x: f32, y: f32| {
-            Area::new((x / scale + lay.origin.0) - 14.0, (y / scale + lay.origin.1) - 14.0, 34.0, 42.0)
+            Area::new(
+                (x / scale + lay.origin.0) - 14.0 * ck,
+                (y / scale + lay.origin.1) - 14.0 * ck,
+                34.0 * ck,
+                42.0 * ck,
+            )
         };
         let mut queue: alloc::collections::VecDeque<Input> = events.into();
         while let Some(ev) = queue.pop_front() {
@@ -1460,6 +2080,30 @@ pub fn main() -> i32 {
                 damage.add(r);
                 pointer_at = Some(r);
             }
+            // The volume and brightness keys, whatever has the keyboard, with
+            // their pop-up (ADR 0186).
+            if let Input::Key { code, .. } = ev
+                && let Some(k) = volume_key(code)
+            {
+                if let Some(o) = media_key(k, &mut st, &mut quick) {
+                    osd = Some(o);
+                }
+                damage.add(crate::quick::osd_area(lw, lh).grow(2.0));
+                damage.add(Area::new(0.0, 0.0, lw, pal.shape.bar_h));
+                continue;
+            }
+            // Ctrl+Alt+F1 to F12: the session on that virtual console (a
+            // text console, another person's desktop), locked or not.
+            if let Input::Key { code, mods, .. } = ev
+                && mods.ctrl
+                && mods.alt
+                && inputs.has_seat()
+                && let Some(vt) = vt_key(code)
+            {
+                slate_rt::eprintln!("strata: switching to virtual console {vt}");
+                inputs.switch_session(vt);
+                continue;
+            }
             // Locked: keys go to the lock screen, nothing to the apps.
             if let Some(l) = locked.as_mut() {
                 if let Input::Pointer(Event::PointerDown(x, y)) = ev {
@@ -1470,8 +2114,19 @@ pub fn main() -> i32 {
                     _ => None,
                 };
                 if outcome == Some(crate::lock::Outcome::SwitchPerson) {
-                    // The login screen comes back for someone else.
+                    // The login screen comes back for someone else: on its
+                    // virtual console, this session waiting locked behind
+                    // it (ADR 0185); without a seat, the session ends.
                     slate_rt::eprintln!("strata: switching person");
+                    if inputs.has_seat() {
+                        // Back for its person: the password, nothing typed.
+                        l.status = crate::lock::Status::Asking;
+                        l.focus = crate::lock::Focus::Password;
+                        l.password = Default::default();
+                        inputs.switch_session(1);
+                        damage.set_full();
+                        continue;
+                    }
                     slate_rt::eprintln!("strata: leaving");
                     return 0;
                 }
@@ -1541,7 +2196,9 @@ pub fn main() -> i32 {
                         Some(launcher::Outcome::Open(app)) => {
                             launcher = None;
                             launcher::remember(&app.exec);
-                            spawn(app.exec.as_bytes(), &socket);
+                            if spawn(app.exec.as_bytes(), &socket).is_some() {
+                                opening = Some(Opening::new(&app.name));
+                            }
                         }
                         Some(launcher::Outcome::Do(launcher::Action::Lock)) => {
                             launcher = None;
@@ -1633,6 +2290,23 @@ pub fn main() -> i32 {
                     }
                     damage.set_full();
                 }
+                // Quick settings have the keys while open (ADR 0186).
+                Input::Key { code, .. } if quick.is_some() && volume_key(code).is_none() => {
+                    let out = quick.as_ref().and_then(|q| q.key(code));
+                    quick_do(
+                        out,
+                        &mut quick,
+                        &mut st,
+                        &settings,
+                        &mut notes,
+                        &mut locked,
+                        &mut power,
+                        &timed,
+                        live,
+                        &socket,
+                    );
+                    damage.set_full();
+                }
                 // So does the Applications menu (super + space trades it
                 // for the launcher, super alone closes it).
                 Input::Key { code, ch, mods, .. } if menu.is_some() => {
@@ -1649,7 +2323,9 @@ pub fn main() -> i32 {
                             Some(menu::Outcome::Open(app)) => {
                                 menu = None;
                                 launcher::remember(&app.exec);
-                                spawn(app.exec.as_bytes(), &socket);
+                                if spawn(app.exec.as_bytes(), &socket).is_some() {
+                                    opening = Some(Opening::new(&app.name));
+                                }
                             }
                             None => {}
                         }
@@ -1716,7 +2392,9 @@ pub fn main() -> i32 {
                             }
                         }
                         Command::Terminal => {
-                            spawn(NEW_WINDOW, &socket);
+                            if spawn(NEW_WINDOW, &socket).is_some() {
+                                opening = Some(Opening::new("Terminal"));
+                            }
                             continue;
                         }
                         Command::Launcher => {
@@ -1728,6 +2406,11 @@ pub fn main() -> i32 {
                             slate_rt::eprintln!("strata: the applications menu (super)");
                             fresh_apps(&mut apps);
                             menu = Some(Menu::new(apps.clone(), launcher::load_recent()));
+                        }
+                        Command::QuickSettings => {
+                            slate_rt::eprintln!("strata: quick settings (super + s)");
+                            menu = None;
+                            quick = Some(quick_now(&st, &settings, &mut notes));
                         }
                         Command::Lock => {
                             slate_rt::eprintln!("strata: locked");
@@ -1828,6 +2511,50 @@ pub fn main() -> i32 {
                     }
                 }
                 // A click on an app opens it; outside the menu, it closes.
+                Input::Pointer(Event::PointerDown(x, y)) if quick.is_some() => {
+                    let (x, y) = (x / scale + lay.origin.0, y / scale + lay.origin.1);
+                    // Its own cell in the top bar closes it again.
+                    let out = if panel.status.contains(x, y) {
+                        Some(crate::quick::Outcome::Close)
+                    } else {
+                        quick.as_mut().and_then(|q| q.press(&quick_hits, x, y))
+                    };
+                    quick_do(
+                        out,
+                        &mut quick,
+                        &mut st,
+                        &settings,
+                        &mut notes,
+                        &mut locked,
+                        &mut power,
+                        &timed,
+                        live,
+                        &socket,
+                    );
+                    damage.set_full();
+                }
+                Input::Pointer(Event::PointerMove(x, _)) if quick.as_ref().is_some_and(|q| q.dragging) => {
+                    let x = x / scale + lay.origin.0;
+                    let out = crate::quick::Quick::level_at(&quick_hits, x).map(crate::quick::Outcome::Volume);
+                    quick_do(
+                        out,
+                        &mut quick,
+                        &mut st,
+                        &settings,
+                        &mut notes,
+                        &mut locked,
+                        &mut power,
+                        &timed,
+                        live,
+                        &socket,
+                    );
+                    damage.set_full();
+                }
+                Input::Pointer(Event::PointerUp(..)) if quick.as_ref().is_some_and(|q| q.dragging) => {
+                    if let Some(q) = quick.as_mut() {
+                        q.dragging = false;
+                    }
+                }
                 Input::Pointer(Event::PointerDown(x, y)) if menu.is_some() => {
                     let (x, y) = (x / scale + lay.origin.0, y / scale + lay.origin.1);
                     if let Some(i) = menu_hits.apps.iter().position(|a| a.contains(x, y)) {
@@ -1933,18 +2660,12 @@ pub fn main() -> i32 {
                             }
                         }
                         Drag::Resize { id, start, edges, x0, y0 } => {
-                            cursor = edges.cursor();
                             let before = wm.frame(id);
                             wm.resize(id, start, edges, x - x0, y - y0);
                             damage.window(before, wm.frame(id));
                         }
                         Drag::None => {
                             let hit = wm.hit(x, y);
-                            // A double arrow over the edges that resize.
-                            cursor = match hit {
-                                Some(Hit::Edge(_, e)) if launcher.is_none() && dialog.is_none() => e.cursor(),
-                                _ => slate_ui::icon::Cursor::Arrow,
-                            };
                             // Hover: the window under the pointer hears it move.
                             if let Some(Hit::Content(id)) = hit
                                 && launcher.is_none()
@@ -1977,6 +2698,26 @@ pub fn main() -> i32 {
                 }
                 Input::Pointer(Event::PointerDown(x, y)) => {
                     let (x, y) = (x / scale + lay.origin.0, y / scale + lay.origin.1);
+                    // A banner: its close button dismisses it; elsewhere on
+                    // it, its app's window comes up too (ADR 0186).
+                    if let Some(&(id, _, close)) = panel.banners.iter().find(|b| b.1.contains(x, y)) {
+                        notes.dismiss(id);
+                        if !close.contains(x, y)
+                            && let Some(n) = notes.list.iter().find(|n| n.id == id)
+                        {
+                            let win = if n.pid == 0 {
+                                wm.windows.iter().find(|w| w.app.eq_ignore_ascii_case(&n.app)).map(|w| w.id)
+                            } else {
+                                server.windows_of(n.pid).first().copied()
+                            };
+                            if let Some(w) = win {
+                                wm.focus(w);
+                            }
+                        }
+                        slate_rt::eprintln!("strata: notification {id} dismissed");
+                        damage.set_full();
+                        continue;
+                    }
                     // A click takes the keyboard focus off the title bar.
                     if let Some(a) = keyed.take().and_then(|(id, _)| wm.frame(id)) {
                         damage.add(Area::new(a.x, a.y, a.w, wm.title_h));
@@ -1994,6 +2735,11 @@ pub fn main() -> i32 {
                         damage.set_full();
                     }
                     if wm.in_bar(x, y) {
+                        // The control pressed looks it until let go (ADR 0186).
+                        extras.bar_pressed = panel.control_at(x, y);
+                        if extras.bar_pressed.is_some() {
+                            damage.add(Area::new(0.0, 0.0, lw, pal.shape.bar_h));
+                        }
                         if panel.earlier.is_some_and(|a| a.contains(x, y)) {
                             list_first = panel.first.saturating_sub(1);
                         } else if panel.later.is_some_and(|a| a.contains(x, y)) {
@@ -2012,6 +2758,10 @@ pub fn main() -> i32 {
                         } else if panel.updates.is_some_and(|a| a.contains(x, y)) {
                             slate_rt::eprintln!("strata: the updates");
                             spawn(UPDATER, &socket);
+                        } else if panel.status.contains(x, y) {
+                            slate_rt::eprintln!("strata: quick settings");
+                            menu = None;
+                            quick = Some(quick_now(&st, &settings, &mut notes));
                         } else if panel.power.contains(x, y) || panel.pending.is_some_and(|a| a.contains(x, y)) {
                             slate_rt::eprintln!("strata: the power dialog");
                             let focus = timed.as_ref().map_or(PowerChoice::ShutDown, |t| t.0.choice);
@@ -2053,16 +2803,18 @@ pub fn main() -> i32 {
                     let raised =
                         wm.focused().map(|w| w.id) != Some(id) || wm.visible().last().map(|w| w.id) != Some(id);
                     match hit {
-                        Hit::Close(_) => {
-                            if server.close(id, now_ms()) {
-                                wm.remove(id);
+                        // Title bar buttons look pressed while held and act
+                        // when let go over them (ADR 0186).
+                        Hit::Close(_) | Hit::Maximize(_) | Hit::Minimize(_) => {
+                            let b = match hit {
+                                Hit::Close(_) => TitleButton::Close,
+                                Hit::Maximize(_) => TitleButton::Maximize,
+                                _ => TitleButton::Minimize,
+                            };
+                            extras.pressed = Some((id, b));
+                            if let Some(a) = wm.frame(id) {
+                                damage.add(Area::new(a.x, a.y, a.w, wm.title_h));
                             }
-                            extras.hover = None;
-                        }
-                        Hit::Maximize(_) => wm.toggle_maximize(id),
-                        Hit::Minimize(_) => {
-                            motion.fade_out(id, now_ms());
-                            extras.hover = None;
                         }
                         Hit::Title(_) => {
                             wm.focus(id);
@@ -2108,6 +2860,38 @@ pub fn main() -> i32 {
                 }
                 Input::Pointer(Event::PointerUp(x, y)) => {
                     let (x, y) = (x / scale + lay.origin.0, y / scale + lay.origin.1);
+                    // A title bar button pressed: it acts if the pointer is
+                    // still over it.
+                    if let Some((id, b)) = extras.pressed.take() {
+                        if let Some(a) = wm.frame(id) {
+                            damage.add(Area::new(a.x, a.y, a.w, wm.title_h));
+                        }
+                        let still = matches!(
+                            (wm.hit(x, y), b),
+                            (Some(Hit::Close(i)), TitleButton::Close)
+                                | (Some(Hit::Maximize(i)), TitleButton::Maximize)
+                                | (Some(Hit::Minimize(i)), TitleButton::Minimize) if i == id
+                        );
+                        if still {
+                            match b {
+                                TitleButton::Close => {
+                                    if server.close(id, now_ms()) {
+                                        wm.remove(id);
+                                    }
+                                    extras.hover = None;
+                                }
+                                TitleButton::Maximize => wm.toggle_maximize(id),
+                                TitleButton::Minimize => {
+                                    motion.fade_out(id, now_ms());
+                                    extras.hover = None;
+                                }
+                            }
+                        }
+                    }
+                    // A press in the top bar is let go.
+                    if extras.bar_pressed.take().is_some() {
+                        damage.add(Area::new(0.0, 0.0, lw, pal.shape.bar_h));
+                    }
                     if let Drag::Content { id } = drag
                         && let Some(a) = wm.frame(id)
                     {

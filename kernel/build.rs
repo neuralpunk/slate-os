@@ -14,6 +14,20 @@ fn main() {
     let out = std::env::var("OUT_DIR").unwrap();
     build_vdso(Path::new(&dir), Path::new(&out));
     trusted_keys(Path::new(&out));
+    splash_logo(Path::new(&out));
+}
+
+/// The boot splash's logo (ADR 0186): slate-ui's mark drawn at 96 and 192
+/// pixels, kept as one coverage byte a pixel, into
+/// `$OUT_DIR/splash-logo-<size>.bin` for the kernel to colour.
+fn splash_logo(out: &Path) {
+    for size in [96usize, 192] {
+        let mut c = slate_ui::Canvas::new(size as i32, size as i32, slate_ui::Color::TRANSPARENT);
+        c.clear();
+        slate_ui::logo::draw(&mut c, 0.0, 0.0, size as f32, slate_ui::Color::rgb(0xFFFFFF));
+        let alpha: Vec<u8> = c.pixels.iter().map(|p| (p >> 24) as u8).collect();
+        std::fs::write(out.join(format!("splash-logo-{size}.bin")), alpha).unwrap();
+    }
 }
 
 /// The public keys the kernel trusts for signed programs (ADR 0090), from

@@ -32,7 +32,7 @@ use alloc::vec::Vec;
 use slate_rt::mem::Mapping;
 use slate_rt::{fs, io, lossy, net, process};
 use slate_ui::{Canvas, Rect};
-pub use strata_proto::{Event, MAX_TEXT, PointerKind, clipboard, mods};
+pub use strata_proto::{Event, MAX_TEXT, PointerKind, clipboard, cursor, mods, urgency};
 use strata_proto::{Next, Request};
 
 /// The socket's name for this user.
@@ -218,6 +218,29 @@ impl Connection {
     /// playing), or let it again.
     pub fn inhibit(&mut self, w: &Window, on: bool) -> Result<(), String> {
         self.send(&Request::Inhibit { win: w.id, on })
+    }
+
+    /// A notification (ADR 0186): `key` (not 0) replaces this app's
+    /// earlier one with the same key; `urgency` is `strata_proto::urgency`.
+    pub fn notify(&mut self, key: u32, app: &str, summary: &str, body: &str, urgency: u8) -> Result<(), String> {
+        self.send(&Request::Notify {
+            key,
+            app: String::from(app),
+            summary: String::from(summary),
+            body: String::from(body),
+            urgency,
+        })
+    }
+
+    /// This app's notification `key` is no longer wanted.
+    pub fn unnotify(&mut self, key: u32) -> Result<(), String> {
+        self.send(&Request::Unnotify { key })
+    }
+
+    /// The pointer's shape over `w`'s content (`strata_proto::cursor::*`;
+    /// ADR 0186).
+    pub fn set_cursor(&mut self, w: &Window, shape: u8) -> Result<(), String> {
+        self.send(&Request::Cursor { win: w.id, shape })
     }
 
     /// A new title for `w`, naming the process it shows (`pid`, a child of

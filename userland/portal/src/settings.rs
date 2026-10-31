@@ -35,17 +35,22 @@ pub const MONO_FONT: &str = "DM Mono 10";
 pub struct Look {
     pub theme: Theme,
     pub high_contrast: bool,
+    /// The person's text and pointer sizes, percent (ADR 0186).
+    pub text: u8,
+    pub cursor: u8,
 }
 
 impl Look {
     /// From the settings file's text (missing or unknown: Strata's own
     /// defaults, Graphite at normal contrast).
     pub fn parse(text: &str) -> Look {
-        let mut l = Look { theme: Theme::Graphite, high_contrast: false };
+        let mut l = Look { theme: Theme::Graphite, high_contrast: false, text: 100, cursor: 100 };
         for line in text.lines() {
             match line.trim().split_once('=') {
                 Some(("theme", v)) => l.theme = Theme::from_key(v.trim()).unwrap_or(l.theme),
                 Some(("contrast", v)) => l.high_contrast = v.trim() == "high",
+                Some(("text", v)) => l.text = v.trim().parse::<u8>().map_or(l.text, |t| t.clamp(50, 200)),
+                Some(("cursor", v)) => l.cursor = v.trim().parse::<u8>().map_or(l.cursor, |c| c.clamp(50, 250)),
                 _ => {}
             }
         }
@@ -119,7 +124,8 @@ impl Look {
                     ("document-font-name", s(FONT)),
                     ("monospace-font-name", s(MONO_FONT)),
                     ("cursor-theme", s("Adwaita")),
-                    ("cursor-size", Value::I32(24)),
+                    ("cursor-size", Value::I32(24 * i32::from(self.cursor) / 100)),
+                    ("text-scaling-factor", Value::Double(f64::from(self.text) / 100.0)),
                     ("icon-theme", s("Adwaita")),
                 ],
             ),
@@ -211,5 +217,15 @@ mod tests {
         assert!(keys.contains(&("org.gnome.desktop.interface", "gtk-theme")));
         assert!(!keys.contains(&("org.gnome.desktop.interface", "font-name")));
         assert!(l.changes(&l).is_empty());
+    }
+
+    #[test]
+    fn sizes() {
+        let l = Look::parse("theme=graphite\ntext=150\ncursor=200\n");
+        assert_eq!(l.get("org.gnome.desktop.interface", "text-scaling-factor"), Some(Value::Double(1.5)));
+        assert_eq!(l.get("org.gnome.desktop.interface", "cursor-size"), Some(Value::I32(48)));
+        let d = Look::parse("");
+        assert_eq!(d.get("org.gnome.desktop.interface", "text-scaling-factor"), Some(Value::Double(1.0)));
+        assert!(l.changes(&d).iter().any(|c| c.1 == "text-scaling-factor"));
     }
 }

@@ -295,6 +295,8 @@ fn dispatch(nr: u64, a: Args, frame: &mut TrapFrame, traced: bool) -> Option<Res
         nr::SCHED_SETSCHEDULER => process::sched_setscheduler(a.0[0], Some(a.0[1]), a.0[2]),
         nr::SCHED_SETPARAM => process::sched_setscheduler(a.0[0], None, a.0[1]),
         nr::SCHED_RR_GET_INTERVAL => process::sched_rr_get_interval(a),
+        nr::SCHED_SETATTR => process::sched_setattr(a),
+        nr::SCHED_GETATTR => process::sched_getattr(a),
         // posix_fadvise(2): advice only; Slate's page cache doesn't use it.
         nr::FADVISE64 => {
             crate::proc::current().ok_or(errno::ESRCH).and_then(|p| p.files.lock().get(a.fd(0)).map(|_| 0))

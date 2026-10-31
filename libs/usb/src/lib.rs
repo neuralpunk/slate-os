@@ -209,6 +209,8 @@ pub fn string_utf8(desc: &[u8]) -> alloc::string::String {
     char::decode_utf16(units).map(|c| c.unwrap_or(char::REPLACEMENT_CHARACTER)).collect()
 }
 
+pub mod audio;
+
 pub mod ecm {
     //! The Ethernet Control Model (CDC ECM 1.2).
 

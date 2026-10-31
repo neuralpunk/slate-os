@@ -152,6 +152,35 @@ fn screen_size(c: &mut Command) -> Result {
     Ok(())
 }
 
+/// SLATE_AUDIO=BACKEND for the machines people use (`run`, `try-install`,
+/// the workbenches):
+/// an HD Audio card (QEMU's intel-hda with a duplex codec, as the sound
+/// scenario has, ADR 0184) on that QEMU audio backend: `pipewire` (or `pa`,
+/// `alsa`, `sdl`, `jack`) plays through the host's own sound card and
+/// records from its default input; `wav` writes target/sound/run.wav;
+/// `none` is a silent card. Unset, the machine has no sound card. Never set
+/// to a host backend by xtask itself: what plays there is heard.
+pub fn sound_card(c: &mut Command) -> Result {
+    let Ok(backend) = std::env::var("SLATE_AUDIO") else { return Ok(()) };
+    let dev = match backend.as_str() {
+        "wav" => {
+            let dir = target_dir().join("sound");
+            std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+            let path = dir.join("run.wav");
+            eprintln!("xtask: the guest's sound goes to {}", path.display());
+            format!("wav,id=snd0,path={},out.frequency=48000,out.channels=2,out.format=s16", path.display())
+        }
+        "pipewire" | "pa" | "alsa" | "sdl" | "jack" | "none" => {
+            eprintln!("xtask: the guest has an HD Audio card on the host's {backend}");
+            format!("{backend},id=snd0")
+        }
+        _ => return Err(format!("SLATE_AUDIO={backend}: want pipewire, pa, alsa, sdl, jack, wav or none")),
+    };
+    c.arg("-audiodev").arg(dev);
+    c.args(["-device", "intel-hda,id=sound0", "-device", "hda-duplex,audiodev=snd0,bus=sound0.0"]);
+    Ok(())
+}
+
 /// `WxH` (`1920x1080`) as a width and a height, each from 480 to 8192.
 fn parse_res(s: &str) -> Option<(u32, u32)> {
     let (w, h) = s.split_once(['x', 'X'])?;
@@ -216,6 +245,14 @@ fn hotplug_scenario(o: &Opts) -> Result {
                 if present { "" } else { "!" }
             )
         };
+        // A uevent listener (ADR 0185) hears the disk come and go (just
+        // after login: the system may still be starting).
+        con.run(
+            "devd monitor 120 > /tmp/ue.log 2>&1 & for i in $(seq 200); do grep -q listening /tmp/ue.log && break; \
+             sleep 0.1; done; grep -c listening /tmp/ue.log | sed 's/^/monitoring-/'",
+            "monitoring-1",
+            30,
+        )?;
         for round in 1..=2 {
             // Plugged in: an ACPI device check (GPE 1, _E01), the slot's BARs
             // from the root port's window, the NVMe driver, the disk.
@@ -247,6 +284,14 @@ fn hotplug_scenario(o: &Opts) -> Result {
             std::thread::sleep(Duration::from_millis(500));
         }
         con.run("dmesg | grep -c 'eject request' | sed 's/^/ejects-/'", "ejects-2", 10)?;
+        con.run(
+            "echo heard-$(grep -c '^KERNEL add /block/nvme0n1 (block) disk' /tmp/ue.log)\
+             -$(grep -c '^KERNEL remove /block/nvme0n1 (block) disk' /tmp/ue.log)\
+             -$(grep -c '^UDEV add /block/nvme0n1 (block) disk$' /tmp/ue.log)\
+             -$(grep -c '^UDEV remove /block/nvme0n1 (block) disk$' /tmp/ue.log)-$(grep -c 'bad header' /tmp/ue.log); kill %1",
+            "heard-2-2-2-2-0",
+            10,
+        )?;
         con.poweroff()
     })();
     let _ = std::fs::write(target_dir().join("hotplug-scenario.log"), strip_ansi(&con.log));
@@ -255,7 +300,8 @@ fn hotplug_scenario(o: &Opts) -> Result {
         return Err(format!("hot-plug scenario: {e} (transcript in target/hotplug-scenario.log)"));
     }
     println!(
-        "xtask: hot-plug scenario passed (an NVMe drive plugged in, read and ejected through ACPI, twice; {:.2}s)",
+        "xtask: hot-plug scenario passed (an NVMe drive plugged in, read and ejected through ACPI, twice, its \
+         uevents heard, and devd's for libudev; {:.2}s)",
         started.elapsed().as_secs_f64()
     );
     Ok(())
@@ -628,6 +674,7 @@ pub fn run(o: &Opts, debug: bool) -> Result {
     let img = image::build(o, cmdline.trim(), "slate.img", image::Root::Disk)?;
     let mut c = base_command(o, &img)?;
     screen_size(&mut c)?;
+    sound_card(&mut c)?;
     // The console is on both the QEMU window (screen and PS/2 keyboard) and
     // this terminal (serial). --headless skips the window.
     if o.headless {
@@ -659,6 +706,7 @@ pub fn try_install(o: &Opts) -> Result {
     }
     let mut c = machine(o)?;
     screen_size(&mut c)?;
+    sound_card(&mut c)?;
     c.args(["-device", "qemu-xhci,id=xhci", "-device", "usb-kbd,bus=xhci.0", "-device", "virtio-tablet-pci"]);
     // A host USB device handed to the guest, `VENDOR:PRODUCT` in hex (a
     // Bluetooth controller, ADR 0176): the host loses it meanwhile, and
@@ -981,6 +1029,41 @@ fn shell_session(o: &Opts) -> Result {
         }
         std::thread::sleep(Duration::from_millis(200));
         check_screenshot(&shot)?;
+        // Virtual consoles (ADR 0185): Alt+F2 to the second, a login there
+        // on the keyboard, a command, Alt+F1 back to the console.
+        let mut keys = |list: &[&str]| -> Result {
+            for k in list {
+                monitor.write_all(format!("sendkey {k}\n").as_bytes()).map_err(|e| e.to_string())?;
+                std::thread::sleep(Duration::from_millis(40));
+            }
+            Ok(())
+        };
+        keys(&["alt-f2"])?;
+        std::thread::sleep(Duration::from_millis(500));
+        keys(&["r", "o", "o", "t", "ret"])?;
+        std::thread::sleep(Duration::from_millis(1500));
+        let line = "echo vt2-$(tty) >/tmp/vt2";
+        let typed: Vec<String> = line
+            .chars()
+            .map(|c| match c {
+                ' ' => "spc".into(),
+                '-' => "minus".into(),
+                '$' => "shift-4".into(),
+                '(' => "shift-9".into(),
+                ')' => "shift-0".into(),
+                '>' => "shift-dot".into(),
+                '/' => "slash".into(),
+                c => c.to_string(),
+            })
+            .collect();
+        keys(&typed.iter().map(String::as_str).collect::<Vec<_>>())?;
+        keys(&["ret"])?;
+        std::thread::sleep(Duration::from_millis(500));
+        keys(&["alt-f1"])?;
+        std::thread::sleep(Duration::from_millis(300));
+        send(b"echo $(cat /sys/class/tty/tty0/active)-$(cat /tmp/vt2)\r")?;
+        let p = wait_for("tty1-vt2-/dev/tty2", p, 10, &mut log)?;
+        let p = wait_for("# ", p, 5, &mut log)?;
         // Logging out brings getty back; then power off through slinit.
         stdin.write_all(b"exit\r").map_err(|e| e.to_string())?;
         stdin.flush().map_err(|e| e.to_string())?;
@@ -1017,7 +1100,7 @@ fn shell_session(o: &Opts) -> Result {
     }
     crate::slatefsimg::check_root(&img, image::ROOT_OFFSET, "/root/session.txt", b"persisted\n")?;
     println!(
-        "xtask: shell session passed ({} commands, Ctrl-C, Ctrl-Z/fg, PS/2 keyboard, screen, login, logout, poweroff, SlateFS root checked; {:.2}s)",
+        "xtask: shell session passed ({} commands, Ctrl-C, Ctrl-Z/fg, PS/2 keyboard, screen, a login on virtual console 2, login, logout, poweroff, SlateFS root checked; {:.2}s)",
         SESSION.len(),
         started.elapsed().as_secs_f64()
     );
@@ -1598,6 +1681,10 @@ fn strata_scenario(o: &Opts) -> Result {
     let mut c = base_command(o, &img)?;
     c.args(["-display", "none", "-serial", "stdio", "-monitor"]);
     c.arg(format!("unix:{},server,nowait", mon.display()));
+    // A sound card for the volume (ADR 0186), on QEMU's silent backend:
+    // nothing reaches the host's speakers.
+    c.args(["-audiodev", "none,id=snd0", "-device", "intel-hda,id=sound0"]);
+    c.args(["-device", "hda-duplex,audiodev=snd0,bus=sound0.0"]);
     let mut con = Console::start(c)?;
     let pause = |ms: u64| std::thread::sleep(Duration::from_millis(ms));
     let desktop = [0x12, 0x12, 0x11];
@@ -1614,6 +1701,68 @@ fn strata_scenario(o: &Opts) -> Result {
         if bar != desktop || middle != desktop {
             return Err(format!("no desktop on the screen (bar {bar:02x?}, middle {middle:02x?})"));
         }
+        // The volume keys change the card's volume, with a pop-up; super + s
+        // opens quick settings, where right raises it; Esc closes them
+        // (ADR 0186).
+        monitor(&mon, &["sendkey volumeup"])?;
+        con.wait_for("strata: volume: ", 10)?;
+        monitor(&mon, &["sendkey audiomute"])?;
+        con.wait_for("strata: volume: muted", 10)?;
+        pause(300);
+        let osd = screendump(&mon, "strata-volume-osd.ppm")?;
+        if ppm_pixel(&osd, 640, 688)? == desktop {
+            return Err("the volume keys showed no pop-up".into());
+        }
+        monitor(&mon, &["sendkey audiomute"])?;
+        con.wait_for("strata: volume: ", 10)?;
+        monitor(&mon, &["sendkey meta_l-s"])?;
+        con.wait_for("strata: quick settings (super + s)", 10)?;
+        pause(500);
+        if ppm_pixel(&screendump(&mon, "strata-quick-settings.ppm")?, 1100, 200)? == desktop {
+            return Err("super + s did not open quick settings".into());
+        }
+        monitor(&mon, &["sendkey right"])?;
+        con.wait_for("strata: volume: ", 10)?;
+        monitor(&mon, &["sendkey esc"])?;
+        pause(2000);
+        if ppm_pixel(&screendump(&mon, "strata-quick-closed.ppm")?, 1100, 200)? != desktop {
+            return Err("Esc did not close quick settings (or the pop-up stayed)".into());
+        }
+        // A notification from the command line: a banner at the top right
+        // for five seconds, then listed in quick settings (ADR 0186).
+        con.send("strata-notify -a Backup 'Backup done' '3 files copied'; echo sent=$?\r")?;
+        con.wait_for_all(&["sent=0", "strata: notification from Backup: Backup done"], 10)?;
+        pause(400);
+        if ppm_pixel(&screendump(&mon, "strata-banner.ppm")?, 1100, 80)? == desktop {
+            return Err("the notification showed no banner".into());
+        }
+        pause(5500);
+        if ppm_pixel(&screendump(&mon, "strata-banner-gone.ppm")?, 1100, 80)? != desktop {
+            return Err("the notification's banner stayed".into());
+        }
+        monitor(&mon, &["sendkey meta_l-s"])?;
+        con.wait_for("strata: quick settings (super + s)", 10)?;
+        pause(400);
+        monitor(&mon, &["sendkey esc"])?;
+        pause(400);
+        // Night Light: the screen warmer, red kept and blue lowered; then
+        // the screen off after three seconds without input, and on again
+        // with a key (ADR 0186).
+        con.run("echo night=on >> $HOME/.config/strata/settings", "", 10)?;
+        con.wait_for("strata: night light on", 10)?;
+        pause(500);
+        let warm = ppm_pixel(&screendump(&mon, "strata-night-light.ppm")?, 640, 300)?;
+        if warm == desktop || warm[2] >= warm[0] {
+            return Err(format!("Night Light didn't warm the screen ({warm:02x?})"));
+        }
+        con.run("echo night=off >> $HOME/.config/strata/settings", "", 10)?;
+        con.wait_for("strata: night light off", 10)?;
+        con.run("echo blank=3 >> $HOME/.config/strata/settings", "", 10)?;
+        con.wait_for("strata: the screen is off", 15)?;
+        monitor(&mon, &["sendkey shift"])?;
+        con.wait_for("strata: the screen is on", 10)?;
+        con.run("echo blank=0 >> $HOME/.config/strata/settings", "", 10)?;
+        pause(500);
         // Whether a point shows the wallpaper as on the empty desktop
         // (whatever the design draws there).
         let bare = |shot: &Path, x: usize, y: usize| -> Result<bool> {
@@ -1635,8 +1784,10 @@ fn strata_scenario(o: &Opts) -> Result {
         if ppm_pixel(&shot, 640, 400)? != window || !bare(&shot, 1100, 700)? {
             return Err("the windows are not where floating windows open".into());
         }
-        // super + up maximises the focused window, and restores it.
+        // super + up maximises the focused window (gliding there, ADR
+        // 0186), and restores it.
         monitor(&mon, &["sendkey meta_l-up"])?;
+        con.wait_for("strata: motion: a window glides", 5)?;
         pause(500);
         if ppm_pixel(&screendump(&mon, "strata-maximised.ppm")?, 5, 760)? != window {
             return Err("super + up did not maximise the window".into());
@@ -1829,7 +1980,7 @@ fn strata_scenario(o: &Opts) -> Result {
         pause(600);
         con.run("test -e /tmp/sb1 && test ! -e /tmp/sb3 && echo clip-$((2*2))", "clip-4", 10)?;
         type_keys(&mon, "exit\n")?;
-        con.wait_for("disconnected", 10)?;
+        con.wait_for_all(&["disconnected", "strata: motion: a closed window fades"], 10)?;
         pause(500);
         monitor(&mon, &["sendkey meta_l-up"])?;
         pause(300);
@@ -1858,7 +2009,8 @@ fn strata_scenario(o: &Opts) -> Result {
             return Err("super + space did not open the launcher".into());
         }
         type_keys(&mon, "term\n")?;
-        con.wait_for("\"terminal\" from pid", 15)?;
+        // Strata shows it opening until its window comes (ADR 0186).
+        con.wait_for_all(&["strata: opening Terminal", "\"terminal\" from pid", "strata: Terminal opened in "], 15)?;
         // Its "Log out" leaves Strata.
         pause(500);
         monitor(&mon, &["sendkey meta_l-spc"])?;
@@ -1950,6 +2102,7 @@ fn strata_scenario(o: &Opts) -> Result {
         pause(800);
         monitor(&mon, &["sendkey right", "sendkey right", "sendkey spc"])?;
         con.wait_for("strata: settings changed: Settings { theme: Light", 10)?;
+        con.wait_for("strata: motion: the new look cross-fades", 5)?;
         pause(500);
         let p = ppm_pixel(&screendump(&mon, "strata-light.ppm")?, 600, 16)?;
         if p != [0xDC, 0xDB, 0xDB] {
@@ -1981,7 +2134,7 @@ fn strata_scenario(o: &Opts) -> Result {
             return Err(format!("the light variant did not come back (bar {p:02x?})"));
         }
         monitor(&mon, &["sendkey down", "sendkey right", "sendkey ret"])?;
-        con.wait_for("wallpaper: Dunes, picture: false }", 10)?;
+        con.wait_for("wallpaper: Dunes, picture: false", 10)?;
         pause(500);
         let p = ppm_pixel(&screendump(&mon, "strata-wallpaper.ppm")?, 40, 790)?;
         if p == [0xDC, 0xDB, 0xDB] {
@@ -2053,7 +2206,7 @@ fn strata_scenario(o: &Opts) -> Result {
         monitor(&mon, &["sendkey esc", "sendkey up", "sendkey up", "sendkey up", "sendkey right", "sendkey spc"])?;
         con.wait_for("strata: settings changed: Settings { theme: Graphite", 10)?;
         monitor(&mon, &["sendkey down", "sendkey ret"])?;
-        con.wait_for("wallpaper: Lineation, picture: false }", 10)?;
+        con.wait_for("wallpaper: Lineation, picture: false", 10)?;
         monitor(&mon, &["sendkey meta_l-q"])?;
         pause(500);
         // A picture of one's own (ADR 0110's second addendum): a blue BMP
@@ -2063,14 +2216,14 @@ fn strata_scenario(o: &Opts) -> Result {
              && cp /tmp/blue.bmp $HOME/.config/strata/wallpaper && echo wallpaper=picture >> $HOME/.config/strata/settings \
              && echo pic-$((1+1))",
             "pic-2",
-            "picture: true }",
+            "picture: true",
             10,
         )?;
         pause(600);
         if ppm_pixel(&screendump(&mon, "strata-picture.ppm")?, 1270, 790)? != [0x33, 0x66, 0x99] {
             return Err("the picture isn't the wallpaper".into());
         }
-        con.run_seeing("echo wallpaper=lineation >> $HOME/.config/strata/settings", "", "picture: false }", 10)?;
+        con.run_seeing("echo wallpaper=lineation >> $HOME/.config/strata/settings", "", "picture: false", 10)?;
         // Account pictures: the broker made their folder sticky; root's
         // shows on the lock screen below. A full name changed through the
         // broker (as Settings asks).
@@ -2463,6 +2616,7 @@ pub fn test(o: &Opts) -> Result {
             "tools" => crate::systools::tools_scenario(o),
             "bluetooth" => crate::bluetooth::bluetooth_scenario(o),
             "boxes" => crate::boxes::boxes_scenario(o),
+            "sound" => crate::sound::sound_scenario(o),
             "stress" => crate::stress::strata_stress(o),
             "packages" => crate::packages::packages_scenario(o),
             "update" => update_scenario(o),
@@ -2515,6 +2669,7 @@ pub fn test(o: &Opts) -> Result {
         vec![("nohpet", true, no_hpet_scenario)],
         vec![("bluetooth", both, crate::bluetooth::bluetooth_scenario)],
         vec![("boxes", both, crate::boxes::boxes_scenario)],
+        vec![("sound", both, crate::sound::sound_scenario)],
         vec![("update", true, update_scenario)],
         vec![("powercut", both, power_cut_scenario)],
         vec![("nic", both, nic_scenario)],
@@ -3058,6 +3213,13 @@ fn usb_scenario(o: &Opts) -> Result {
         // A mouse plugged into the hub, then taken out: the hub's
         // status-change endpoint tells (it is not polled).
         con.run("dmesg | grep -c 'hub with 8 ports$' | sed 's/^/listening-/'", "listening-1", 10)?;
+        // Its uevents (ADR 0185), heard by a listener.
+        con.run(
+            "devd monitor 120 > /tmp/ue.log 2>&1 & for i in $(seq 50); do grep -q listening /tmp/ue.log && break; \
+             sleep 0.1; done; grep -c listening /tmp/ue.log | sed 's/^/monitoring-/'",
+            "monitoring-1",
+            10,
+        )?;
         monitor(&mon, &["device_add usb-mouse,bus=xhci.0,port=1.3,id=hubmouse"])?;
         con.run(
             "for i in $(seq 50); do dmesg | grep -q 'USB port [0-9]*\\.3: mouse' && break; sleep 0.1; done; \
@@ -3082,6 +3244,19 @@ fn usb_scenario(o: &Opts) -> Result {
              echo off-$(ls /dev | grep -c \"^$s2\")-$(dmesg | grep -c 'disabled; unplug the device')",
             "off-0-1",
             20,
+        )?;
+        // The mouse's device and interface came and went; the stick's
+        // disk went.
+        con.run(
+            "sleep 0.3; echo ue-$(grep -c '^KERNEL add /.*[.]3 (usb) usb_device' /tmp/ue.log)\
+             -$(grep -c '^KERNEL add /.*[.]3:1[.]0 (usb) usb_interface' /tmp/ue.log)\
+             -$(grep -c '^KERNEL remove /.*[.]3:1[.]0 (usb) usb_interface' /tmp/ue.log)\
+             -$(grep -c '^KERNEL remove /.*[.]3 (usb) usb_device' /tmp/ue.log)\
+             -$(grep -c '^KERNEL remove /block/sd[a-z]* (block) disk' /tmp/ue.log)\
+             -$(grep -c '^UDEV add /.*[.]3 (usb) usb_device$' /tmp/ue.log)\
+             -$(grep -c '^UDEV add /.*/event[0-9]* (input) -$' /tmp/ue.log)-$(grep -c 'bad header' /tmp/ue.log); kill %1",
+            "ue-1-1-1-1-1-1-1-0",
+            10,
         )?;
         // In sysfs and lsusb (M23 phase 7): two root hubs, the hub with
         // the keyboard behind it, the stick; the mouse gone again.
@@ -3346,7 +3521,10 @@ fn unlock_root(con: &mut Console, mon: &Path, password: &str) -> Result {
     con.wait_for("Password to unlock /dev/sda2: ", 60)?;
     for _ in 0..3 {
         type_keys(mon, &format!("{password}\n"))?;
-        if con.wait_for_any(&["unlocked as /dev/dm-0", "does not unlock the disk"], 20)? == 0 {
+        // (A quiet boot, behind the splash, doesn't print the kernel's
+        // line; the splash coming back says the screen was let go.)
+        let unlocked = ["unlocked as /dev/dm-0", "does not unlock the disk", "splash: back after the disk's password"];
+        if con.wait_for_any(&unlocked, 20)? != 1 {
             return Ok(());
         }
         con.wait_for("Password to unlock /dev/sda2: ", 10)?;
@@ -3577,6 +3755,18 @@ fn graphical_scenario(o: &Opts) -> Result {
         // The login screen (ADR 0038): a wrong password, then the right
         // one, typed on the screen for its only person.
         con.wait_for("strata-login: showing the login screen (1 to choose from)", 90)?;
+        // The installed system booted quiet: the splash, paused for the
+        // disk's password and back until the login screen (ADR 0186).
+        for line in [
+            "splash: shown",
+            "splash: paused for the disk's password",
+            "splash: back after the disk's password",
+            "splash: ended (a program took the screen)",
+        ] {
+            if con.last_line_with(line).is_none() {
+                return Err(format!("the boot splash: no {line:?}"));
+            }
+        }
         std::thread::sleep(Duration::from_millis(1000));
         let shot = screendump(&mon, "graphical-login.ppm")?;
         // Inside the password field, under the people (scenes: login-one).
@@ -3594,6 +3784,40 @@ fn graphical_scenario(o: &Opts) -> Result {
         let shot = screendump(&mon, "graphical-strata.ppm")?;
         if ppm_pixel(&shot, 640, 300)? != [0x12, 0x12, 0x11] {
             return Err("Strata did not start at the login".into());
+        }
+        // Sessions (ADR 0185): Ctrl+Alt+F2 to a text console and Alt+F7
+        // back to the desktop, still there.
+        monitor(&mon, &["sendkey ctrl-alt-f2"])?;
+        con.wait_for("strata: switched away", 10)?;
+        std::thread::sleep(Duration::from_millis(800));
+        monitor(&mon, &["sendkey alt-f7"])?;
+        con.wait_for("strata: back in front", 10)?;
+        std::thread::sleep(Duration::from_millis(1500));
+        let shot = screendump(&mon, "graphical-back.ppm")?;
+        if ppm_pixel(&shot, 640, 300)? != [0x12, 0x12, 0x11] {
+            return Err("the desktop did not come back from the text console".into());
+        }
+        // "Switch person": the session waits, locked, on its virtual
+        // console; the login screen comes back on the first; ada logging
+        // in there again gets her session back, unlocked by that password.
+        monitor(&mon, &["sendkey meta_l-l"])?;
+        con.wait_for("strata: locked", 10)?;
+        std::thread::sleep(Duration::from_millis(400));
+        monitor(&mon, &["sendkey tab", "sendkey ret"])?;
+        std::thread::sleep(Duration::from_millis(300));
+        monitor(&mon, &["sendkey ret"])?;
+        con.wait_for("strata: switching person", 10)?;
+        con.wait_for("strata: switched away", 10)?;
+        con.wait_for("strata-login: showing the login screen", 30)?;
+        std::thread::sleep(Duration::from_millis(1000));
+        type_keys(&mon, &format!("{GRAPHICAL_PASSWORD}\n"))?;
+        con.wait_for("strata-login: back to ada's session", 20)?;
+        con.wait_for("strata: back in front", 20)?;
+        con.wait_for("strata: unlocked from the login screen", 10)?;
+        std::thread::sleep(Duration::from_millis(1500));
+        let shot = screendump(&mon, "graphical-switched-back.ppm")?;
+        if ppm_pixel(&shot, 640, 300)? != [0x12, 0x12, 0x11] {
+            return Err("ada's desktop did not come back unlocked".into());
         }
         // Log out: back to the login screen. Then a login typed on the
         // console (the serial line), which it takes too.
@@ -3696,7 +3920,8 @@ fn graphical_scenario(o: &Opts) -> Result {
     crate::slatefsimg::fsck_with(&disk, root, "graphically installed root after use", Some(GRAPHICAL_PASSWORD))?;
     println!(
         "xtask: graphical installer scenario passed (framebuffer, USB keyboard and mouse, UK English, encrypted \
-         install with Strata in {installed:.1}s, the unlock and login screens, log out, leaving with nothing behind, Berlin's time zone, a console login typing \
+         install with Strata in {installed:.1}s, the unlock and login screens, a text console and back, switching \
+         person and back, log out, leaving with nothing behind, Berlin's time zone, a console login typing \
          with the German layout, its dead keys and AltGr, su, shutting down from Strata's power dialog; {:.2}s)",
         started.elapsed().as_secs_f64()
     );

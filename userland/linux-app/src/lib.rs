@@ -111,6 +111,11 @@ pub fn environment(uid: u32, home: &str, user: &str, keyboard: Option<&str>) -> 
     if let Some(k) = keyboard {
         env.push(format!("SLATE_KEYBOARD={k}"));
     }
+    // The person's sound server (ADR 0185), when they have one.
+    let pulse = format!("/run/user/{uid}/pulse");
+    if fs::exists(pulse.as_bytes()) {
+        env.push(format!("PULSE_SERVER=unix:{pulse}/native"));
+    }
     for keep in [b"STRATA_SOCKET".as_slice(), b"TERM"] {
         if let Some(v) = slate_rt::env::var(keep) {
             env.push(format!("{}={}", lossy(keep), lossy(&v)));
@@ -134,7 +139,8 @@ pub fn main() -> i32 {
                 Some("rollback") => setup::rollback(&args[1..]).map(|()| 0),
                 Some("run") => parse(&args[1..]).and_then(|c| run_plain(&c)),
                 Some("warm") => warm(&args[1..]).map(|()| 0),
-                _ => Err("usage: slate-linux setup|upgrade|rollback|run|warm ... (see /usr/share/doc/slate/guides/installing.md, \"Linux programs\")"
+                Some("sound") => sound(&args[1..]),
+                _ => Err("usage: slate-linux setup|upgrade|rollback|run|warm|sound ... (see /usr/share/doc/slate/guides/installing.md, \"Linux programs\")"
                     .into()),
             }
     } else {
@@ -281,6 +287,14 @@ fn bind_files(root: &str, uid: u32, gid: u32, user: &str, home: &str) -> Result<
 
 /// Make the runtime this process's root, in namespaces of its own.
 fn enter(root: &str, uid: u32, gid: u32, user: &str, home: &str) -> Result<(), String> {
+    enter_with(root, uid, gid, user, home, false)
+}
+
+/// [`enter`]; `devices` also brings /sys and devd's /run/udev in, for the
+/// sound server's WirePlumber to find the cards (ADR 0185). The person's
+/// runtime directory, /run/user/UID, comes in at the same path when there
+/// is one: their sound server's sockets are there.
+fn enter_with(root: &str, uid: u32, gid: u32, user: &str, home: &str, devices: bool) -> Result<(), String> {
     if uid == 0 {
         // Root needs no user namespace for its mounts, and must not have
         // one: its capabilities there would not reach files whose owners
@@ -306,6 +320,25 @@ fn enter(root: &str, uid: u32, gid: u32, user: &str, home: &str) -> Result<(), S
     mount("proc", &format!("{root}/proc"), "proc", 0, "")?;
     mount("tmpfs", &format!("{root}/tmp"), "tmpfs", 0, "mode=1777")?;
     bind_files(root, uid, gid, user, home)?;
+    let mine = format!("/run/user/{uid}");
+    if (devices || fs::exists(mine.as_bytes())) && fs::exists(format!("{root}/run").as_bytes()) {
+        mount("tmpfs", &format!("{root}/run"), "tmpfs", 0, "mode=0755")?;
+        if fs::exists(mine.as_bytes()) {
+            for d in ["user", &format!("user/{uid}")] {
+                let at = format!("{root}/run/{d}");
+                fs::mkdir(at.as_bytes(), 0o755).map_err(|e| format!("{at}: {e}"))?;
+            }
+            mount(&mine, &format!("{root}{mine}"), "", fs::MS_BIND, "")?;
+        }
+        if devices && fs::exists(b"/run/udev") {
+            let at = format!("{root}/run/udev");
+            fs::mkdir(at.as_bytes(), 0o755).map_err(|e| format!("{at}: {e}"))?;
+            mount("/run/udev", &at, "", fs::MS_BIND | fs::MS_REC, "")?;
+        }
+    }
+    if devices && fs::exists(format!("{root}/sys").as_bytes()) {
+        mount("/sys", &format!("{root}/sys"), "", fs::MS_BIND | fs::MS_REC, "")?;
+    }
     // The person's home, at the same path: /home gets a tmpfs to hold the
     // mount point, since the runtime's own /home isn't theirs to change.
     if let Some(rest) = home.strip_prefix("/home/") {
@@ -371,7 +404,14 @@ fn run_plain(c: &Command) -> Result<i32, String> {
     let t0 = slate_rt::time::monotonic_ns();
     let (uid, gid, user, home) = person();
     enter(&c.root, uid, gid, &user, &home)?;
-    let env = environment(uid, &home, &user, None);
+    let mut env = environment(uid, &home, &user, None);
+    // Its runtime directory, as apps have one, and the person's session
+    // bus when their sound server runs (ADR 0185).
+    let _ = fs::mkdir(format!("/tmp/xdg-{uid}").as_bytes(), 0o700);
+    let bus = format!("/run/user/{uid}/bus");
+    if fs::exists(bus.as_bytes()) {
+        env.push(format!("DBUS_SESSION_BUS_ADDRESS=unix:path={bus}").into_bytes());
+    }
     // SLATE_LINUX_TIMING says how long entering took (M31 phase 1).
     if slate_rt::env::var(b"SLATE_LINUX_TIMING").is_some() {
         eprintln!(
@@ -425,6 +465,87 @@ fn warm(args: &[String]) -> Result<(), String> {
     }
     eprintln!("slate-linux: warm in {} ms", ms_since(t0));
     Ok(())
+}
+
+/// What `slate-linux sound` runs, in order: the person's session bus,
+/// then PipeWire, its session manager and its PulseAudio server.
+pub const SOUND: &[&str] =
+    &["/usr/bin/dbus-daemon", "/usr/bin/pipewire", "/usr/bin/wireplumber", "/usr/bin/pipewire-pulse"];
+
+/// `slate-linux sound [--root DIR]` (ADR 0185): the person's Linux
+/// services, which Strata starts at login: a D-Bus session bus and
+/// PipeWire with WirePlumber and pipewire-pulse, their sockets in
+/// /run/user/UID (`bus`, `pipewire-0`, `pulse/native`), so the person's
+/// Linux apps share one sound server and the cards. It runs until one of
+/// them ends (then the others go too) or Strata does, in a process group
+/// of its own for Strata to stop when the session is switched away from.
+fn sound(args: &[String]) -> Result<i32, String> {
+    let root = match args {
+        [flag, dir] if flag == "--root" => dir.clone(),
+        [] => String::from(DEFAULT_ROOT),
+        _ => return Err("usage: slate-linux sound [--root DIR]".into()),
+    };
+    if let Some(missing) = SOUND.iter().find(|p| !fs::exists(format!("{root}{p}").as_bytes())) {
+        return Err(format!("the Linux runtime has no {missing}; `slate-linux upgrade` adds PipeWire"));
+    }
+    let (uid, gid, user, home) = person();
+    let dir = format!("/run/user/{uid}");
+    if !fs::exists(dir.as_bytes()) {
+        return Err(format!("{dir} is missing (the login makes it)"));
+    }
+    let _ = fs::mkdir(format!("{dir}/pulse").as_bytes(), 0o700);
+    let parent = process::getppid();
+    let _ = process::setpgid(0, 0);
+    enter_with(&root, uid, gid, &user, &home, true)?;
+    let mut env: Vec<Vec<u8>> =
+        environment(uid, &home, &user, None).into_iter().filter(|v| !v.starts_with(b"XDG_RUNTIME_DIR=")).collect();
+    env.push(format!("XDG_RUNTIME_DIR={dir}").into_bytes());
+    env.push(format!("DBUS_SESSION_BUS_ADDRESS=unix:path={dir}/bus").into_bytes());
+    let mut started = Vec::new();
+    for (i, program) in SOUND.iter().enumerate() {
+        let mut argv: Vec<Vec<u8>> = alloc::vec![program.as_bytes().to_vec()];
+        if i == 0 {
+            for a in ["--session", "--nofork", "--nopidfile"] {
+                argv.push(a.as_bytes().to_vec());
+            }
+            argv.push(format!("--address=unix:path={dir}/bus").into_bytes());
+        }
+        started.push(spawn(&argv, &env, false)?);
+        // The bus and PipeWire's socket before what connects to them.
+        let wait_for = match i {
+            0 => Some(format!("{dir}/bus")),
+            1 => Some(format!("{dir}/pipewire-0")),
+            _ => None,
+        };
+        if let Some(path) = wait_for {
+            let t0 = slate_rt::time::monotonic_ns();
+            while !fs::exists(path.as_bytes()) && slate_rt::time::monotonic_ns() - t0 < 3_000_000_000 {
+                slate_rt::time::sleep_ns(20_000_000);
+            }
+        }
+    }
+    eprintln!("slate-linux: sound: PipeWire for {user} in {dir}");
+    // Until one ends, or Strata does (its child no more).
+    let ended = loop {
+        match process::wait(-1, process::WNOHANG) {
+            Ok((pid, _)) if pid > 0 => break Some(pid),
+            Err(_) => break None,
+            _ => {}
+        }
+        if process::getppid() != parent {
+            break None;
+        }
+        slate_rt::time::sleep_ns(500_000_000);
+    };
+    if let Some(pid) = ended {
+        let which = SOUND.get(started.iter().position(|&p| p == pid).unwrap_or(usize::MAX)).unwrap_or(&"?");
+        eprintln!("slate-linux: sound: {which} ended; the others go too");
+    }
+    for &pid in &started {
+        let _ = process::kill(pid, slate_rt::signal::SIGTERM);
+    }
+    while process::wait(-1, 0).is_ok() {}
+    Ok(1)
 }
 
 /// The program's exit status from a wait status.
@@ -1145,6 +1266,15 @@ fn run(c: &Command) -> Result<i32, String> {
     enter(&c.root, uid, gid, &user, &home)?;
     let xdg = format!("/tmp/xdg-{uid}");
     fs::mkdir(xdg.as_bytes(), 0o700).map_err(|e| format!("{xdg}: {e}"))?;
+    // The person's sound server (ADR 0185): PulseAudio's socket where
+    // programs look first, $XDG_RUNTIME_DIR/pulse/native, and Flatpak
+    // hands it to sandboxes that ask for it.
+    let pulse = format!("/run/user/{uid}/pulse");
+    if fs::exists(pulse.as_bytes()) {
+        let at = format!("{xdg}/pulse");
+        fs::mkdir(at.as_bytes(), 0o700).map_err(|e| format!("{at}: {e}"))?;
+        mount(&pulse, &at, "", fs::MS_BIND, "")?;
+    }
     let wl = "/tmp/strata-wl";
     let fd =
         fs::open(wl.as_bytes(), fs::O_WRONLY | fs::O_CREAT | fs::O_CLOEXEC, 0o755).map_err(|e| format!("{wl}: {e}"))?;

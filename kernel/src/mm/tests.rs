@@ -159,8 +159,23 @@ fn check(p: PhysAddr, order: usize, tag: u64) -> bool {
     (0..words).step_by(61).all(|i| unsafe { base.add(i as usize).read() } == tag ^ i)
 }
 
+/// Random allocations and frees leave the free count as it was. Drivers
+/// on other CPUs may take or give back frames meanwhile (devices set up
+/// at boot): a leak shows every time, so up to three tries.
 fn frames_random() -> Result<(), &'static str> {
-    let before = frame::stats().free_frames;
+    for attempt in 1..=3 {
+        let before = frame::stats().free_frames;
+        frames_random_once()?;
+        let after = frame::stats().free_frames;
+        if after == before {
+            return Ok(());
+        }
+        crate::log_warn!("mm::frames_random: try {attempt}: {before} free frames before, {after} after");
+    }
+    Err("free frame count not restored")
+}
+
+fn frames_random_once() -> Result<(), &'static str> {
     let mut rng = Rng::new(0xF00D);
     let mut live: Vec<(PhysAddr, usize, u64)> = Vec::with_capacity(4096);
     for i in 0..20_000u64 {
@@ -179,7 +194,7 @@ fn frames_random() -> Result<(), &'static str> {
         ensure(check(p, order, tag), "frame contents were overwritten")?;
         frame::free(p, order);
     }
-    ensure(frame::stats().free_frames == before, "free frame count not restored")
+    Ok(())
 }
 
 fn frames_exhaust() -> Result<(), &'static str> {

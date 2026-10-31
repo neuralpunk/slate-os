@@ -115,6 +115,18 @@ pub struct Bar<'a> {
     pub first: usize,
     /// The live system (M27): an "Install SlateOS" button.
     pub live: bool,
+    /// The control held down, drawn pressed (ADR 0186).
+    pub pressed: Option<Area>,
+    /// An app being opened: its name, and the spinner's step (of 12).
+    pub opening: Option<(&'a str, u8)>,
+    /// The volume (percent, muted); None without a sound card.
+    pub volume: Option<(u32, bool)>,
+    /// Quick settings are open.
+    pub quick: bool,
+    /// Notifications not yet seen: a mark by the status icons.
+    pub unread: bool,
+    /// The battery without its percentage (a setting).
+    pub hide_percent: bool,
 }
 
 /// Where the panel's controls are.
@@ -138,6 +150,34 @@ pub struct PanelHits {
     pub updates: Option<Area>,
     /// What is set for later, when something is.
     pub pending: Option<Area>,
+    /// The status icons, which open quick settings (ADR 0186).
+    pub status: Area,
+    /// Notifications' banners (drawn with the desktop).
+    pub banners: Vec<crate::notes::BannerHit>,
+}
+
+impl PanelHits {
+    /// The control at (x, y), if one is there.
+    pub fn control_at(&self, x: f32, y: f32) -> Option<Area> {
+        let mut all = alloc::vec![self.applications, self.power, self.status];
+        all.extend(self.workspaces);
+        all.extend(self.windows.iter().map(|w| w.1));
+        all.extend([self.earlier, self.later, self.install, self.updates, self.pending].into_iter().flatten());
+        all.into_iter().find(|a| a.w > 0.0 && a.contains(x, y))
+    }
+}
+
+/// A ring three quarters round, radius `r` about (cx, cy), turned to step
+/// `step` of 12: something is under way.
+pub fn spinner(p: &mut Painter<'_>, cx: f32, cy: f32, r: f32, step: u8, c: Color) {
+    let a0 = f32::from(step % 12) * core::f32::consts::PI / 6.0;
+    let pts: Vec<(f32, f32)> = (0..=18)
+        .map(|i| {
+            let a = a0 + 4.7 * i as f32 / 18.0;
+            (cx + r * icon::cos(a), cy + r * icon::sin(a))
+        })
+        .collect();
+    p.polyline(&pts, 1.6, c);
 }
 
 /// The narrowest a window button gets before the list scrolls.
@@ -146,7 +186,7 @@ pub const LIST_MIN: f32 = 110.0;
 const LIST_ARROW: f32 = 22.0;
 
 /// `s` cut at the end with an ellipsis to fit `max`.
-fn truncate_end(p: &Painter<'_>, st: &Style<'_, '_>, s: &str, max: f32) -> String {
+pub fn truncate_end(p: &Painter<'_>, st: &Style<'_, '_>, s: &str, max: f32) -> String {
     if p.measure(st, s) <= max {
         return String::from(s);
     }
@@ -202,6 +242,10 @@ pub fn bar(p: &mut Painter<'_>, pal: &Palette, f: &Fonts<'_>, b: &Bar<'_>) -> Pa
     let t = (bar_h - BAR_H) / 2.0;
     if pal.topbar_fill.alpha() > 0 {
         p.fill(Area::new(0.0, 0.0, w, bar_h), 0.0, pal.topbar_fill);
+    }
+    // The control held down: a raised fill a step lighter, under it.
+    if let Some(a) = b.pressed {
+        p.fill(a, 6.0, mix(pal.topbar_raised, pal.topbar_strong, 0.14));
     }
     // The logo and "Applications".
     let apps_label = p.style(&f.regular, 12.5, if b.menu { pal.topbar_strong } else { pal.topbar_text });
@@ -298,17 +342,59 @@ pub fn bar(p: &mut Painter<'_>, pal: &Palette, f: &Fonts<'_>, b: &Bar<'_>) -> Pa
         p.line(&st, right, 0.0, bar_h, &date);
     }
     let label = p.style(&f.regular, 12.5, pal.topbar_text);
-    if let Some(level) = b.battery {
-        let pct = alloc::format!("{level}%");
-        right -= 16.0 + p.measure(&label, &pct);
-        p.line(&label, right, 0.0, bar_h, &pct);
+    // The status icons (the volume, the network, the battery) open quick
+    // settings (ADR 0186): their cell is laid out first, to fill it under
+    // them while the menu is open or the cell pressed.
+    let pct = b.battery.map(|level| if b.hide_percent { String::new() } else { alloc::format!("{level}%") });
+    let battery_w = pct.as_ref().map_or(0.0, |s| 16.0 + p.measure(&label, s) + 5.0 + 16.0);
+    let network_w = if b.network.is_some() { 16.0 + 14.0 } else { 0.0 };
+    let cluster_right = right - 6.0;
+    let cluster_left = right - battery_w - network_w - 16.0 - 14.0 - 8.0;
+    let cluster = Area::new(cluster_left, t + 4.0, cluster_right - cluster_left, 24.0);
+    if b.quick {
+        p.fill(cluster, 6.0, pal.topbar_raised);
+    } else if b.pressed.is_some_and(|a| a == cluster) {
+        p.fill(cluster, 6.0, mix(pal.topbar_raised, pal.topbar_strong, 0.14));
+    }
+    let strong = |on: bool| if on { pal.topbar_strong } else { pal.topbar_text };
+    if let (Some(level), Some(pct)) = (b.battery, pct.as_ref()) {
+        right -= 16.0 + p.measure(&label, pct);
+        p.line(&label, right, 0.0, bar_h, pct);
         right -= 5.0 + 16.0;
         let (x, y) = p.to_device(right, t + 8.0);
-        icon::battery(p.canvas, x, y, 16.0 * p.scale, level, pal.topbar_text);
+        icon::battery(p.canvas, x, y, 16.0 * p.scale, level, strong(b.quick));
     }
     if let Some(link) = b.network {
         right -= 16.0 + 14.0;
-        p.icon(Icon::Wifi, right, t + 9.0, 14.0, if link { pal.topbar_text } else { pal.topbar_dim });
+        p.icon(Icon::Wifi, right, t + 9.0, 14.0, if link { strong(b.quick) } else { pal.topbar_dim });
+    }
+    // The volume: the speaker, crossed out when muted; the sliders
+    // without a sound card.
+    right -= 16.0 + 14.0;
+    let speaker = match b.volume {
+        Some((_, true)) => Icon::SpeakerMuted,
+        Some(_) => Icon::Speaker,
+        None => Icon::Sliders,
+    };
+    p.icon(speaker, right, t + 9.0, 14.0, strong(b.quick));
+    hits.status = cluster;
+    // Unseen notifications: a small chalk badge on the speaker's corner.
+    if b.unread {
+        p.fill(Area::new(right + 11.0, t + 6.0, 6.0, 6.0), 3.0, pal.topbar_strong);
+    }
+    // An app being opened (ADR 0186): a spinner and its name, quiet, until
+    // its window comes.
+    if let Some((name, step)) = b.opening {
+        let st = p.style(&f.regular, 12.5, pal.topbar_text);
+        let text = alloc::format!("Opening {name}");
+        let tw = p.measure(&st, &text).min(220.0);
+        let w = 9.0 + 12.0 + 7.0 + tw + 10.0;
+        right -= 16.0 + w;
+        let a = Area::new(right, t + 5.0, w, 22.0);
+        p.fill(a, 6.0, pal.topbar_raised);
+        spinner(p, a.x + 9.0 + 6.0, t + 16.0, 5.0, step, pal.topbar_text);
+        let text = truncate_end(p, &st, &text, tw);
+        p.line(&st, a.x + 9.0 + 12.0 + 7.0, 0.0, bar_h, &text);
     }
     // Updates waiting (ADR 0112): information, so steel (STRATA_COLORS),
     // with the count in words; it opens the Software Updater.
@@ -445,6 +531,8 @@ pub struct Frame<'a> {
     /// The title bar button with the keyboard focus (alt + space): a
     /// 2 px chalk ring, 2 px outside.
     pub keyed: Option<TitleButton>,
+    /// The title bar button held down (ADR 0186).
+    pub pressed: Option<TitleButton>,
 }
 
 /// The title bar's buttons.
@@ -831,14 +919,20 @@ pub fn frame(p: &mut Painter<'_>, pal: &Palette, f: &Fonts<'_>, a: Area, fr: &Fr
         (TitleButton::Maximize, max, max_icon),
         (TitleButton::Close, close, Icon::Close),
     ] {
-        let hover = if fr.hover == Some(b) { fr.hover_in.clamp(0.0, 1.0) } else { 0.0 };
+        let pressed = fr.pressed == Some(b);
+        let hover = if fr.hover == Some(b) || pressed { fr.hover_in.clamp(0.0, 1.0) } else { 0.0 };
         if hover > 0.0 {
             p.fill(area, 6.0, pal.title_hover.faded(hover));
         }
+        // Held down: the fill twice as deep, the glyph half a pixel lower.
+        if pressed {
+            p.fill(area, 6.0, pal.title_hover);
+        }
         let keyed = fr.keyed == Some(b);
-        let lit = if keyed { 1.0 } else { hover };
+        let lit = if keyed || pressed { 1.0 } else { hover };
         let ink = mix(fade(pal.title_button_unfocused, pal.titlebar_button), pal.title_text, lit);
-        p.icon(icon, area.x + 8.5, area.y + 6.5, 11.0, ink);
+        let down = if pressed { 0.5 } else { 0.0 };
+        p.icon(icon, area.x + 8.5, area.y + 6.5 + down, 11.0, ink);
         if keyed {
             p.border(area.grow(4.0), 6.0 + 4.0, 2.0, pal.title_text);
         }
@@ -1017,7 +1111,7 @@ pub fn launcher(p: &mut Painter<'_>, pal: &Palette, f: &Fonts<'_>, l: &Launcher<
 
 /// A floating surface's rim (ADR 0124): a 1 px line of light just inside
 /// its top edge, following its corners; none in high contrast.
-fn rim(p: &mut Painter<'_>, pal: &Palette, a: Area, r: f32) {
+pub fn rim(p: &mut Painter<'_>, pal: &Palette, a: Area, r: f32) {
     if pal.titlebar_rim.alpha() > 0 {
         let saved = p.clip(Area::new(a.x, a.y + 1.0, a.w, 1.0));
         p.fill(a.grow(-1.0), r - 1.0, pal.titlebar_rim);

@@ -1,0 +1,10 @@
+[package]
+name = "slate-hda"
+description = "HD Audio codecs: verbs, parameters, a codec's widget graph and the paths from converters to pins (ADR 0184)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true

@@ -2,12 +2,13 @@
 
 //! USB: the xHCI host controller driver and the class drivers on it (HID
 //! keyboards and pointers, Bulk-Only mass storage, hubs, ADR 0029; CDC
-//! Ethernet, ADR 0046; Bluetooth controllers, ADR 0113).
+//! Ethernet, ADR 0046; Bluetooth controllers, ADR 0113; audio, ADR 0184).
 //!
 //! Devices plug into the controller's root ports or into USB 2 hubs
 //! (keyboards often have one built in). Descriptors and standard requests
 //! follow the USB 2.0 specification, chapter 9; hubs chapter 11.
 
+pub mod audio;
 pub mod btmtk;
 pub mod btusb;
 pub mod ecm;
@@ -35,6 +36,7 @@ pub const RT_ENDPOINT_OUT: u8 = 0x02;
 pub const RT_CLASS_INTERFACE_OUT: u8 = 0x21;
 
 /// Transfer types in bmAttributes (table 9-13).
+pub const EP_ISOCH: u8 = 1;
 pub const EP_BULK: u8 = 2;
 pub const EP_INTERRUPT: u8 = 3;
 
@@ -107,6 +109,7 @@ pub fn supported(class: u8, subclass: u8, protocol: u8) -> bool {
     matches!(
         (class, subclass, protocol),
         (3, _, _)
+            | (1, 1, _)
             | (8, 6, 0x50 | 0x62)
             | (9, _, _)
             | (0xE0, 1, 1)

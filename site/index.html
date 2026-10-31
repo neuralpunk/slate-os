@@ -25,12 +25,14 @@
 /* Layout: one long survey of graphite bands. Content sits in a 1320px frame on a 12-column grid,
    headlines set large and left-weighted, DM Mono data pinned to the edges like the legend of a geological map. */
 :root {
-  /* Strata's graphite neutrals */
-  --desktop: #121211; --well: #161615; --window: #1A1A19; --overlay: #1C1C1B;
-  --header: #222221; --divider: #262625; --raised: #262625; --active: #2A2A28;
-  --border: #333331; --border-strong: #3A3A38;
-  --chalk: #E3E1DC; --focus: #A9A7A2; --text-1: #C9C7C2; --text-2: #BEBCB7; --text-3: #A3A29F;
-  --text-4: #9B9994; --muted: #85837E; --inactive: #75736F; --decor: #5F5D59;
+  /* Strata's Copper Noir neutrals: graphite a few points towards brown */
+  --desktop: #121211; --well: #161514; --window: #1A1918; --overlay: #1D1B19;
+  --header: #23201D; --divider: #2A2725; --raised: #2C2621; --active: #302B27;
+  --border: #38332F; --border-strong: #403A35;
+  --chalk: #E9E3DA; --focus: #A57553; --text-1: #D6CFC5; --text-2: #C9C2B8; --text-3: #B8B0A6;
+  --text-4: #A49C92; --muted: #8E877E; --inactive: #77706A; --decor: #5F5A54;
+  /* Copper Noir's copper, rationed: focus, the active, the selected, the one action */
+  --copper: #D39466; --copper-hi: #DFA77E; --copper-on: #1A1310; --copper-dim: #7A5232;
   /* Semantic colour, meaning only */
   --sage: #A4B38C; --sage-t: #2D2F29; --sage-b: #4A5041;
   --moss: #8FB2A4; --moss-t: #2A2F2C; --moss-b: #434F4A;
@@ -143,7 +145,6 @@ body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-a
 .btn svg { width: 14px; height: 14px; transition: transform .3s var(--ease); }
 .btn:hover svg { transform: translateX(3px); }
 .btn-primary { background: var(--chalk); color: var(--desktop); border-color: var(--chalk); }
-.btn-primary:hover { background: #F1EFEA; }
 .btn-ghost { color: var(--text-1); }
 .btn-ghost:hover { border-color: var(--focus); color: var(--chalk); }
 
@@ -614,6 +615,36 @@ footer { border-top: 1px solid var(--divider); padding-block: 48px calc(40px + e
   .ledger-track, .caret { animation: none; }
   * { transition-duration: 0s !important; }
 }
+
+/* ── Copper Noir ─────────────────────────────── */
+::selection { background: var(--copper); color: var(--copper-on); }
+:focus-visible { outline-color: var(--copper); }
+.btn-primary { background: var(--copper); border-color: var(--copper); color: var(--copper-on); }
+.btn-primary:hover { background: var(--copper-hi); }
+.btn-ghost:hover, .nav-gh:hover { border-color: var(--copper-dim); color: var(--chalk); }
+.nav-links a:hover { color: var(--copper); }
+.wordmark .os { color: var(--copper); }
+.h2 .serif, .thesis p em, .part h3 .serif { color: var(--copper); }
+.hero::after { content: ""; position: absolute; inset: auto 0 0 0; height: 70%; z-index: -1; pointer-events: none;
+  background: radial-gradient(ellipse 52% 62% at 50% 100%, rgba(211,148,102,.12) 0%, rgba(211,148,102,0) 72%); }
+.scroll-cue i { background: linear-gradient(var(--copper), transparent); }
+.carry li:hover sup, .carry li.lit sup { color: var(--copper); }
+.shot-tabs button[aria-selected="true"] { background: var(--copper); border-color: var(--copper); color: var(--copper-on); }
+/* The desktop shown in Copper Noir: the active workspace filled, the
+   clock and selection in copper, the focused frame's warm outline. */
+.wsx button.on { background: var(--copper); color: var(--copper-on); }
+.wsx button.on::after { width: 0; }
+.wlist button.on::before { background: var(--copper); }
+.sbar .clock { color: var(--copper); }
+.win.focused .tb, .cwin.top .tb { background: var(--header); }
+.files aside div.on { background: var(--copper); color: var(--copper-on); }
+.arow.sel { background: var(--copper); }
+.arow.sel b, .arow.sel span { color: var(--copper-on); }
+.arow.sel .tile { background: var(--copper-on); color: var(--copper); }
+.seg button[aria-pressed="true"] { background: var(--copper); color: var(--copper-on); }
+.theme.on, .walls div.on { outline-color: var(--copper); }
+.toggle { background: var(--copper); }
+.caret { background: var(--copper); }
 </style>
 </head>
 <body>
@@ -711,18 +742,20 @@ footer { border-top: 1px solid var(--divider); padding-block: 48px calc(40px + e
 <div class="ledger" aria-label="SlateOS in figures">
   <div class="ledger-track">
     <div class="ledger-item"><b>0</b> lines of Linux, BSD or UNIX code<svg><use href="#mark"/></svg></div>
-    <div class="ledger-item"><b>300,000+</b> lines of Rust<svg><use href="#mark"/></svg></div>
+    <div class="ledger-item"><b>350,000+</b> lines of Rust<svg><use href="#mark"/></svg></div>
     <div class="ledger-item"><b>1,000+</b> cases checked against GNU's tools<svg><use href="#mark"/></svg></div>
-    <div class="ledger-item"><b>1,800+</b> checks on every test run<svg><use href="#mark"/></svg></div>
+    <div class="ledger-item"><b>1,900+</b> checks on every test run<svg><use href="#mark"/></svg></div>
+    <div class="ledger-item"><b>Sound</b>, ALSA-compatible, PipeWire included<svg><use href="#mark"/></svg></div>
     <div class="ledger-item"><b>4</b> themes, drawn by its own toolkit<svg><use href="#mark"/></svg></div>
     <div class="ledger-item"><b>1</b> AMD display driver of its own<svg><use href="#mark"/></svg></div>
     <div class="ledger-item"><b>16</b> keyboard layouts, with dead keys<svg><use href="#mark"/></svg></div>
     <div class="ledger-item"><b>1</b> switch to Linux compatibility<svg><use href="#mark"/></svg></div>
     <div class="ledger-item"><b>UEFI</b> and <b>BIOS</b>, its own bootloader<svg><use href="#mark"/></svg></div>
     <div class="ledger-item" aria-hidden="true"><b>0</b> lines of Linux, BSD or UNIX code<svg><use href="#mark"/></svg></div>
-    <div class="ledger-item" aria-hidden="true"><b>300,000+</b> lines of Rust<svg><use href="#mark"/></svg></div>
+    <div class="ledger-item" aria-hidden="true"><b>350,000+</b> lines of Rust<svg><use href="#mark"/></svg></div>
     <div class="ledger-item" aria-hidden="true"><b>1,000+</b> cases checked against GNU's tools<svg><use href="#mark"/></svg></div>
-    <div class="ledger-item" aria-hidden="true"><b>1,800+</b> checks on every test run<svg><use href="#mark"/></svg></div>
+    <div class="ledger-item" aria-hidden="true"><b>1,900+</b> checks on every test run<svg><use href="#mark"/></svg></div>
+    <div class="ledger-item" aria-hidden="true"><b>Sound</b>, ALSA-compatible, PipeWire included<svg><use href="#mark"/></svg></div>
     <div class="ledger-item" aria-hidden="true"><b>4</b> themes, drawn by its own toolkit<svg><use href="#mark"/></svg></div>
     <div class="ledger-item" aria-hidden="true"><b>1</b> AMD display driver of its own<svg><use href="#mark"/></svg></div>
     <div class="ledger-item" aria-hidden="true"><b>16</b> keyboard layouts, with dead keys<svg><use href="#mark"/></svg></div>
@@ -858,7 +891,7 @@ footer { border-top: 1px solid var(--divider); padding-block: 48px calc(40px + e
       <div class="ruled">the desktop<b>strata</b></div>
       <div class="split">
         <h2 class="h2" id="desk-title" style="grid-column: span 7">Strata. A desktop that <span class="serif">gets out of the way.</span></h2>
-        <p class="lede" style="grid-column: 8 / span 5; align-self: end">Window manager and display server in one program, drawn by Slate's own toolkit. Warm graphite by default, chalk kept for what matters now, and colour only when it means something. <strong>Click around: it's live.</strong></p>
+        <p class="lede" style="grid-column: 8 / span 5; align-self: end">Window manager and display server in one program, drawn by Slate's own toolkit. Warm graphite by default, chalk kept for what matters now, and colour only when it means something. Windows settle and glide into place; quick settings hold the volume, the network and the dark style; notifications slide in from your apps; Night Light warms the evening. <strong>Click around: it's live.</strong></p>
       </div>
     </div>
     <div class="stage-fit" id="stage-fit">
@@ -1124,7 +1157,7 @@ Domain:	slate
       <div class="ruled">apps<b>slate-apps</b></div>
       <div class="split">
         <h2 class="h2" id="apps-title" style="grid-column: span 7">Apps, <span class="serif">made here too.</span></h2>
-        <p class="lede" style="grid-column: 8 / span 5; align-self: end">Files, Terminal, Text Editor, Calendar, Contacts, System Monitor, Disks, Software Updater, App Center, Calculator, Clock, Help and more. Each one is a small native program on a shared kit, and each one follows your theme.</p>
+        <p class="lede" style="grid-column: 8 / span 5; align-self: end">Files, Terminal, Web Browser, Text Editor, Calendar, Contacts, System Monitor, Disks, Software Updater, App Center, Calculator, Clock, Help and more. Each one is a small native program on a shared kit, and each one follows your theme.</p>
       </div>
     </div>
     <div class="collage-fit" id="collage-fit">
@@ -1252,6 +1285,9 @@ Domain:	slate
       <li>Rust<sup>toolchain</sup></li>
       <li>Python<sup>runtime</sup></li>
       <li>Sway<sup>wayland</sup></li>
+      <li>PipeWire<sup>sound</sup></li>
+      <li>GNOME apps<sup>flathub</sup></li>
+      <li>Arch Linux packages<sup>from source</sup></li>
       <li>your ext4 drives<sup>read · write</sup></li>
     </ul>
     <div class="carry-note"><span class="dtag linux"><svg><use href="#i-split"/></svg>linux</span>Each runs as the same file you'd run on Linux, in the Linux domain.</div>
@@ -1326,9 +1362,10 @@ Domain:	slate
         <h3><svg><use href="#i-check"/></svg>works today</h3>
         <dl>
           <dt>disks</dt><dd>NVMe, SATA (in AHCI mode) and USB drives</dd>
-          <dt>wired network</dt><dd>Intel I210, I211 and 82576 cards, and standard USB Ethernet adapters</dd>
+          <dt>wired network</dt><dd>Intel I210, I211, 82576, and 2.5 Gigabit I225 and I226 cards, and standard USB Ethernet adapters</dd>
           <dt>graphics</dt><dd>Any card, on the firmware's framebuffer. Full graphics on supported AMD Radeon integrated graphics</dd>
           <dt>input</dt><dd>USB keyboards and mice (on the USB 3 controller) and PS/2</dd>
+          <dt>sound</dt><dd>Built-in sound (Intel HD Audio) and USB speakers and headsets, so far tested in virtual machines</dd>
           <dt>bluetooth</dt><dd>USB adapters pair with devices</dd>
         </dl>
       </div>
@@ -1336,7 +1373,7 @@ Domain:	slate
         <h3><svg><use href="#i-dash"/></svg>not yet</h3>
         <ul>
           <li>Wi-Fi <span>· use a cable or a USB Ethernet adapter</span></li>
-          <li>Sound</li>
+          <li>Sound over HDMI and DisplayPort, and USB microphones</li>
           <li>Sleep <span>· the power button shuts down cleanly</span></li>
           <li>Bluetooth keyboards, mice and headphones</li>
           <li>Many built-in Realtek network ports</li>

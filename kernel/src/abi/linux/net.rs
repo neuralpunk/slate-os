@@ -102,6 +102,8 @@ const SO_PEEK_OFF: u64 = 42;
 /// (socket(7); musl `sys/socket.h`).
 const SO_REUSEADDR: u64 = 2;
 const SO_DONTROUTE: u64 = 5;
+/// SO_PRIORITY (socket(7); musl `sys/socket.h`).
+const SO_PRIORITY: u64 = 12;
 const SO_BROADCAST: u64 = 6;
 const SO_SNDBUFFORCE: u64 = 32;
 const SO_RCVBUFFORCE: u64 = 33;
@@ -1329,6 +1331,15 @@ pub fn setsockopt(a: Args) -> Result {
         }
         // Broadcast sends are allowed without it.
         (SOL_SOCKET, SO_BROADCAST, Sock::Dgram(_)) => opts.set_flag(SockOpts::BROADCAST, int()? != 0),
+        // 0 to 6 for anyone, others with CAP_NET_ADMIN (socket(7); EPERM
+        // otherwise, -1 included, as Linux was seen to answer).
+        (SOL_SOCKET, SO_PRIORITY, _) => {
+            let v = int()?;
+            if !(0..=6).contains(&v) && !crate::proc::cred::current().capable(crate::proc::cred::CAP_NET_ADMIN) {
+                return Err(super::errno::EPERM);
+            }
+            opts.set_priority(v as u8)
+        }
         (SOL_SOCKET, SO_DONTROUTE, Sock::Dgram(d)) => d.set_dontroute(int()? != 0)?,
         (IPPROTO_IP, IP_RECVERR, Sock::Dgram(_) | Sock::Stream(_))
         | (IPPROTO_IPV6, IPV6_RECVERR, Sock::Dgram(_) | Sock::Stream(_)) => {
@@ -1587,6 +1598,7 @@ pub fn getsockopt(a: Args) -> Result {
         (SOL_SOCKET, SO_REUSEADDR) => i32::from(sock_opts(&s).flag(SockOpts::REUSEADDR)),
         (SOL_SOCKET, SO_BROADCAST) => i32::from(sock_opts(&s).flag(SockOpts::BROADCAST)),
         (SOL_SOCKET, SO_DONTROUTE) => i32::from(sock_opts(&s).flag(SockOpts::DONTROUTE)),
+        (SOL_SOCKET, SO_PRIORITY) => i32::from(sock_opts(&s).priority()),
         (IPPROTO_IP, IP_RECVERR) | (IPPROTO_IPV6, IPV6_RECVERR) if matches!(s, Sock::Dgram(_) | Sock::Stream(_)) => {
             i32::from(sock_opts(&s).flag(SockOpts::RECVERR))
         }

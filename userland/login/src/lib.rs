@@ -293,9 +293,16 @@ fn login() -> i32 {
 /// login shell, whose profile starts Strata.
 /// `screen`: the login was typed on the login screen, so the session is
 /// Strata alone (`SLATE_SESSION=strata`, which /etc/profile execs).
-pub(crate) fn session_on_console(u: &User, screen: bool) -> i32 {
+/// `vt`: the virtual console the session is on (ADR 0185), its
+/// controlling terminal and input, brought to the front; its output stays
+/// on the console, where its log is read.
+pub(crate) fn session_on_console(u: &User, screen: bool, vt: Option<u32>) -> i32 {
     let _ = process::setsid();
-    if let Ok(fd) = fs::open(b"/dev/console", fs::O_RDWR, 0) {
+    let tty = match vt {
+        Some(n) => alloc::format!("/dev/tty{n}").into_bytes(),
+        None => b"/dev/console".to_vec(),
+    };
+    if let Ok(fd) = fs::open(&tty, fs::O_RDWR, 0) {
         let _ = term::steal_controlling(fd);
         for t in 0..3 {
             let _ = process::dup2(fd, t);
@@ -304,11 +311,66 @@ pub(crate) fn session_on_console(u: &User, screen: bool) -> i32 {
             let _ = io::close(fd);
         }
     }
+    if let Some(n) = vt {
+        if let Ok(fd) = fs::open(b"/dev/console", fs::O_RDWR | fs::O_NOCTTY, 0) {
+            for t in 1..3 {
+                let _ = process::dup2(fd, t);
+            }
+            if fd > 2 {
+                let _ = io::close(fd);
+            }
+        }
+        activate_vt(n);
+    }
     let _ = term::set_foreground(0, process::getpid());
     // The profile execs Strata for it: nothing is left when Strata ends
     // (ADR 0039).
     let extra: &[&[u8]] = if screen { &[b"SLATE_SESSION=strata"] } else { &[] };
     start_session(u, false, extra, b"")
+}
+
+/// The person's runtime directory, /run/user/UID (0700, theirs), as the
+/// XDG base directory specification describes it: their sound server's
+/// sockets go there (ADR 0185). Kept until the system stops.
+pub(crate) fn make_runtime_dir(u: &User) {
+    let _ = fs::mkdir(b"/run/user", 0o755);
+    let dir = alloc::format!("/run/user/{}", u.uid);
+    if fs::mkdir(dir.as_bytes(), 0o700).is_ok() {
+        let _ = fs::chown(dir.as_bytes(), u.uid, u.gid);
+    }
+}
+
+// console_ioctl(2) (ADR 0185).
+const VT_GETSTATE: u32 = 0x5603;
+const VT_ACTIVATE: u32 = 0x5606;
+
+/// `struct vt_stat`: the VT in front, and the open VTs (bit n for VT n).
+fn vt_state() -> Option<(u16, u16)> {
+    let fd = fs::open(b"/dev/tty0", fs::O_RDWR | fs::O_NOCTTY | fs::O_CLOEXEC, 0).ok()?;
+    let mut st = [0u16; 3];
+    let r = io::ioctl(fd, VT_GETSTATE, st.as_mut_ptr() as usize);
+    let _ = io::close(fd);
+    r.ok().map(|_| (st[0], st[2]))
+}
+
+/// The virtual console in front.
+pub(crate) fn front_vt() -> Option<u32> {
+    vt_state().map(|(front, _)| u32::from(front))
+}
+
+/// The first virtual console from 7 to 12 nobody has open: a desktop
+/// session's (VTs 1 to 6 are the login screen's and the text logins').
+pub(crate) fn free_desktop_vt() -> Option<u32> {
+    let (_, open) = vt_state()?;
+    (7..=12u32).find(|&n| open & (1 << n) == 0)
+}
+
+/// Bring virtual console `n` to the front.
+pub(crate) fn activate_vt(n: u32) {
+    if let Ok(fd) = fs::open(b"/dev/tty0", fs::O_RDWR | fs::O_NOCTTY | fs::O_CLOEXEC, 0) {
+        let _ = io::ioctl(fd, VT_ACTIVATE, n as usize);
+        let _ = io::close(fd);
+    }
 }
 
 /// The login shell for `u`, with `extra` environment entries; `host` is
@@ -328,6 +390,11 @@ fn start_session(u: &User, keep_env: bool, extra: &[&[u8]], host: &[u8]) -> i32 
         let _ = fs::chown(&tty, u.uid, tty_gid);
         let _ = fs::chmod(&tty, 0o620);
     }
+    // Every session has its runtime directory (ADR 0185): a desktop
+    // started from a console login or the live system's `login -f` too.
+    make_runtime_dir(u);
+    let runtime = alloc::format!("/run/user/{}", u.uid);
+    let runtime_env = fs::exists(runtime.as_bytes()).then(|| alloc::format!("XDG_RUNTIME_DIR={runtime}").into_bytes());
     if !become_user(u) {
         return 1;
     }
@@ -352,6 +419,7 @@ fn start_session(u: &User, keep_env: bool, extra: &[&[u8]], host: &[u8]) -> i32 
     }
     io::flush_stdout();
     let mut env = login_env(&u, keep_env);
+    env.extend(runtime_env);
     env.extend(extra.iter().map(|e| e.to_vec()));
     exec_shell(&u, &env, true, None)
 }

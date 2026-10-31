@@ -39,6 +39,8 @@ pub struct ClientWindow {
     close_asked: Option<i64>,
     /// Its app keeps the screen from locking by itself (a video playing).
     pub inhibit: bool,
+    /// The pointer's shape over its content (`strata_proto::cursor`).
+    cursor: u8,
 }
 
 /// A window's pixels, mapped from the client's shared memory.
@@ -133,16 +135,26 @@ fn now_ms() -> i64 {
 pub struct Changes {
     pub windows: bool,
     pub contents: Vec<(WinId, slate_ui::Rect)>,
+    /// Notifications sent or taken back (ADR 0186).
+    pub notes: Vec<NoteChange>,
+}
+
+/// A client's notification, sent or taken back.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum NoteChange {
+    Add { pid: i32, key: u32, app: String, summary: String, body: String, urgency: u8 },
+    Remove { pid: i32, key: u32 },
 }
 
 impl Changes {
     fn merge(&mut self, o: Changes) {
         self.windows |= o.windows;
         self.contents.extend(o.contents);
+        self.notes.extend(o.notes);
     }
 
     fn windows() -> Changes {
-        Changes { windows: true, contents: Vec::new() }
+        Changes { windows: true, ..Changes::default() }
     }
 
     pub fn any(&self) -> bool {
@@ -169,6 +181,9 @@ pub struct Server {
     pub drag: Option<(WinId, Vec<String>)>,
     /// Flatpak apps' names and icons by ID, as looked up (M31 phase 4).
     flatpaks: alloc::collections::BTreeMap<String, Option<Known>>,
+    /// The shown buffers of windows that went since the session last
+    /// looked: a closed window fades from its last contents (ADR 0186).
+    gone: Vec<(WinId, Buffer)>,
 }
 
 impl Server {
@@ -184,6 +199,7 @@ impl Server {
             icons: Vec::new(),
             drag: None,
             flatpaks: alloc::collections::BTreeMap::new(),
+            gone: Vec::new(),
         })
     }
 
@@ -228,9 +244,10 @@ impl Server {
             }
         }
         for i in gone.into_iter().rev() {
-            let c = self.clients.remove(i);
-            for w in &c.windows {
+            let mut c = self.clients.remove(i);
+            for w in c.windows.drain(..) {
                 wm.remove(w.id);
+                self.retire(w);
             }
             for fd in c.fds {
                 let _ = io::close(fd);
@@ -312,6 +329,7 @@ impl Server {
                     sent: None,
                     close_asked: None,
                     inhibit: false,
+                    cursor: 0,
                 });
                 Ok(Changes::windows())
             }
@@ -381,12 +399,13 @@ impl Server {
                     self.send(i, &Event::Release { win, index: old });
                 }
                 let r = slate_ui::Rect::new(x as i32, y as i32, width.min(16384) as i32, height.min(16384) as i32);
-                Ok(Changes { windows: false, contents: alloc::vec![(id, r)] })
+                Ok(Changes { contents: alloc::vec![(id, r)], ..Changes::default() })
             }
             Request::Destroy { win } => {
                 let Some(at) = c.windows.iter().position(|w| w.cwin == win) else { return Ok(Changes::default()) };
                 let w = c.windows.remove(at);
                 wm.remove(w.id);
+                self.retire(w);
                 Ok(Changes::windows())
             }
             Request::Copy { which, text } => {
@@ -461,7 +480,32 @@ impl Server {
                 }
                 Ok(Changes::default())
             }
+            Request::Notify { key, app, summary, body, urgency } => {
+                slate_rt::eprintln!("strata: a notification from pid {} ({app})", c.pid);
+                let notes = alloc::vec![NoteChange::Add { pid: c.pid, key, app, summary, body, urgency }];
+                Ok(Changes { notes, ..Changes::default() })
+            }
+            Request::Unnotify { key } => {
+                Ok(Changes { notes: alloc::vec![NoteChange::Remove { pid: c.pid, key }], ..Changes::default() })
+            }
+            Request::Cursor { win, shape } => {
+                if let Some(w) = c.windows.iter_mut().find(|w| w.cwin == win) {
+                    w.cursor = shape;
+                }
+                Ok(Changes::default())
+            }
         }
+    }
+
+    /// The windows of the client whose process is `pid`.
+    pub fn windows_of(&self, pid: i32) -> Vec<WinId> {
+        self.clients.iter().filter(|c| c.pid == pid).flat_map(|c| c.windows.iter().map(|w| w.id)).collect()
+    }
+
+    /// The pointer shape window `id`'s app asked for over its content.
+    pub fn cursor(&self, id: WinId) -> slate_ui::icon::Cursor {
+        let shape = self.find(id).map_or(0, |(ci, wi)| self.clients[ci].windows[wi].cursor);
+        crate::session::cursor_of(shape)
     }
 
     /// A sandboxed Linux window's app, when it names a Flatpak app by ID
@@ -576,7 +620,8 @@ impl Server {
         self.send(ci, &Event::Close { win: cwin });
         if stuck {
             slate_rt::eprintln!("strata: window {id} isn't answering: closed");
-            self.clients[ci].windows.remove(wi);
+            let w = self.clients[ci].windows.remove(wi);
+            self.retire(w);
         }
         stuck
     }
@@ -595,6 +640,32 @@ impl Server {
     /// Whether a window's app keeps the screen from locking by itself.
     pub fn inhibited(&self) -> bool {
         self.clients.iter().any(|c| c.windows.iter().any(|w| w.inhibit))
+    }
+
+    /// A window has gone: its shown buffer is kept for its closing motion.
+    fn retire(&mut self, mut w: ClientWindow) {
+        if let Some(b) = w.front.and_then(|f| w.buffers[usize::from(f)].take()) {
+            self.gone.push((w.id, b));
+        }
+    }
+
+    /// The last buffer of window `id`, gone since the last
+    /// [`Server::forget_gone`].
+    pub fn take_gone(&mut self, id: WinId) -> Option<Buffer> {
+        let i = self.gone.iter().position(|(w, _)| *w == id)?;
+        Some(self.gone.swap_remove(i).1)
+    }
+
+    /// Unmap the buffers of windows gone that nothing took.
+    pub fn forget_gone(&mut self) {
+        self.gone.clear();
+    }
+
+    /// The size of window `id`'s shown buffer (device pixels).
+    pub fn buffer_size(&self, id: WinId) -> Option<(u32, u32)> {
+        let (ci, wi) = self.find(id)?;
+        let w = &self.clients[ci].windows[wi];
+        w.buffers[usize::from(w.front?)].as_ref().map(|b| (b.width, b.height))
     }
 
     /// The buffer of window `id`, if its client gave one.

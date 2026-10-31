@@ -20,6 +20,7 @@ pub mod pci_sys;
 pub mod ps2;
 pub mod rtc;
 pub mod rtl8139;
+pub mod sound;
 pub mod usb;
 pub mod virtio;
 
@@ -78,7 +79,7 @@ const fn removable(d: Driver, remove: fn(&Arc<pci::Device>)) -> Driver {
 
 /// Every driver. PCI class codes are from the PCI Code and ID Assignment
 /// Specification (class 01h: 01h IDE, 06h/01h AHCI, 08h/02h NVMe; class
-/// 0Ch/03h/30h xHCI).
+/// 0Ch/03h/30h xHCI; 04h/03h HD Audio).
 pub const DRIVERS: &[Driver] = &[
     pci_driver(
         "virtio-blk",
@@ -155,6 +156,13 @@ pub const DRIVERS: &[Driver] = &[
         amd::probe,
     ),
     pci_driver(
+        "hda",
+        "HD Audio controllers (ADR 0184)",
+        Stage::Usb,
+        |d| (d.class, d.subclass) == (0x04, 0x03),
+        sound::hda::probe,
+    ),
+    pci_driver(
         "xhci",
         "USB host controllers (xHCI)",
         Stage::Usb,
@@ -166,6 +174,7 @@ pub const DRIVERS: &[Driver] = &[
     Driver { name: "usb-uas", what: "USB Attached SCSI (else storage uses Bulk-Only)", pci: None },
     Driver { name: "usb-hub", what: "USB hubs", pci: None },
     Driver { name: "usb-ecm", what: "USB Ethernet adapters (CDC-ECM)", pci: None },
+    Driver { name: "usb-audio", what: "USB audio playback (Audio Class 1.0, ADR 0184)", pci: None },
     Driver { name: "ps2", what: "PS/2 keyboards and mice (i8042)", pci: None },
 ];
 

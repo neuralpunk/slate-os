@@ -2,6 +2,169 @@
 
 What changed in each SlateOS release, newest first.
 
+## 0.2 (2026-10-31)
+
+### Sound
+
+- **SlateOS plays sound.** Built-in sound (HD Audio, on nearly every PC
+  and laptop) and USB speakers and headsets (USB Audio Class 1.0) show
+  up as sound cards when the computer starts or when they are plugged
+  in. On built-in sound, every analog output plays at once: the
+  speakers, the headphone socket and line out.
+- **Linux sound software works unchanged.** SlateOS speaks the same
+  interface to sound cards as Linux, so ALSA programs (`aplay`,
+  `amixer`, `speaker-test`), PipeWire with WirePlumber, and
+  pipewire-pulse for PulseAudio programs run on it as they are, in a
+  Linux system on SlateOS. Programs can write sound through the kernel
+  or straight into the card's buffer, and mixers show volumes in
+  decibels.
+- **Volume controls.** Built-in sound has Master Playback and Capture
+  volumes and mute switches; a USB device has its own PCM Playback
+  volume and mute, when it offers them.
+- **Unplugging is safe.** A USB headset pulled out while playing
+  disappears cleanly, and the program playing is told the device has
+  gone.
+- **Settings › Sound.** A new page lists the sound cards SlateOS found
+  and plays a short, soft test tune (a few seconds of a music-box
+  phrase, quietly) on the one chosen, so you can check that sound
+  works; it also says what sound can't do yet. `slate-sound` does the
+  same from the command line (`slate-sound test 0`).
+- **Who can use it.** People allowed to use the desktop (Settings ›
+  Users › "Can use the desktop") can use the sound cards.
+- **Flatpak apps play sound**, the web browser among them. When you log
+  in to the desktop, SlateOS starts a sound server of your own
+  (PipeWire, with its PulseAudio service) for your Linux apps; they all
+  share it, and Flatpak gives it to the apps that ask for sound. A USB
+  headset plugged in later shows up in their sound settings too. When
+  someone else takes the screen with "Switch person", the cards go to
+  them, and your sound server starts again when you come back. It also
+  starts when the Linux apps' runtime is set up during a session, as
+  "Try SlateOS" does for the web browser, and it keeps its buffers long
+  enough that the browser's sound doesn't break up.
+- **Not yet:** there is no volume control in Settings or the top bar yet, no sound over
+  HDMI or DisplayPort, no recording from USB headsets, and no USB Audio
+  Class 2.0 devices (many USB DACs). Sound has been tested in virtual
+  machines so far; reports from real hardware are welcome.
+
+### Sessions and consoles
+
+- **"Switch person" keeps your session.** Locking the screen and
+  choosing "Switch person" brings the login screen back for someone else
+  while your desktop stays as it is, locked, with your windows open.
+  Logging in as yourself again at the login screen brings it back
+  unlocked: one password. Up to six people can have a desktop open at
+  once.
+- **Text consoles.** Ctrl+Alt+F2 to F6 (Alt+F2 to F6 from a text
+  console) lead to text logins, handy when the desktop won't answer;
+  Ctrl+Alt+F1 brings the login screen, and Alt or Ctrl+Alt with F7 to
+  F12 the desktops that are open.
+
+### Desktop
+
+- **A boot splash.** From the boot menu to the login screen (or the
+  installer), SlateOS shows a dark screen with its mark and a line
+  moving gently under it instead of scrolling text. It steps aside for
+  the disk's password and comes back after it; Esc, or anything going
+  wrong, shows the text underneath. The login screen then fades in.
+- **Windows settle into place.** A window opens growing gently from 96%
+  of its size as it fades in, and closes by fading and shrinking the same
+  way, instead of vanishing.
+- **Snapping and maximising glide.** A window that changes place by
+  itself (maximised, restored, snapped to a half or a quarter, put back)
+  slides and stretches to its new place in a fifth of a second, instead
+  of jumping there; the snap preview fades in as you drag.
+- **Smooth changes of look.** Choosing another theme, wallpaper or
+  contrast cross-fades the whole screen to the new look.
+- **From the login screen to the desktop.** After a successful login,
+  the login screen's panel fades away and your desktop fades in from
+  the same picture.
+- **Motion in step with the screen.** Each frame of an animation is
+  worked out for the moment the screen will show it, and frames wait for
+  the screen's refresh while something moves, so animations step evenly.
+- Reduced motion (Settings › Accessibility) still turns all of it off.
+- **Pointer shapes.** The pointer becomes a hand over buttons and the top
+  bar's controls, a text beam over text fields and in the terminal, arrows
+  four ways while a window is moved, and shows a turning ring while an
+  app is starting. Apps can ask for these shapes too (and for "busy" and
+  "not allowed").
+- **Buttons look pressed.** The top bar's controls, the title bar's
+  buttons and the buttons in SlateOS's apps darken while held. The title
+  bar's buttons now act when let go, like other desktops' do: moving off
+  before letting go cancels.
+- **Volume control.** The top bar shows the volume (a speaker, crossed
+  out when muted). The keyboard's volume and mute keys change it, with
+  a small pop-up showing the level; a laptop's brightness keys do the
+  same for the screen where SlateOS can set its backlight. `slate-sound
+  volume` sets it from the command line (`slate-sound volume 40`, `up`,
+  `down`, `mute`, `toggle`). The volume is the sound card's own, so it
+  applies to everything: SlateOS's sounds and Linux apps alike.
+- **Quick settings.** Clicking the status icons at the top bar's right
+  (or Super+S) opens a menu with the volume slider and mute, tiles for
+  the network, Bluetooth and the dark style (which switches the theme
+  to its light or dark partner), the battery, and buttons for Settings,
+  locking the screen and the power options. Settings can now open
+  straight at a page (`strata-settings sound`).
+- **Notifications.** Apps can now tell you things: a banner slides in
+  at the top right for a few seconds (urgent ones, such as the Clock's
+  alarms, stay until dismissed; ✕ closes one, clicking it brings its
+  app's window forward). Missed ones wait in quick settings' list until
+  cleared, and a small dot on the speaker icon says there are some
+  you haven't seen. Do Not Disturb (a tile in quick settings) keeps the
+  banners away, but for urgent ones. Linux apps send theirs through the
+  standard notification service, as on other Linux desktops; `strata-notify` sends
+  one from the command line (`strata-notify "Backup done" "3 files"`).
+- **Settings › Mouse and touchpad.** The pointer's speed (five steps),
+  natural scrolling, left-handed buttons, and tap to click for
+  touchpads. Linux apps follow them too.
+- **Settings › Night Light.** Warmer colours in the evening: off, on, or
+  on a schedule (19:00, 20:00, 21:00 or 22:00 until the morning), in
+  five strengths. It works on every screen SlateOS drives.
+- **Settings › Power.** The screen turns off after a chosen time without
+  the keyboard or the mouse (10 minutes unless you choose otherwise)
+  and comes back with the next key or movement; the battery's
+  percentage in the top bar can be hidden.
+- **Larger text and a larger pointer.** Settings › Accessibility has
+  text sizes (default, large, larger) for the desktop and SlateOS's own
+  apps (Linux apps that follow the desktop's text scale do too), and
+  pointer sizes.
+- **Feedback while an app starts.** Opening an app from the launcher, the
+  Applications menu or with Super+Enter shows "Opening ..." with a
+  spinner in the top bar until its window appears, so slow starters such
+  as the web browser no longer look like nothing happened.
+
+### Under the hood
+
+- **Real-time scheduling for audio.** `sched_setattr` and
+  `sched_getattr` work, `RLIMIT_RTTIME` is enforced (a real-time thread
+  that never sleeps gets SIGXCPU, then is stopped), and a real-time
+  thread that wakes or is preempted moves to a CPU where it can run at
+  once instead of waiting. PipeWire's audio thread runs real-time on
+  SlateOS.
+- USB controllers can now do isochronous transfers, the steady stream
+  of packets audio devices use.
+- **Devices for Linux programs.** Disks, partitions and USB devices
+  coming and going are now announced the way Linux announces them, and
+  SlateOS's device manager passes each announcement on in the form
+  libudev expects, so Linux programs that watch for devices (sound
+  servers, input libraries, disk tools) see them arrive. Programs in an
+  unprivileged sandbox don't hear the system's device events, as on
+  Linux. `devd monitor` shows them as they happen.
+- **Virtual consoles for Linux programs:** the console interface Linux
+  programs use to switch consoles and take the screen (`/dev/tty0` to
+  `/dev/tty12`), and seatd switches between sessions as Linux's does.
+- For Linux programs: threads can be named through
+  `/proc/self/task/ID/comm` (which musl's `pthread_setname_np` uses),
+  and sockets keep `SO_PRIORITY`.
+- Fixed: removing a folder and making it again at once could fail with
+  "File exists" when another thread looked the same name up at that
+  moment (the kernel's cache of file names kept the old one).
+- For developers: a new test scenario checks the sound interface on
+  three virtual sound cards and finds the tones it played in what the
+  virtual machine recorded, unplugging a USB one mid-tone; `cargo xtask
+  sound` runs PipeWire on SlateOS and checks the same way that aplay,
+  pw-play and paplay play whole. Recordings go to files, never to the
+  computer's speakers.
+
 ## 0.1.3 (2026-10-30)
 
 ### Linux software from source, in a Linux system of your own

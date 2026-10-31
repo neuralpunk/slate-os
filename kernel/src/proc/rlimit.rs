@@ -8,8 +8,10 @@
 //! and EFBIG), RLIMIT_DATA (brk), RLIMIT_STACK (the stack reserved at
 //! exec), RLIMIT_AS (brk, mmap, mremap), RLIMIT_NPROC (fork and clone),
 //! RLIMIT_NOFILE (new descriptors), RLIMIT_NICE and RLIMIT_RTPRIO (raising
-//! priorities). RLIMIT_CORE is kept: Slate writes no core dumps. The rest
-//! are kept and reported only.
+//! priorities), RLIMIT_RTTIME (a real-time thread's CPU time since it last
+//! blocked: SIGXCPU past the soft limit and each second after, SIGKILL at
+//! the hard one; ADR 0184). RLIMIT_CORE is kept: Slate writes no core
+//! dumps. The rest are kept and reported only.
 
 use core::sync::atomic::Ordering;
 
@@ -33,7 +35,6 @@ pub const RLIMIT_SIGPENDING: usize = 11;
 pub const RLIMIT_MSGQUEUE: usize = 12;
 pub const RLIMIT_NICE: usize = 13;
 pub const RLIMIT_RTPRIO: usize = 14;
-#[allow(dead_code)] // Kept and reported only.
 pub const RLIMIT_RTTIME: usize = 15;
 pub const RLIM_NLIMITS: usize = 16;
 pub const RLIM_INFINITY: u64 = !0;
@@ -117,6 +118,12 @@ impl Process {
                 self.cpu_limit_ns[0].store(ns(l.cur), Ordering::Relaxed);
                 self.cpu_limit_ns[1].store(ns(l.max), Ordering::Relaxed);
             }
+            // In microseconds (getrlimit(2)).
+            RLIMIT_RTTIME => {
+                let ns = |us: u64| us.saturating_mul(1000);
+                self.rt_limit_ns[0].store(ns(l.cur), Ordering::Relaxed);
+                self.rt_limit_ns[1].store(ns(l.max), Ordering::Relaxed);
+            }
             _ => {}
         }
     }
@@ -153,6 +160,28 @@ pub fn check_cpu_limit(p: &alloc::sync::Arc<Process>) {
         if p.cpu_limit_signalled.swap(second + 1, Ordering::Relaxed) != second + 1 {
             super::signal::send_to_process(p, super::signal::SIGXCPU);
         }
+    }
+}
+
+/// RLIMIT_RTTIME, from the timer tick, for a real-time thread that has run
+/// `ran_ns` of CPU time since it last blocked (getrlimit(2)): SIGXCPU when
+/// it passes the soft limit and once a second after that, SIGKILL at the
+/// hard limit. `signalled` is the thread's count of SIGXCPUs sent.
+pub fn check_rt_limit(p: &alloc::sync::Arc<Process>, ran_ns: u64, signalled: &core::sync::atomic::AtomicU64) {
+    let soft = p.rt_limit_ns[0].load(Ordering::Relaxed);
+    if ran_ns < soft {
+        return;
+    }
+    if ran_ns >= p.rt_limit_ns[1].load(Ordering::Relaxed) {
+        crate::log_warn!("pid {}: a real-time thread ran past RLIMIT_RTTIME's hard limit; killed", p.pid);
+        super::signal::send_to_process(p, super::signal::SIGKILL);
+        return;
+    }
+    // The first at the soft limit, then one for each further second.
+    let due = 1 + (ran_ns - soft) / crate::time::NS_PER_SEC;
+    if signalled.load(Ordering::Relaxed) < due {
+        signalled.store(due, Ordering::Relaxed);
+        super::signal::send_to_process(p, super::signal::SIGXCPU);
     }
 }
 

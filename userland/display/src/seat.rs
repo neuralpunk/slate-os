@@ -7,6 +7,12 @@
 //! The messages are seatd's protocol (libseat's `seatd` backend; the
 //! layouts are in userland/seatd/src/lib.rs): a 16-bit opcode and a 16-bit
 //! body size in native byte order, then the body.
+//!
+//! Sessions switch (ADR 0185): seatd sends DISABLE_SEAT when the session
+//! is to step aside (its input devices are then taken back, so they are
+//! opened again later) and ENABLE_SEAT when it is in front again;
+//! [`Seat::events`] gives them, [`Seat::disabled`] acknowledges, and
+//! [`Seat::switch_session`] asks for another virtual console.
 
 use alloc::collections::VecDeque;
 use alloc::format;
@@ -18,11 +24,23 @@ use slate_rt::{io, net, process};
 const SOCKET: &[u8] = b"/run/seatd.sock";
 const CLIENT_OPEN_SEAT: u16 = 1;
 const CLIENT_OPEN_DEVICE: u16 = 3;
+const CLIENT_DISABLE_SEAT: u16 = 5;
+const CLIENT_SWITCH_SESSION: u16 = 6;
 const SERVER: u16 = 1 << 15;
 const SERVER_SEAT_OPENED: u16 = SERVER + 1;
 const SERVER_DEVICE_OPENED: u16 = SERVER + 3;
+const SERVER_DISABLE_SEAT: u16 = SERVER + 5;
 const SERVER_ENABLE_SEAT: u16 = SERVER + 6;
 const SERVER_ERROR: u16 = SERVER + 0x7FFF;
+
+/// What seatd says of the session.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SeatEvent {
+    /// Step aside: stop using the devices, then [`Seat::disabled`].
+    Disable,
+    /// In front again: open the input devices again.
+    Enable,
+}
 
 /// The seat, held open while its devices are in use.
 #[derive(Debug)]
@@ -30,6 +48,8 @@ pub struct Seat {
     fd: i32,
     buf: Vec<u8>,
     fds: VecDeque<i32>,
+    /// Events that came while waiting for an answer.
+    pending: VecDeque<SeatEvent>,
 }
 
 fn message(op: u16, body: &[u8]) -> Vec<u8> {
@@ -40,14 +60,15 @@ fn message(op: u16, body: &[u8]) -> Vec<u8> {
 }
 
 impl Seat {
-    /// Open the seat and wait until seatd makes this session active.
+    /// Open the seat and wait until seatd makes this session active: at
+    /// once if its virtual console is in front, else when it comes there.
     pub fn open() -> Result<Seat, String> {
         let fd = net::connect_path(SOCKET).map_err(|e| format!("seatd ({}): {e}", "/run/seatd.sock"))?;
-        let mut s = Seat { fd, buf: Vec::new(), fds: VecDeque::new() };
+        let mut s = Seat { fd, buf: Vec::new(), fds: VecDeque::new(), pending: VecDeque::new() };
         io::write_all(fd, &message(CLIENT_OPEN_SEAT, &[])).map_err(|e| format!("seatd: {e}"))?;
         let (mut opened, mut enabled) = (false, false);
         while !(opened && enabled) {
-            match s.next(5000)? {
+            match s.next(if opened { -1 } else { 5000 })? {
                 (SERVER_SEAT_OPENED, _) => opened = true,
                 (SERVER_ENABLE_SEAT, _) => enabled = true,
                 (SERVER_ERROR, b) if errno(&b) == slate_rt::Errno::EACCES.0 => {
@@ -78,9 +99,41 @@ impl Seat {
                     return Ok(fd);
                 }
                 (SERVER_ERROR, b) => return Err(format!("seatd would not open the device (error {})", errno(&b))),
-                _ => {}
+                (op, _) => self.keep(op),
             }
         }
+    }
+
+    /// An event that came while waiting for something else.
+    fn keep(&mut self, op: u16) {
+        match op {
+            SERVER_DISABLE_SEAT => self.pending.push_back(SeatEvent::Disable),
+            SERVER_ENABLE_SEAT => self.pending.push_back(SeatEvent::Enable),
+            _ => {}
+        }
+    }
+
+    /// The connection to poll for [`Seat::events`].
+    pub fn fd(&self) -> i32 {
+        self.fd
+    }
+
+    /// What seatd said since the last call, without waiting.
+    pub fn events(&mut self) -> Vec<SeatEvent> {
+        while let Ok((op, _)) = self.next(0) {
+            self.keep(op);
+        }
+        self.pending.drain(..).collect()
+    }
+
+    /// The session has stepped aside (after [`SeatEvent::Disable`]).
+    pub fn disabled(&mut self) {
+        let _ = io::write_all(self.fd, &message(CLIENT_DISABLE_SEAT, &[]));
+    }
+
+    /// Ask for the session on virtual console `vt`.
+    pub fn switch_session(&mut self, vt: i32) {
+        let _ = io::write_all(self.fd, &message(CLIENT_SWITCH_SESSION, &vt.to_ne_bytes()));
     }
 
     /// The next message, within `timeout_ms`.

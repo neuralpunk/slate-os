@@ -22,6 +22,12 @@ test = false
 bench = false
 
 [[bin]]
+name = "strata-notify"
+path = "src/notify_main.rs"
+test = false
+bench = false
+
+[[bin]]
 name = "strata-settings"
 path = "src/settings_main.rs"
 test = false
@@ -42,6 +48,7 @@ slate-rt = { path = "../rt" }
 slate-abi = { path = "../../libs/abi" }
 slate-sysinfo = { path = "../sysinfo" }
 slate-bluetooth = { path = "../bluetooth" }
+slate-sound = { path = "../sound" }
 slate-hci = { path = "../../libs/hci" }
 slate-strata-client = { path = "../strata-client" }
 strata-proto = { path = "../../libs/strata-proto" }

@@ -96,6 +96,20 @@ pub enum Icon {
     /// (Solitaire); a flag on its pole (Mines).
     Cards,
     Flag,
+    /// A speaker with two sound waves (Settings › Sound, ADR 0184).
+    Speaker,
+    /// The speaker, crossed out: muted (ADR 0186).
+    SpeakerMuted,
+    /// The sun: brightness.
+    Sun,
+    /// A crescent moon: dark style, Night Light.
+    Moon,
+    /// A mouse: the pointer's settings.
+    Mouse,
+    /// A bell: notifications.
+    Bell,
+    /// The bell struck through: Do Not Disturb.
+    BellOff,
 }
 
 /// Draw `icon` `size` device pixels square at (x, y).
@@ -280,6 +294,55 @@ pub fn draw(canvas: &mut Canvas, icon: Icon, x: f32, y: f32, size: f32, color: C
             p.extend(&Path::rounded_ring(3.0, 4.5, 18.0, 15.0, 2.5, w));
             p.extend(&polyline(&[(3.5, 9.0), (20.5, 9.0)], w));
         }
+        Icon::Speaker => {
+            p.extend(&polyline(
+                &[(4.0, 9.5), (8.0, 9.5), (13.0, 5.0), (13.0, 19.0), (8.0, 14.5), (4.0, 14.5), (4.0, 9.5)],
+                w,
+            ));
+            p.extend(&polyline(&arc(13.0, 12.0, 4.0, -0.8, 0.8), w));
+            p.extend(&polyline(&arc(13.0, 12.0, 7.5, -0.85, 0.85), w));
+        }
+        Icon::SpeakerMuted => {
+            p.extend(&polyline(
+                &[(4.0, 9.5), (8.0, 9.5), (13.0, 5.0), (13.0, 19.0), (8.0, 14.5), (4.0, 14.5), (4.0, 9.5)],
+                w,
+            ));
+            p.extend(&polyline(&[(16.0, 9.5), (21.0, 14.5)], w));
+            p.extend(&polyline(&[(21.0, 9.5), (16.0, 14.5)], w));
+        }
+        Icon::Sun => {
+            p.extend(&polyline(&arc(12.0, 12.0, 4.0, 0.0, 2.0 * core::f32::consts::PI), w));
+            for i in 0..8 {
+                let a = i as f32 * core::f32::consts::FRAC_PI_4;
+                let (c, s) = (cos(a), sin(a));
+                p.extend(&polyline(&[(12.0 + 6.5 * c, 12.0 + 6.5 * s), (12.0 + 9.0 * c, 12.0 + 9.0 * s)], w));
+            }
+        }
+        Icon::Moon => {
+            // The outer edge round the bottom left, then back along the
+            // circle that bites it (they meet at about (11, 4) and (20, 13)).
+            let mut pts = arc(12.0, 12.0, 8.0, 0.128, 4.585);
+            pts.extend(arc(16.5, 7.5, 6.5, 3.698, 1.014));
+            pts.push(pts[0]);
+            p.extend(&polyline(&pts, w));
+        }
+        Icon::Mouse => {
+            p.extend(&Path::rounded_ring(6.5, 3.5, 11.0, 17.0, 5.5, w));
+            p.extend(&polyline(&[(12.0, 6.5), (12.0, 10.0)], w));
+        }
+        Icon::Bell => {
+            p.extend(&polyline(&[(5.0, 17.0), (6.5, 15.0), (6.5, 10.5)], w));
+            p.extend(&polyline(&arc(12.0, 10.5, 5.5, core::f32::consts::PI, 2.0 * core::f32::consts::PI), w));
+            p.extend(&polyline(&[(17.5, 10.5), (17.5, 15.0), (19.0, 17.0), (5.0, 17.0)], w));
+            p.extend(&polyline(&arc(12.0, 18.5, 2.0, 0.0, core::f32::consts::PI), w));
+        }
+        Icon::BellOff => {
+            p.extend(&polyline(&[(5.0, 17.0), (6.5, 15.0), (6.5, 10.5)], w));
+            p.extend(&polyline(&arc(12.0, 10.5, 5.5, core::f32::consts::PI, 2.0 * core::f32::consts::PI), w));
+            p.extend(&polyline(&[(17.5, 10.5), (17.5, 15.0), (19.0, 17.0), (5.0, 17.0)], w));
+            p.extend(&polyline(&arc(12.0, 18.5, 2.0, 0.0, core::f32::consts::PI), w));
+            p.extend(&polyline(&[(4.0, 4.0), (20.0, 20.0)], w));
+        }
         Icon::Display => {
             p.extend(&Path::rounded_ring(2.5, 4.0, 19.0, 12.5, 2.0, w));
             p.extend(&polyline(&[(12.0, 16.5), (12.0, 19.5)], w));
@@ -403,16 +466,126 @@ pub enum Cursor {
     ResizeNwse,
     /// Top-right and bottom-left corners.
     ResizeNesw,
+    /// A link or a button: a pointing hand, its fingertip at the point
+    /// (ADR 0186).
+    Hand,
+    /// Text: a beam centred at the point.
+    Text,
+    /// Busy: the arrow with a turning ring beside it, at step `n` of 12.
+    Busy(u8),
+    /// Moving something: arrows four ways, centred at the point.
+    Move,
+    /// Not here: a ring with a bar across, centred at the point.
+    NotAllowed,
+}
+
+/// Ink with a light edge, as the arrow is drawn.
+fn inked(canvas: &mut Canvas, t: &Transform, pts: &[(f32, f32)]) {
+    Path::polygon(pts).fill(canvas, t, Color::rgb(0x0B0B0B));
+    let mut edge: alloc::vec::Vec<(f32, f32)> = pts.to_vec();
+    edge.push(pts[0]);
+    edge.push(pts[1]);
+    polyline(&edge, 1.2).fill(canvas, t, Color::rgb(0xF3F2F2));
 }
 
 /// The pointer at (x, y) in `shape`; a double arrow is centred there.
 pub fn cursor(canvas: &mut Canvas, x: f32, y: f32, s: f32, shape: Cursor) {
+    let t = Transform::new(s, x, y);
     let angle = match shape {
         Cursor::Arrow => return pointer(canvas, x, y, s),
         Cursor::ResizeH => 0.0,
         Cursor::ResizeV => core::f32::consts::FRAC_PI_2,
         Cursor::ResizeNwse => core::f32::consts::FRAC_PI_4,
         Cursor::ResizeNesw => -core::f32::consts::FRAC_PI_4,
+        Cursor::Hand => {
+            // The index finger up, three fingers folded, the thumb out.
+            let hand = [
+                (-1.8, 1.2),
+                (0.0, 0.0),
+                (1.8, 1.2),
+                (1.8, 8.0),
+                (4.6, 7.6),
+                (7.0, 8.4),
+                (9.0, 9.6),
+                (9.0, 15.0),
+                (7.0, 19.5),
+                (-2.5, 19.5),
+                (-6.5, 13.5),
+                (-6.5, 11.0),
+                (-4.5, 10.5),
+                (-1.8, 12.5),
+            ];
+            inked(canvas, &t, &hand);
+            // The folded fingers' creases.
+            for cx in [4.6, 7.0] {
+                polyline(&[(cx - 0.2, 8.2), (cx - 0.2, 11.5)], 1.0).fill(canvas, &t, Color::rgb(0xF3F2F2));
+            }
+            return;
+        }
+        Cursor::Text => {
+            let beam = [
+                (-3.5, -9.0),
+                (3.5, -9.0),
+                (3.5, -7.4),
+                (0.9, -7.4),
+                (0.9, 7.4),
+                (3.5, 7.4),
+                (3.5, 9.0),
+                (-3.5, 9.0),
+                (-3.5, 7.4),
+                (-0.9, 7.4),
+                (-0.9, -7.4),
+                (-3.5, -7.4),
+            ];
+            return inked(canvas, &t, &beam);
+        }
+        Cursor::Busy(n) => {
+            pointer(canvas, x, y, s);
+            // A ring three quarters round, turning a twelfth each step.
+            let a0 = f32::from(n % 12) * core::f32::consts::PI / 6.0;
+            let ring = arc(15.0, 19.0, 4.0, a0, a0 + 4.7);
+            polyline(&ring, 3.6).fill(canvas, &t, Color::rgb(0xF3F2F2));
+            polyline(&ring, 1.8).fill(canvas, &t, Color::rgb(0x0B0B0B));
+            return;
+        }
+        Cursor::Move => {
+            let a = 2.0;
+            let arm = [
+                (-a, -6.0),
+                (-4.5, -6.0),
+                (0.0, -10.5),
+                (4.5, -6.0),
+                (a, -6.0),
+                (a, -a),
+                (6.0, -a),
+                (6.0, -4.5),
+                (10.5, 0.0),
+                (6.0, 4.5),
+                (6.0, a),
+                (a, a),
+                (a, 6.0),
+                (4.5, 6.0),
+                (0.0, 10.5),
+                (-4.5, 6.0),
+                (-a, 6.0),
+                (-a, a),
+                (-6.0, a),
+                (-6.0, 4.5),
+                (-10.5, 0.0),
+                (-6.0, -4.5),
+                (-6.0, -a),
+                (-a, -a),
+            ];
+            return inked(canvas, &t, &arm);
+        }
+        Cursor::NotAllowed => {
+            let ring = arc(0.0, 0.0, 7.0, 0.0, 2.0 * core::f32::consts::PI);
+            polyline(&ring, 4.2).fill(canvas, &t, Color::rgb(0xF3F2F2));
+            polyline(&[(-5.5, 4.5), (5.5, -4.5)], 4.2).fill(canvas, &t, Color::rgb(0xF3F2F2));
+            polyline(&ring, 2.2).fill(canvas, &t, Color::rgb(0x0B0B0B));
+            polyline(&[(-4.9, 4.0), (4.9, -4.0)], 2.2).fill(canvas, &t, Color::rgb(0x0B0B0B));
+            return;
+        }
     };
     // A horizontal double arrow, turned.
     let shape = [
@@ -429,12 +602,7 @@ pub fn cursor(canvas: &mut Canvas, x: f32, y: f32, s: f32, shape: Cursor) {
     ];
     let (c, sn) = (cos(angle), sin(angle));
     let pts: alloc::vec::Vec<(f32, f32)> = shape.iter().map(|&(px, py)| (px * c - py * sn, px * sn + py * c)).collect();
-    let t = Transform::new(s, x, y);
-    Path::polygon(&pts).fill(canvas, &t, Color::rgb(0x0B0B0B));
-    let mut edge = pts.clone();
-    edge.push(pts[0]);
-    edge.push(pts[1]);
-    polyline(&edge, 1.2).fill(canvas, &t, Color::rgb(0xF3F2F2));
+    inked(canvas, &t, &pts);
 }
 
 /// A battery `size` device pixels square at (x, y), charged `level` (0 to

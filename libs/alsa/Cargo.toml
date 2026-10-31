@@ -1,0 +1,10 @@
+[package]
+name = "slate-alsa"
+description = "ALSA's kernel interface: its numbers and layouts, hardware parameter refinement and stream pointers (ADR 0184)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true

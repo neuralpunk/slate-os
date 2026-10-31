@@ -37,6 +37,51 @@ const VBLANK_EVENT: u32 = 0x400_0000;
 const EVENT_VBLANK: u32 = 0x01;
 /// DRM_MODE_TYPE_PREFERRED (drm_mode.h).
 const TYPE_PREFERRED: u32 = 1 << 3;
+/// DRM_IOCTL_MODE_GETPROPERTY, _OBJ_GETPROPERTIES, _OBJ_SETPROPERTY.
+const GETPROPERTY: u32 = 0xAA;
+const OBJ_GETPROPERTIES: u32 = 0xB9;
+const OBJ_SETPROPERTY: u32 = 0xBA;
+/// DRM_MODE_OBJECT_CONNECTOR.
+const OBJECT_CONNECTOR: u32 = 0xc0c0_c0c0;
+/// DRM_MODE_DPMS_ON, DRM_MODE_DPMS_OFF.
+const DPMS_ON: u64 = 0;
+const DPMS_OFF: u64 = 3;
+
+/// `struct drm_mode_obj_get_properties`.
+#[repr(C)]
+#[derive(Default)]
+struct ObjGetProperties {
+    props_ptr: u64,
+    prop_values_ptr: u64,
+    count_props: u32,
+    obj_id: u32,
+    obj_type: u32,
+    pad: u32,
+}
+
+/// `struct drm_mode_get_property` (DRM_PROP_NAME_LEN is 32).
+#[repr(C)]
+#[derive(Default)]
+struct GetProperty {
+    values_ptr: u64,
+    enum_blob_ptr: u64,
+    prop_id: u32,
+    flags: u32,
+    name: [u8; 32],
+    count_values: u32,
+    count_enum_blobs: u32,
+}
+
+/// `struct drm_mode_obj_set_property`.
+#[repr(C)]
+#[derive(Default)]
+struct ObjSetProperty {
+    value: u64,
+    prop_id: u32,
+    obj_id: u32,
+    obj_type: u32,
+    pad: u32,
+}
 
 /// `union drm_wait_vblank` (drm.h): the request's type, sequence and
 /// signal (the event's user data).
@@ -206,6 +251,9 @@ pub struct Output {
     /// A vblank event asked for and not yet come (when it was asked, ns):
     /// it has not shown the last frame yet.
     waiting: Option<i64>,
+    /// When its last vblank event said it showed a frame (ns, the
+    /// monotonic clock).
+    shown_at: Option<i64>,
 }
 
 impl Output {
@@ -228,6 +276,8 @@ pub struct Screens {
     /// Device pixels a logical one, the same on every display.
     pub scale: f32,
     crtcs: Vec<u32>,
+    /// Night Light's tint (ADR 0186), applied as frames are shown.
+    pub tint: Option<[u32; 3]>,
 }
 
 /// `a` ∩ `b`, each (x, y, w, h).
@@ -241,14 +291,31 @@ impl Screens {
     /// Light the displays of the card open on `fd` as `wants` asks, at
     /// the scale `scale_of` gives for the primary display's size.
     pub fn open(fd: i32, wants: &[Want], scale_of: &dyn Fn(u32, u32) -> f32) -> Result<Screens, String> {
-        let mut s =
-            Screens { fd, heads: Vec::new(), outputs: Vec::new(), width: 0, height: 0, scale: 1.0, crtcs: Vec::new() };
+        let mut s = Screens {
+            fd,
+            heads: Vec::new(),
+            outputs: Vec::new(),
+            width: 0,
+            height: 0,
+            scale: 1.0,
+            crtcs: Vec::new(),
+            tint: None,
+        };
         s.rebuild(wants, scale_of)?;
         Ok(s)
     }
 
     pub fn fd(&self) -> i32 {
         self.fd
+    }
+
+    /// Whether the displays connected now differ from those lit (one
+    /// plugged in or taken out before anything listened for hotplugs).
+    pub fn heads_changed(&self) -> bool {
+        let Ok((_, conns)) = resources(self.fd) else { return false };
+        let now: Vec<String> =
+            conns.iter().filter_map(|&id| head(self.fd, id).ok().flatten()).map(|h| h.name).collect();
+        now != self.heads.iter().map(|h| h.name.clone()).collect::<Vec<_>>()
     }
 
     /// Read what is connected again and light it as `wants` asks (after
@@ -312,6 +379,7 @@ impl Screens {
                 pitch: dumb.pitch as usize / 4,
                 buffer,
                 waiting: None,
+                shown_at: None,
             });
         }
         // CRTCs not used: off (a display left on would show the console).
@@ -359,6 +427,55 @@ impl Screens {
         self.outputs.iter().any(|o| o.waiting.is_some_and(|at| now - at < 50_000_000))
     }
 
+    /// Turn the displays' power on or off (their connectors' DPMS
+    /// property): blanking after a while without input (ADR 0186).
+    pub fn set_power(&mut self, on: bool) -> Result<(), String> {
+        let names: Vec<String> = self.outputs.iter().map(|o| o.name.clone()).collect();
+        for name in names {
+            let Some(conn) = self.heads.iter().find(|h| h.name == name).map(|h| h.connector) else { continue };
+            let Some(prop) = self.property(conn, "DPMS")? else { continue };
+            let mut set = ObjSetProperty {
+                value: if on { DPMS_ON } else { DPMS_OFF },
+                prop_id: prop,
+                obj_id: conn,
+                obj_type: OBJECT_CONNECTOR,
+                pad: 0,
+            };
+            ioctl(self.fd, OBJ_SETPROPERTY, &mut set, "setting DPMS")?;
+        }
+        Ok(())
+    }
+
+    /// The id of connector `conn`'s property `name`.
+    fn property(&self, conn: u32, name: &str) -> Result<Option<u32>, String> {
+        let mut g = ObjGetProperties { obj_id: conn, obj_type: OBJECT_CONNECTOR, ..ObjGetProperties::default() };
+        ioctl(self.fd, OBJ_GETPROPERTIES, &mut g, "connector properties")?;
+        let n = g.count_props as usize;
+        let mut ids = vec![0u32; n];
+        let mut values = vec![0u64; n];
+        g.props_ptr = ids.as_mut_ptr() as u64;
+        g.prop_values_ptr = values.as_mut_ptr() as u64;
+        ioctl(self.fd, OBJ_GETPROPERTIES, &mut g, "connector properties")?;
+        for &id in ids.iter().take(g.count_props as usize) {
+            let mut p = GetProperty { prop_id: id, ..GetProperty::default() };
+            ioctl(self.fd, GETPROPERTY, &mut p, "a property")?;
+            let end = p.name.iter().position(|&b| b == 0).unwrap_or(p.name.len());
+            if &p.name[..end] == name.as_bytes() {
+                return Ok(Some(id));
+            }
+        }
+        Ok(None)
+    }
+
+    /// When the next frame will be seen (ns, the monotonic clock): the
+    /// primary output's first vblank after `now`, from its last one and
+    /// its refresh rate (ADR 0186: motion is worked out for when it is
+    /// shown, so its steps are even). `now` when unknown.
+    pub fn next_vblank(&self, now: i64) -> i64 {
+        let Some(o) = self.outputs.first() else { return now };
+        next_vblank(o.shown_at, o.mode.refresh, now)
+    }
+
     /// Read the card's events: each vblank event frees its output.
     pub fn read_events(&mut self) {
         let mut ev = [0u8; 1024];
@@ -372,6 +489,12 @@ impl Screens {
                 let i = u64::from_le_bytes(ev[at + 8..at + 16].try_into().unwrap()) as usize;
                 if let Some(o) = self.outputs.get_mut(i) {
                     o.waiting = None;
+                    // tv_sec and tv_usec at 16 and 20.
+                    if at + 24 <= n {
+                        let sec = u32::from_le_bytes(ev[at + 16..at + 20].try_into().unwrap()) as i64;
+                        let usec = u32::from_le_bytes(ev[at + 20..at + 24].try_into().unwrap()) as i64;
+                        o.shown_at = Some(sec * 1_000_000_000 + usec * 1000);
+                    }
                 }
             }
             at += len.max(8);
@@ -414,7 +537,10 @@ impl Screens {
                     let src = pixels.get(row as usize * pw + x as usize..row as usize * pw + (x + w) as usize);
                     let dst = words.get_mut(ly * o.pitch + lx..ly * o.pitch + lx + w as usize);
                     if let (Some(d), Some(s)) = (dst, src) {
-                        d.copy_from_slice(s);
+                        match self.tint.filter(|_| !whole) {
+                            Some(t) => tint_row(d, s, t),
+                            None => d.copy_from_slice(s),
+                        }
                     }
                 }
                 // struct drm_clip_rect (libdrm drm.h): x1, y1, x2, y2.
@@ -423,6 +549,14 @@ impl Screens {
             }
             if whole {
                 clips = vec![[0, 0, r.2 as u16, r.3 as u16]];
+                // The whole buffer, put there by the caller too: tinted
+                // once, in place.
+                if let Some(t) = self.tint {
+                    for row in 0..r.3 as usize {
+                        let line = &mut words[row * o.pitch..row * o.pitch + r.2 as usize];
+                        tint_in_place(line, t);
+                    }
+                }
             }
             if clips.is_empty() {
                 continue;
@@ -456,6 +590,52 @@ impl Drop for Screens {
         let _ = io::ioctl(self.fd, super::io_(super::DROP_MASTER), 0);
         let _ = io::close(self.fd);
     }
+}
+
+/// Each channel of `src`'s pixels scaled by `t` (red, green, blue, of
+/// 256) into `dst`: Night Light (ADR 0186).
+pub fn tint_row(dst: &mut [u32], src: &[u32], t: [u32; 3]) {
+    for (d, &p) in dst.iter_mut().zip(src) {
+        *d = tint(p, t);
+    }
+}
+
+/// [`tint_row`] in place.
+pub fn tint_in_place(row: &mut [u32], t: [u32; 3]) {
+    for p in row.iter_mut() {
+        *p = tint(*p, t);
+    }
+}
+
+#[inline(always)]
+fn tint(p: u32, t: [u32; 3]) -> u32 {
+    let r = (((p >> 16) & 0xFF) * t[0]) >> 8;
+    let g = (((p >> 8) & 0xFF) * t[1]) >> 8;
+    let b = ((p & 0xFF) * t[2]) >> 8;
+    (p & 0xFF00_0000) | (r.min(255) << 16) | (g.min(255) << 8) | b.min(255)
+}
+
+/// Night Light's tint at `warmth` (1 to 5): red kept, green and blue
+/// lowered toward a candle's colour, roughly 5500 K to 3000 K.
+pub fn warmth_tint(warmth: u8) -> [u32; 3] {
+    match warmth.clamp(1, 5) {
+        1 => [256, 236, 206],
+        2 => [256, 225, 184],
+        3 => [256, 214, 163],
+        4 => [256, 199, 137],
+        _ => [256, 180, 107],
+    }
+}
+
+/// The first vblank after `now`, for a display that last showed a frame
+/// at `shown_at` and refreshes `hz` times a second.
+pub fn next_vblank(shown_at: Option<i64>, hz: u32, now: i64) -> i64 {
+    let (Some(at), true) = (shown_at, hz > 0) else { return now };
+    let period = 1_000_000_000 / i64::from(hz);
+    if at > now {
+        return at;
+    }
+    at + ((now - at) / period + 1) * period
 }
 
 fn now_ns() -> i64 {
@@ -527,6 +707,31 @@ fn head(fd: i32, id: u32) -> Result<Option<Head>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tinted() {
+        let mut d = [0u32; 2];
+        tint_row(&mut d, &[0xFFFF_FFFF, 0xFF10_2030], [256, 128, 0]);
+        assert_eq!(d, [0xFFFF_7F00, 0xFF10_1000]);
+        let mut row = [0xFF80_8080];
+        tint_in_place(&mut row, warmth_tint(3));
+        assert_eq!(row[0] >> 16 & 0xFF, 0x80);
+        assert!((row[0] & 0xFF) < (row[0] >> 8 & 0xFF));
+    }
+
+    #[test]
+    fn vblanks_ahead() {
+        // 60 Hz: a period of 16 666 666 ns.
+        let p = 16_666_666;
+        assert_eq!(next_vblank(None, 60, 5), 5);
+        assert_eq!(next_vblank(Some(1000), 0, 5000), 5000);
+        assert_eq!(next_vblank(Some(1000), 60, 1000), 1000 + p);
+        assert_eq!(next_vblank(Some(1000), 60, 1000 + p - 1), 1000 + p);
+        assert_eq!(next_vblank(Some(1000), 60, 1000 + p), 1000 + 2 * p);
+        assert_eq!(next_vblank(Some(1000), 60, 1000 + 10 * p + 7), 1000 + 11 * p);
+        // One the event names ahead of now.
+        assert_eq!(next_vblank(Some(9000), 60, 1000), 9000);
+    }
 
     fn head(name: &str, modes: &[(u32, u32, u32)]) -> Head {
         Head {

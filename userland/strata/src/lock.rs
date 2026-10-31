@@ -135,6 +135,22 @@ pub fn draw_dots(p: &mut Painter<'_>, pal: &Palette, x0: f32, mid: f32, field: &
     x0 - 4.0 + 9.0 * n as f32
 }
 
+/// Whether the login screen has just let this session's person back in
+/// (ADR 0185): the broker, having checked their password there, leaves a
+/// note of its own (root's) with the time, and the session comes back
+/// unlocked within 15 s of it. Only the broker can write the note.
+pub fn unlocked_by_login() -> bool {
+    let path = alloc::format!("/run/slate-brokerd.unlock/{}", slate_rt::process::getuid());
+    let Ok(st) = slate_rt::fs::stat(path.as_bytes()) else { return false };
+    if st.uid != 0 {
+        return false;
+    }
+    let text = slate_rt::fs::read_file(path.as_bytes()).unwrap_or_default();
+    let at: u64 = core::str::from_utf8(&text).ok().and_then(|t| t.trim().parse().ok()).unwrap_or(0);
+    let now = slate_rt::time::monotonic_ns();
+    at != 0 && at <= now && now - at < 15_000_000_000
+}
+
 impl Lock {
     /// A key: the password to check when Enter is pressed, or switching
     /// person once confirmed.

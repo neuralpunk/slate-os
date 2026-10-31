@@ -1781,6 +1781,114 @@ pub fn sched_setscheduler(tid: u64, policy: Option<u64>, param: u64) -> Result {
     Ok(0)
 }
 
+// sched_setattr(2): `struct sched_attr` is 48 bytes in its first
+// version and 56 with the utilization hints (the man page's layout: size,
+// policy, flags, nice, priority, runtime, deadline, period, util_min,
+// util_max). Flags: SCHED_FLAG_RESET_ON_FORK 0x01, KEEP_POLICY 0x08,
+// KEEP_PARAMS 0x10; values seen on the host (Linux 7.2), where other
+// flags were EINVAL, a size below 48 E2BIG with 56 written back, and
+// sched_getattr reported util_max 1024 and zeroed the caller's bytes past
+// its 56.
+const SCHED_ATTR_SIZE_VER0: u32 = 48;
+const SCHED_ATTR_SIZE: u32 = 56;
+const SCHED_FLAG_RESET_ON_FORK: u64 = 0x01;
+const SCHED_FLAG_KEEP_POLICY: u64 = 0x08;
+const SCHED_FLAG_KEEP_PARAMS: u64 = 0x10;
+
+/// sched_setattr(2): the policy, nice value and real-time priority in
+/// one call (ADR 0184). SCHED_DEADLINE is not offered (EINVAL; GAPS).
+pub fn sched_setattr(a: Args) -> Result {
+    let (tid, attr, flags) = (a.0[0], a.0[1], a.0[2]);
+    if attr == 0 || (tid as i32) < 0 || flags as u32 != 0 {
+        return Err(EINVAL);
+    }
+    let size = match crate::arch::uaccess::read_user::<u32>(attr).map_err(|_| EFAULT)? {
+        0 => SCHED_ATTR_SIZE_VER0,
+        n => n,
+    };
+    let too_big = |attr: u64| {
+        let _ = write_user(attr, &SCHED_ATTR_SIZE);
+        Err(super::errno::E2BIG)
+    };
+    if !(SCHED_ATTR_SIZE_VER0..=4096).contains(&size) {
+        return too_big(attr);
+    }
+    let mut b = [0u8; 4096];
+    let b = &mut b[..size as usize];
+    crate::arch::uaccess::copy_from_user(b, attr).map_err(|_| EFAULT)?;
+    if b.len() > SCHED_ATTR_SIZE as usize && b[SCHED_ATTR_SIZE as usize..].iter().any(|&x| x != 0) {
+        return too_big(attr);
+    }
+    let u32_at = |o: usize| u32::from_le_bytes([b[o], b[o + 1], b[o + 2], b[o + 3]]);
+    let policy = u64::from(u32_at(4));
+    let sflags = u64::from(u32_at(8)) | u64::from(u32_at(12)) << 32;
+    let nice = u32_at(16) as i32;
+    let prio = u32_at(20);
+    if sflags & !(SCHED_FLAG_RESET_ON_FORK | SCHED_FLAG_KEEP_POLICY | SCHED_FLAG_KEEP_PARAMS) != 0 {
+        return Err(EINVAL);
+    }
+    let (p, t) = sched_target(tid)?;
+    let (old_policy, old_prio, old_nice, old_reset) = t.sched_params();
+    let (policy, reset) = if sflags & SCHED_FLAG_KEEP_POLICY != 0 {
+        (u64::from(old_policy), old_reset)
+    } else {
+        (policy, sflags & SCHED_FLAG_RESET_ON_FORK != 0)
+    };
+    let rt = matches!(policy, SCHED_FIFO | SCHED_RR);
+    let (prio, nice) = if sflags & SCHED_FLAG_KEEP_PARAMS != 0 {
+        (u32::from(old_prio), i32::from(old_nice))
+    } else {
+        (prio, if rt { i32::from(old_nice) } else { nice })
+    };
+    match policy {
+        SCHED_FIFO | SCHED_RR if (1..=99).contains(&prio) => {}
+        SCHED_OTHER | SCHED_BATCH | SCHED_IDLE if prio == 0 => {}
+        _ => return Err(EINVAL),
+    }
+    let nice = nice.clamp(-20, 19) as i8;
+    if !may_reschedule(&p) {
+        return Err(super::errno::EPERM);
+    }
+    let was_rt = matches!(u64::from(old_policy), SCHED_FIFO | SCHED_RR);
+    let raising_rt = rt && (!was_rt || prio > u32::from(old_prio));
+    let raising_nice = !rt && nice < old_nice;
+    if (raising_rt || raising_nice) && !may_raise(&p, raising_nice.then_some(nice), raising_rt.then_some(prio as u8)) {
+        return Err(super::errno::EPERM);
+    }
+    if old_reset && !reset && !crate::proc::cred::current().capable(crate::proc::cred::CAP_SYS_NICE) {
+        return Err(super::errno::EPERM);
+    }
+    crate::sched::set_params(&t, policy as u8, prio as u8, nice, reset);
+    crate::proc::futex::priority_changed(&t);
+    Ok(0)
+}
+
+/// sched_getattr(2): what sched_setattr sets, in the caller's `size`
+/// bytes (at least 48).
+pub fn sched_getattr(a: Args) -> Result {
+    let (tid, attr, size, flags) = (a.0[0], a.0[1], a.0[2] as u32, a.0[3]);
+    if attr == 0 || (tid as i32) < 0 || flags as u32 != 0 || !(SCHED_ATTR_SIZE_VER0..=4096).contains(&size) {
+        return Err(EINVAL);
+    }
+    let (_, t) = sched_target(tid)?;
+    let (policy, prio, nice, reset) = t.sched_params();
+    let mut b = alloc::vec![0u8; size as usize];
+    let mut put = |o: usize, v: &[u8]| {
+        if o + v.len() <= b.len() {
+            b[o..o + v.len()].copy_from_slice(v);
+        }
+    };
+    put(0, &SCHED_ATTR_SIZE.min(size).to_le_bytes());
+    put(4, &u32::from(policy).to_le_bytes());
+    put(8, &(if reset { SCHED_FLAG_RESET_ON_FORK } else { 0 }).to_le_bytes());
+    put(16, &i32::from(nice).to_le_bytes());
+    put(20, &u32::from(prio).to_le_bytes());
+    // util_min 0, util_max 1024: no clamping.
+    put(52, &1024u32.to_le_bytes());
+    crate::arch::uaccess::copy_to_user(attr, &b).map_err(|_| EFAULT)?;
+    Ok(0)
+}
+
 /// The thread sched_setaffinity(2) and sched_getaffinity(2) name (0: the
 /// caller), and whether the caller may change it.
 fn affinity_target(tid: u64) -> core::result::Result<alloc::sync::Arc<crate::sched::Thread>, super::Errno> {

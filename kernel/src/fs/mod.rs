@@ -20,6 +20,7 @@ pub mod slatefs;
 pub mod tmpfs;
 pub mod tty;
 pub mod vfs;
+pub mod vt;
 
 use alloc::sync::Arc;
 use alloc::vec::Vec;
@@ -996,6 +997,11 @@ pub fn devfs_root() -> Arc<dyn vfs::Inode> {
         ("ttyS0", TTY_MAJOR, TTYS0_MINOR, 0o660),
         ("ptmx", tty::PTMX_MAJOR, tty::PTMX_MINOR, 0o666),
     ];
+    // The virtual consoles (ADR 0185): tty0 the one in front, tty1 the
+    // console.
+    for n in 0..=vt::COUNT as u32 {
+        let _ = dev.create(&alloc::format!("tty{n}"), S_IFCHR | 0o620, makedev(TTY_MAJOR, n));
+    }
     for (name, major, minor, perm) in nodes {
         let _ = dev.create(name, S_IFCHR | perm, makedev(major, minor));
     }
@@ -1073,6 +1079,9 @@ pub fn sys_device_add(key: &str, entries: Vec<SysEntry>) {
     if let Some(sys) = SYSFS.lock().clone() {
         apply_sys_entries(&sys, &entries);
     }
+    // Uevent listeners hear of it (ADR 0185): the device, then its
+    // interfaces.
+    announce_entries(&entries, "add", false);
     let mut all = SYS_DEVICES.lock();
     all.retain(|(k, _)| k != key);
     all.push((key.into(), entries));
@@ -1096,6 +1105,8 @@ pub fn sys_device_remove(key: &str) {
         let Some(i) = all.iter().position(|(k, _)| k == key) else { return };
         all.remove(i).1
     };
+    // Its interfaces go first, then the device, as on Linux.
+    announce_entries(&entries, "remove", true);
     let Some(sys) = SYSFS.lock().clone() else { return };
     let dirs: Vec<&str> =
         entries.iter().filter_map(|e| if let SysEntry::Dir(p) = e { Some(p.as_str()) } else { None }).collect();
@@ -1240,11 +1251,36 @@ pub fn char_removed(dev_path: &str) {
 /// Tell uevent listeners about each device (each directory with a
 /// uevent file) among `n`'s sysfs entries.
 fn announce(n: &CharNode, action: &str) {
-    for e in &n.sys {
-        let SysEntry::File(p, text) = e else { continue };
+    announce_entries(&n.sys, action, false);
+}
+
+/// Tell uevent listeners about each device among `entries` (each
+/// directory with a uevent file, made or generated), last first when
+/// `reverse`.
+fn announce_entries(entries: &[SysEntry], action: &str, reverse: bool) {
+    if !crate::net::uevent::listening() {
+        return;
+    }
+    let mut found: Vec<(&str, alloc::string::String)> = Vec::new();
+    for e in entries {
+        let (p, text) = match e {
+            SysEntry::File(p, text) => (p, text.clone()),
+            SysEntry::Generated(p, make) if p.ends_with("/uevent") => {
+                let mut b = Vec::new();
+                make(&mut b);
+                (p, alloc::string::String::from_utf8_lossy(&b).into_owned())
+            }
+            _ => continue,
+        };
         let Some(dir) = p.strip_suffix("/uevent") else { continue };
+        found.push((dir, text));
+    }
+    if reverse {
+        found.reverse();
+    }
+    for (dir, text) in found {
         let mut env: Vec<alloc::string::String> = Vec::new();
-        for s in &n.sys {
+        for s in entries {
             if let SysEntry::Link(lp, target) = s
                 && lp.strip_suffix("/subsystem") == Some(dir)
             {
@@ -1272,11 +1308,51 @@ pub fn block_added(name: &str, rdev: u64) {
         && let Some(info) = crate::block::list().into_iter().find(|i| i.name == name)
     {
         sysfs_block(&sys, &info);
+        announce_block(&sys, name, "add");
     }
+}
+
+/// Tell uevent listeners about block device `name` (ADR 0185), from its
+/// /sys/block entry: DEVPATH `/block/DISK[/PART]`, SUBSYSTEM `block`, and
+/// its uevent file's lines.
+fn announce_block(sys: &Arc<dyn vfs::Inode>, name: &str, action: &str) {
+    if !crate::net::uevent::listening() {
+        return;
+    }
+    let Ok(block) = sys.lookup("block") else { return };
+    let mut at = None;
+    if block.lookup(name).is_ok() {
+        at = Some(alloc::format!("/block/{name}"));
+    } else {
+        for disk in block.readdir().unwrap_or_default() {
+            if let Ok(d) = block.lookup(&disk.name)
+                && disk.name != "."
+                && disk.name != ".."
+                && d.lookup(name).map(|p| p.metadata().mode & vfs::S_IFMT == vfs::S_IFDIR).unwrap_or(false)
+            {
+                at = Some(alloc::format!("/block/{}/{name}", disk.name));
+                break;
+            }
+        }
+    }
+    let Some(devpath) = at else { return };
+    let Some(text) = find_dir(sys, &devpath[1..]).and_then(|d| d.lookup("uevent").ok()).map(|f| {
+        let mut b = alloc::vec![0u8; 512];
+        let n = f.read_at(0, &mut b).unwrap_or(0);
+        alloc::string::String::from_utf8_lossy(&b[..n]).into_owned()
+    }) else {
+        return;
+    };
+    let mut env = alloc::vec![alloc::string::String::from("SUBSYSTEM=block")];
+    env.extend(text.lines().filter(|l| !l.is_empty()).map(alloc::string::String::from));
+    crate::net::uevent::announce(action, &devpath, &env);
 }
 
 /// A partition went away (after a rescan).
 pub fn block_removed(name: &str) {
+    if let Some(sys) = SYSFS.lock().clone() {
+        announce_block(&sys, name, "remove");
+    }
     let dev = DEVFS.lock().clone();
     if let Some(dev) = dev {
         let _ = dev.unlink(name);
@@ -1439,6 +1515,7 @@ pub fn block_changed(name: &str) {
     };
     if let Ok(dir) = dir {
         sysfs_holds(&dir, &info);
+        announce_block(&sys, name, "change");
     }
 }
 
@@ -1475,6 +1552,19 @@ pub fn sysfs_root() -> Arc<dyn vfs::Inode> {
         && crate::arch::efi::available()
     {
         let _ = efi.mkdir("efivars", 0o755);
+    }
+    // /sys/class/tty/tty0/active: the virtual console in front (ADR 0185),
+    // as sysfs-tty in Linux's ABI documentation describes it.
+    if let Ok(class) = root.lookup("class")
+        && let Ok(tty) = class.mkdir("tty", 0o755)
+        && let Ok(t0) = tty.mkdir("tty0", 0o755)
+    {
+        let _ = tmpfs::create_generated(
+            &t0,
+            "active",
+            0o444,
+            Arc::new(|o: &mut Vec<u8>| o.extend_from_slice(alloc::format!("tty{}\n", vt::active()).as_bytes())),
+        );
     }
     for i in crate::block::list() {
         sysfs_block(&root, &i);

@@ -443,6 +443,11 @@ pub struct Dentry {
     referenced: core::sync::atomic::AtomicBool,
     /// Names this directory doesn't have (negative entries).
     missing: IrqSpinLock<dcache::Misses>,
+    /// Names forgotten so far (unlink, rmdir, rename), counted under the
+    /// children's lock: a lookup that raced one of them doesn't cache
+    /// what it found, which may be gone (a stale positive entry made
+    /// mkdir fail with EEXIST after rmdir).
+    removals: core::sync::atomic::AtomicU64,
 }
 
 /// The dentries that cache names for each directory inode (by its
@@ -508,6 +513,7 @@ impl Dentry {
             aliased: core::sync::atomic::AtomicBool::new(false),
             referenced: core::sync::atomic::AtomicBool::new(true),
             missing: IrqSpinLock::new(dcache::Misses::default()),
+            removals: core::sync::atomic::AtomicU64::new(0),
         })
     }
 
@@ -559,6 +565,7 @@ impl Dentry {
         }
         // A miss cached, or the generation a miss found now is noted at.
         let misses = !uncached && self.inode.cache_misses();
+        let removals = self.removals.load(core::sync::atomic::Ordering::Acquire);
         let generation = if misses {
             self.alias();
             self.missing.lock().check(name)?
@@ -582,7 +589,12 @@ impl Dentry {
             }
         } else {
             self.alias();
-            self.children.lock().insert(String::from(name), d.clone());
+            let mut children = self.children.lock();
+            // Cached only if nothing was forgotten since the lookup began
+            // (it may have found what was being removed).
+            if self.removals.load(core::sync::atomic::Ordering::Acquire) == removals {
+                children.insert(String::from(name), d.clone());
+            }
         }
         Ok(d.mount_top())
     }
@@ -643,7 +655,11 @@ impl Dentry {
     /// stay valid.
     /// The other dentries of this directory forget it too ([`ALIASES`]).
     pub fn forget(&self, name: &str) {
-        let gone = self.children.lock().remove(name);
+        let gone = {
+            let mut children = self.children.lock();
+            self.removals.fetch_add(1, core::sync::atomic::Ordering::AcqRel);
+            children.remove(name)
+        };
         if let Some(d) = gone {
             d.prune();
         }
@@ -656,7 +672,11 @@ impl Dentry {
             .unwrap_or_default();
         for o in &others {
             if !core::ptr::eq(Arc::as_ptr(o), self) {
-                let gone = o.children.lock().remove(name);
+                let gone = {
+                    let mut children = o.children.lock();
+                    o.removals.fetch_add(1, core::sync::atomic::Ordering::AcqRel);
+                    children.remove(name)
+                };
                 if let Some(d) = gone {
                     d.prune();
                 }

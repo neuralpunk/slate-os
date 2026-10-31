@@ -560,6 +560,13 @@ pub fn uevent_listen(groups: u32) -> Result<i32> {
     Ok(fd)
 }
 
+/// Send `data` to the uevent multicast groups in `groups` (udev's
+/// re-announcements go to group 2; the kernel wants CAP_NET_ADMIN).
+pub fn uevent_send(fd: i32, data: &[u8], groups: u32) -> Result<usize> {
+    let addr = netlink_addr(0, groups);
+    crate::syscall!(sys::pick(sys::SENDTO, nr::SENDTO), fd, data.as_ptr(), data.len(), 0, addr.as_ptr(), addr.len())
+}
+
 /// Receive one uevent message: its length and the sender's port (0: the
 /// kernel).
 pub fn uevent_recv(fd: i32, buf: &mut [u8]) -> Result<(usize, u32)> {

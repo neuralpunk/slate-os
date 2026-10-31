@@ -132,6 +132,8 @@ pub struct Process {
     cpu_limit_ns: [AtomicU64; 2],
     /// One more than the CPU second SIGXCPU was last sent for.
     cpu_limit_signalled: AtomicU64,
+    /// RLIMIT_RTTIME's soft and hard limits in nanoseconds, for the tick.
+    rt_limit_ns: [AtomicU64; 2],
     /// /proc/<pid>/oom_score_adj (-1000 to 1000; proc(5)).
     pub oom_score_adj: AtomicI32,
     /// When the out-of-memory killer chose this process (monotonic ns; 0:
@@ -312,6 +314,7 @@ impl Process {
             limits: IrqSpinLock::new(rlimit::Limits::defaults()),
             cpu_limit_ns: [AtomicU64::new(u64::MAX), AtomicU64::new(u64::MAX)],
             cpu_limit_signalled: AtomicU64::new(0),
+            rt_limit_ns: [AtomicU64::new(u64::MAX), AtomicU64::new(u64::MAX)],
             oom_score_adj: AtomicI32::new(0),
             oom_killed_at: AtomicU64::new(0),
             threads: IrqSpinLock::new(Vec::new()),
@@ -880,6 +883,7 @@ pub fn fork_with(
     *child.limits.lock() = parent.limits.lock().clone();
     for i in 0..2 {
         child.cpu_limit_ns[i].store(parent.cpu_limit_ns[i].load(Ordering::Relaxed), Ordering::Relaxed);
+        child.rt_limit_ns[i].store(parent.rt_limit_ns[i].load(Ordering::Relaxed), Ordering::Relaxed);
     }
     child.oom_score_adj.store(parent.oom_score_adj.load(Ordering::Relaxed), Ordering::Relaxed);
     if share_files && vfork {

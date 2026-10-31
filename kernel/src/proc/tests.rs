@@ -51,6 +51,8 @@ pub const TESTS: &[Test] = &[
     Test { name: "user::net", run: net },
     Test { name: "user::tcp", run: tcp },
     Test { name: "user::unix", run: unix },
+    Test { name: "user::uevent", run: uevent },
+    Test { name: "user::vt", run: vt },
     Test { name: "user::rtnl", run: rtnl },
     Test { name: "user::sockopts", run: sockopts },
     Test { name: "user::nftables", run: nftables },
@@ -268,6 +270,17 @@ fn sockopts() -> Result<(), &'static str> {
 
 fn unix() -> Result<(), &'static str> {
     ensure(run("unix", &[b"unix"])? == wait_status_exited(0), "AF_UNIX/netlink checks failed")
+}
+
+/// tests/user/uevent.c: uevent sockets keep to their network namespace
+/// (ADR 0185).
+fn uevent() -> Result<(), &'static str> {
+    ensure(run("uevent", &[b"uevent", b"check"])? == wait_status_exited(0), "uevent namespace checks failed")
+}
+
+/// tests/user/vt.c: the virtual consoles' ioctls and switching (ADR 0185).
+fn vt() -> Result<(), &'static str> {
+    ensure(run("vt", &[b"vt"])? == wait_status_exited(0), "virtual console checks failed")
 }
 
 fn tcp() -> Result<(), &'static str> {

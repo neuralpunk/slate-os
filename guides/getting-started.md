@@ -254,6 +254,6 @@ runtime AppImages run on, from Flathub.
 ## What isn't there yet
 
 SlateOS is young, and some things aren't supported yet: Wi-Fi (use a
-wired connection or a USB Ethernet adapter), sound, sleep, and
-Bluetooth keyboards, mice and headphones. The installation guide's
+wired connection or a USB Ethernet adapter), sound over HDMI and from
+USB microphones, sleep, and Bluetooth keyboards, mice and headphones. The installation guide's
 "What SlateOS runs on" lists the hardware SlateOS works with.

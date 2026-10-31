@@ -77,6 +77,7 @@ const SUITES: &[&[Test]] = &[
     crate::fs::efivarfs::TESTS,
     crate::fs::tmpfs::TESTS,
     crate::fs::vfs::dcache::TESTS,
+    crate::net::uevent::TESTS,
 ];
 
 /// Mark the kernel as running in test mode (so a panic exits QEMU with a

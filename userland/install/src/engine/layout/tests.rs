@@ -240,6 +240,16 @@ fn beside_windows_shares_its_esp() {
     let conf = String::from_utf8(read_file(&esp, "boot/limine/limine.conf")).unwrap();
     assert_eq!(slate_esp::titles(&conf), ["Slate", "Windows Boot Manager"]);
     assert!(conf.contains(&std::format!("cmdline: root=PARTUUID={} quiet\n", plan.root_partuuid())), "{conf}");
+    // With the desktop, quiet once (the boot splash, ADR 0186); without
+    // it or anything else, nothing more.
+    let quiet = crate::engine::limine_conf(&crate::engine::Plan { desktop: true, ..plan.clone() });
+    assert!(quiet.contains(&std::format!("cmdline: root=PARTUUID={} quiet\n", plan.root_partuuid())), "{quiet}");
+    let plain = crate::engine::Plan { desktop: true, cmdline_extra: String::new(), ..plan.clone() };
+    assert!(
+        crate::engine::limine_conf(&plain).contains(&std::format!("root=PARTUUID={} quiet\n", plan.root_partuuid()))
+    );
+    let text = crate::engine::Plan { desktop: false, cmdline_extra: String::new(), ..plan.clone() };
+    assert!(!crate::engine::limine_conf(&text).contains("quiet"));
     assert!(
         conf.ends_with("/Windows Boot Manager\n    protocol: efi\n    path: boot():/EFI/Microsoft/Boot/bootmgfw.efi\n")
     );

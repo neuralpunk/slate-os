@@ -58,6 +58,9 @@ pub fn try_scenario(o: &Opts) -> Result {
             }
             con.wait_for("strata: 1280x800 at scale 1", 60)?;
             con.wait_for("strata: live session for live", 10)?;
+            // The live login has its runtime directory, and with no
+            // Linux runtime yet Strata looks for one later (ADR 0185).
+            con.wait_for("strata: sound: waiting for the Linux runtime", 15)?;
             pause(1500);
             let shot = screendump(&mon, "try-desktop.ppm")?;
             if ppm_pixel(&shot, 640, 300)? != DESKTOP {
@@ -65,7 +68,14 @@ pub fn try_scenario(o: &Opts) -> Result {
             }
             Ok(())
         };
+        // The boot splash (ADR 0186): the stick boots quiet; the installer
+        // taking the screen ends it.
         welcome(&mut con, false)?;
+        for line in ["splash: shown", "splash: ended (a program took the screen)"] {
+            if con.last_line_with(line).is_none() {
+                return Err(format!("the boot splash: no {line:?}"));
+            }
+        }
         // The launcher's "Install SlateOS": the installer again.
         monitor(&mon, &["sendkey meta_l-spc"])?;
         pause(500);

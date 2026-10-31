@@ -109,6 +109,16 @@ pub fn boot(workbench: &Path, mon: Option<&Path>, gpu: bool) -> Result<Console> 
 
 /// [`boot`], with `extra` on the kernel's command line too.
 pub fn boot_with(workbench: &Path, mon: Option<&Path>, gpu: bool, extra: &str) -> Result<Console> {
+    boot_full(workbench, mon, gpu, extra, None)
+}
+
+/// [`boot`] with an HD Audio card recording to `wav` (never the host's
+/// speakers).
+pub fn boot_with_sound(workbench: &Path, mon: Option<&Path>, wav: &Path) -> Result<Console> {
+    boot_full(workbench, mon, false, "", Some(wav))
+}
+
+fn boot_full(workbench: &Path, mon: Option<&Path>, gpu: bool, extra: &str, wav: Option<&Path>) -> Result<Console> {
     let o = Opts::default();
     let cmdline = format!("slate.compat=on {extra} {}", std::env::var("SLATE_DESKTOP_CMDLINE").unwrap_or_default());
     let img = image::build(&o, cmdline.trim(), "slate-desktop.img", image::Root::Disk)?;
@@ -116,6 +126,14 @@ pub fn boot_with(workbench: &Path, mon: Option<&Path>, gpu: bool, extra: &str) -
     crate::qemu::add_disk(&mut c, 0, workbench);
     if gpu {
         c.args(["-vga", "none", "-device", "virtio-gpu-pci"]);
+    }
+    match wav {
+        Some(w) => {
+            c.arg("-audiodev")
+                .arg(format!("wav,id=snd0,path={},out.frequency=48000,out.channels=2,out.format=s16", w.display()));
+            c.args(["-device", "intel-hda,id=sound0", "-device", "hda-duplex,audiodev=snd0,bus=sound0.0"]);
+        }
+        None => crate::qemu::sound_card(&mut c)?,
     }
     c.args(["-device", "virtio-tablet-pci", "-display", "none", "-serial", "stdio", "-monitor"]);
     match mon {

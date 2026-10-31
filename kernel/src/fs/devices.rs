@@ -38,6 +38,9 @@ pub fn open(rdev: u64, flags: u32) -> Result<Arc<dyn File>> {
             tty::open_tty(ctty, flags | super::O_NOCTTY)
         }
         (TTYAUX_MAJOR, CONSOLE_MINOR) | (TTY_MAJOR, TTYS0_MINOR) => tty::open_tty(tty::console().clone(), flags),
+        // The virtual consoles (ADR 0185): tty0 the one in front.
+        (TTY_MAJOR, 0) => tty::open_tty(super::vt::tty(super::vt::active()).ok_or(ENXIO)?, flags),
+        (TTY_MAJOR, n @ 1..=12) => tty::open_tty(super::vt::tty(n as usize).ok_or(ENXIO)?, flags),
         (tty::PTMX_MAJOR, tty::PTMX_MINOR) => tty::open_master(flags)?,
         (tty::PTS_MAJOR, n) => tty::open_slave(n, flags)?,
         (MISC_MAJOR, TUN_MINOR) => crate::net::tun::open(flags)?,
@@ -49,6 +52,8 @@ pub fn open(rdev: u64, flags: u32) -> Result<Arc<dyn File>> {
         }
         (crate::drivers::drm::DRM_MAJOR, n) => crate::drivers::drm::open(n, flags)?,
         (crate::drivers::input::INPUT_MAJOR, n) => crate::drivers::input::open(n, flags)?,
+        // Sound cards, /dev/snd (ADR 0184).
+        (slate_alsa::abi::SOUND_MAJOR, n) => crate::drivers::sound::open(n, flags)?,
         _ => return Err(ENXIO),
     })
 }

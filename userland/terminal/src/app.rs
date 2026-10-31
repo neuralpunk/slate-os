@@ -718,6 +718,8 @@ fn run(fonts: &Fonts<'_>, italics: &render::Italics<'_>) -> Result<(), String> {
         )
     };
     conn.set_hints(&win, cells(40.0, 10.0), cells(80.0, 24.0))?;
+    // Its text can be selected: a text beam over it (ADR 0186).
+    conn.set_cursor(&win, slate_strata_client::cursor::TEXT)?;
     // The size asked for arrives as a configure, in the loop.
     let metrics = Metrics::new(fonts, win.scale);
     steps(&mut conn, &win, &metrics)?;

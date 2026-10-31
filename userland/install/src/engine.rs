@@ -465,9 +465,13 @@ pub enum Step {
 /// with its kernel (`slate-update` adds the previous system after an
 /// update, ADR 0086). An encrypted root loads the unlock archive, and the
 /// keyboard layout goes on the command line for the unlock screen (ADR
-/// 0038).
+/// 0038). A system with the desktop boots `quiet`, behind the boot splash
+/// (ADR 0186).
 pub fn limine_conf(plan: &Plan) -> String {
     let mut extra = plan.cmdline_extra.clone();
+    if plan.desktop && !extra.split_whitespace().any(|w| w == "quiet") {
+        extra = format!("quiet {extra}").trim_end().into();
+    }
     if plan.encryption.is_some()
         && let Some(k) = plan.keyboard.as_deref().filter(|k| *k != "us")
     {

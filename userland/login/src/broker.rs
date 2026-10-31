@@ -1110,6 +1110,19 @@ fn login(f: &[&[u8]], fd: i32) -> Result<(), String> {
         log(&format!("{what}: denied (nologin)"));
         return Err("Logins are not allowed now.".into());
     }
+    // Their desktop is running, switched away from (ADR 0185): back to it
+    // rather than a second one, unlocked by this password.
+    if screen && let Some(vt) = running_session(u.uid) {
+        log(&format!("{what}: granted, back to their session on virtual console {vt}"));
+        let _ = fs::mkdir(UNLOCKS, 0o755);
+        let note = format!("{}\n", slate_rt::time::monotonic_ns());
+        let _ = fs::write_file(&unlock_path(u.uid), note.as_bytes(), 0o644);
+        io::write_all(fd, format!("switch {vt}\n").as_bytes()).map_err(|e| format!("{e}"))?;
+        // Once the login screen has let go of the seat.
+        let _ = read_message(fd, 5000);
+        crate::activate_vt(vt);
+        return Ok(());
+    }
     log(&format!("{what}: granted"));
     io::write_all(fd, b"ok\n").map_err(|e| format!("{e}"))?;
     match process::fork() {
@@ -1122,25 +1135,66 @@ fn login(f: &[&[u8]], fd: i32) -> Result<(), String> {
     }
 }
 
-/// The supervisor of a graphical login: wait for `start`, run the session,
-/// say `ended`.
+/// Desktop sessions running, a file per person (`UID`: "VT PID"), and
+/// the notes a login leaves for a session it brings back unlocked (ADR
+/// 0185): root's, so no one else can leave one.
+const SESSIONS: &[u8] = b"/run/slate-brokerd.sessions";
+const UNLOCKS: &[u8] = b"/run/slate-brokerd.unlock";
+
+fn session_path(uid: u32) -> Vec<u8> {
+    format!("/run/slate-brokerd.sessions/{uid}").into_bytes()
+}
+
+pub fn unlock_path(uid: u32) -> Vec<u8> {
+    format!("/run/slate-brokerd.unlock/{uid}").into_bytes()
+}
+
+/// The virtual console of `uid`'s desktop session, if it is running.
+fn running_session(uid: u32) -> Option<u32> {
+    let text = fs::read_file(&session_path(uid)).ok()?;
+    let text = String::from(lossy(&text));
+    let mut f = text.split_whitespace();
+    let (vt, pid): (u32, i32) = (f.next()?.parse().ok()?, f.next()?.parse().ok()?);
+    fs::exists(format!("/proc/{pid}").as_bytes()).then_some(vt)
+}
+
+/// The supervisor of a graphical login: wait for `start`, run the session
+/// (one on the screen on a virtual console of its own, ADR 0185), say
+/// `ended`.
 fn supervise(fd: i32, u: &db::User, what: &str, screen: bool) -> i32 {
     if read_message(fd, 30_000).as_deref() != Some(b"start") {
         return 1;
     }
+    let vt = if screen { crate::free_desktop_vt() } else { None };
+    if vt.is_some() {
+        crate::make_runtime_dir(u);
+    }
     let session = match process::fork() {
         Ok(0) => {
             pipe_default();
-            process::exit_now(crate::session_on_console(u, screen))
+            process::exit_now(crate::session_on_console(u, screen, vt))
         }
         Ok(pid) => pid,
         Err(_) => return 1,
     };
+    if let Some(vt) = vt {
+        let _ = fs::mkdir(SESSIONS, 0o755);
+        let _ = fs::write_file(&session_path(u.uid), format!("{vt} {session}\n").as_bytes(), 0o644);
+        log(&format!("{what}: session on virtual console {vt}"));
+    }
     let _ = process::wait(session, 0);
     slate_rt::utmp::logout(session);
     // The session's leftovers go with it.
     let _ = process::kill(-session, SIGHUP);
     log(&format!("{what}: session ended"));
+    if let Some(vt) = vt {
+        let _ = fs::unlink(&session_path(u.uid));
+        // The login screen again, unless another session is in front.
+        if crate::front_vt() == Some(vt) {
+            crate::activate_vt(1);
+        }
+    }
+    // The login screen may have gone (a session on the screen).
     let _ = io::write_all(fd, b"ended\n");
     0
 }

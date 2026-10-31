@@ -27,6 +27,7 @@ use crate::{Result, target_dir};
 const DESKTOP: &[&str] = &[
     "bin/strata",
     "bin/strata-keys",
+    "bin/strata-notify",
     "bin/strata-settings",
     "bin/strata-login",
     "bin/terminal",

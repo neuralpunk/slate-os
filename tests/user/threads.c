@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 // POSIX threads on Slate: clone(CLONE_THREAD), futexes, TLS, signals to
 // threads, concurrent memory changes (TLB shootdowns), fork and exit from
-// multi-threaded processes.
+// multi-threaded processes, threads named through /proc (musl's
+// pthread_setname_np writes /proc/self/task/TID/comm).
 #define _GNU_SOURCE
 #include <errno.h>
 #include <pthread.h>
@@ -63,6 +64,12 @@ static volatile pid_t signalled_tid;
 static void on_usr1(int s) {
     (void)s;
     signalled_tid = tid();
+}
+
+static void *napper(void *arg) {
+    (void)arg;
+    usleep(200000);
+    return NULL;
 }
 
 static volatile int stop_waiting;
@@ -230,11 +237,23 @@ int main(void) {
     pthread_t r;
     int ok = pthread_create(&r, NULL, race_stat, NULL) == 0;
     for (int i = 0; i < 20000 && ok; i++) {
-        ok = mkdir("/tmp/tmpfs-race/d", 0755) == 0 && rmdir("/tmp/tmpfs-race/d") == 0;
+        int m = mkdir("/tmp/tmpfs-race/d", 0755);
+        int e1 = errno;
+        int r = m == 0 ? rmdir("/tmp/tmpfs-race/d") : -1;
+        ok = m == 0 && r == 0;
+        if (!ok) printf("tmpfs race: round %d: mkdir %d (errno %d), rmdir %d (errno %d)\n", i, m, e1, r, errno);
     }
     race_done = 1;
     pthread_join(r, NULL);
     rmdir("/tmp/tmpfs-race");
     check("tmpfs_stat_while_adding", ok);
+    /* A thread's name, set and read back (proc(5)). */
+    pthread_t named;
+    pthread_create(&named, NULL, napper, NULL);
+    char nm[16] = "";
+    int named_set = pthread_setname_np(named, "data-loop.0");
+    int named_got = pthread_getname_np(named, nm, sizeof nm);
+    check("thread_name", named_set == 0 && named_got == 0 && !strcmp(nm, "data-loop.0"));
+    pthread_join(named, NULL);
     return failures;
 }

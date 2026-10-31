@@ -153,6 +153,10 @@ pub struct Thread {
     /// Run time weighted by nice: the order of normal threads in a run
     /// queue, relative to the queue's `min_vruntime`.
     pub(super) vruntime: AtomicU64,
+    /// Its CPU time (user and kernel) when it last blocked or became
+    /// real-time, for RLIMIT_RTTIME; and the SIGXCPUs sent since.
+    pub(super) rt_mark: AtomicU64,
+    pub(super) rt_signalled: AtomicU64,
 }
 
 // SAFETY: `rsp` is only accessed by the CPU switching this thread in or
@@ -251,6 +255,20 @@ impl Thread {
         )
     }
 
+    /// RLIMIT_RTTIME's count starts again: it blocked, or became
+    /// real-time.
+    pub(super) fn rt_restart(&self) {
+        let (u, s) = self.cpu_ns();
+        self.rt_mark.store(u + s, Ordering::Relaxed);
+        self.rt_signalled.store(0, Ordering::Relaxed);
+    }
+
+    /// The CPU time it has used since it last blocked (RLIMIT_RTTIME).
+    pub(super) fn rt_ran_ns(&self) -> u64 {
+        let (u, s) = self.cpu_ns();
+        (u + s).saturating_sub(self.rt_mark.load(Ordering::Relaxed))
+    }
+
     /// Its rank with a boost: what it lends to a lock owner.
     pub fn effective_rank(&self) -> u32 {
         self.rank().max(self.pi_boost.load(Ordering::Relaxed))
@@ -340,6 +358,8 @@ impl Thread {
             reset_on_fork: AtomicBool::new(false),
             pi_boost: AtomicU32::new(0),
             vruntime: AtomicU64::new(0),
+            rt_mark: AtomicU64::new(0),
+            rt_signalled: AtomicU64::new(0),
         }
     }
 

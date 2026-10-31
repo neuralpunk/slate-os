@@ -19,6 +19,7 @@ bench = false
 slate-rt = { path = "../rt" }
 slate-ui = { path = "../ui" }
 slate-abi = { path = "../../libs/abi" }
+slate-strata-client = { path = "../strata-client" }
 
 [lints]
 workspace = true

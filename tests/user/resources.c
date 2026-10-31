@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 // Resource control (M19 phase 5, ADR 0045): resource limits, nice values
-// and real-time policies, CPU time measured by the clock, the load
+// and real-time policies (with sched_setattr, RLIMIT_RTTIME and real-time
+// threads moving to a CPU where they run at once: ADR 0184), CPU time
+// measured by the clock, the load
 // average, priority-inheritance and robust futexes, FUTEX_WAKE_OP, and the
 // cgroup memory.max (with the out-of-memory killer) and cpu.max limits.
 // Runs as root on Slate; never run it on the host (it makes cgroups).
@@ -401,10 +403,196 @@ static int policy_child(void) {
     return 0;
 }
 
+/* sched_setattr(2)'s structure: the man page's layout, 56 bytes with the
+ * utilization hints; flags 0x01 SCHED_FLAG_RESET_ON_FORK, 0x10
+ * KEEP_PARAMS (values seen on Linux). */
+struct sched_attr_ {
+    uint32_t size, policy;
+    uint64_t flags;
+    int32_t nice;
+    uint32_t priority;
+    uint64_t runtime, deadline, period;
+    uint32_t util_min, util_max;
+    uint8_t extra[8];
+};
+
+static long setattr(struct sched_attr_ *a) {
+    return syscall(SYS_sched_setattr, 0, a, 0);
+}
+
+static int attr_child(void) {
+    struct sched_attr_ a;
+    memset(&a, 0xff, sizeof a);
+    CHILD_CHECK("getattr", syscall(SYS_sched_getattr, 0, &a, sizeof a, 0) == 0 && a.size == 56 && a.policy == 0 &&
+                               a.nice == 0 && a.util_max == 1024 && a.extra[0] == 0);
+    memset(&a, 0, sizeof a);
+    a.size = 48;
+    a.policy = SCHED_FIFO;
+    a.priority = 12;
+    CHILD_CHECK("set_fifo", setattr(&a) == 0 && get_sched() == SCHED_FIFO && get_param() == 12);
+    memset(&a, 0, sizeof a);
+    a.size = 48;
+    a.policy = SCHED_OTHER;
+    a.nice = 3;
+    CHILD_CHECK("set_other", setattr(&a) == 0 && get_sched() == SCHED_OTHER && getpriority(PRIO_PROCESS, 0) == 3);
+    memset(&a, 0, sizeof a);
+    CHILD_CHECK("getattr_48",
+                syscall(SYS_sched_getattr, 0, &a, 48, 0) == 0 && a.size == 48 && a.nice == 3 && a.policy == 0);
+    memset(&a, 0, sizeof a);
+    a.size = 48;
+    a.policy = SCHED_OTHER;
+    a.flags = 0x10; /* KEEP_PARAMS: nice stays 3 */
+    a.nice = 9;
+    CHILD_CHECK("keep_params", setattr(&a) == 0 && getpriority(PRIO_PROCESS, 0) == 3);
+    memset(&a, 0, sizeof a);
+    a.size = 48;
+    a.flags = 0x80;
+    CHILD_CHECK("bad_flag", setattr(&a) < 0 && errno == EINVAL);
+    memset(&a, 0, sizeof a);
+    a.size = 40;
+    CHILD_CHECK("small", setattr(&a) < 0 && errno == E2BIG && a.size == 56);
+    memset(&a, 0, sizeof a);
+    a.size = sizeof a;
+    a.extra[2] = 1;
+    CHILD_CHECK("big_nonzero", setattr(&a) < 0 && errno == E2BIG && a.size == 56);
+    memset(&a, 0, sizeof a);
+    a.size = 48;
+    a.policy = 6; /* SCHED_DEADLINE: not offered */
+    CHILD_CHECK("deadline", setattr(&a) < 0 && errno == EINVAL);
+    memset(&a, 0, sizeof a);
+    a.size = 48;
+    a.policy = SCHED_RR;
+    a.flags = 0x01;
+    a.priority = 4;
+    CHILD_CHECK("reset_flag", setattr(&a) == 0 && get_sched() == (SCHED_RR | SCHED_RESET_ON_FORK));
+    memset(&a, 0, sizeof a);
+    CHILD_CHECK("getattr_flags", syscall(SYS_sched_getattr, 0, &a, 56, 0) == 0 && a.flags == 1 && a.priority == 4);
+    CHILD_CHECK("getattr_small", syscall(SYS_sched_getattr, 0, &a, 40, 0) < 0 && errno == EINVAL);
+    return 0;
+}
+
+static volatile int rt_xcpus;
+static void on_rt_xcpu(int sig) {
+    (void)sig;
+    rt_xcpus++;
+}
+
+/* Spin for `ms` of wall time without a system call (the clock is the
+ * vDSO's), so the thread never blocks. */
+static void spin_quiet(int ms) {
+    struct timespec t;
+    clock_gettime(CLOCK_MONOTONIC, &t);
+    long long until = t.tv_sec * 1000000000LL + t.tv_nsec + ms * 1000000LL;
+    for (;;) {
+        clock_gettime(CLOCK_MONOTONIC, &t);
+        if (t.tv_sec * 1000000000LL + t.tv_nsec >= until) break;
+    }
+}
+
+/* RLIMIT_RTTIME (getrlimit(2)): a real-time thread that runs past the soft
+ * limit without blocking gets SIGXCPU, once until a second more passes. */
+static int rttime_soft_child(void) {
+    struct rlimit r = {50000, 5000000}; /* 50 ms, 5 s (microseconds) */
+    CHILD_CHECK("set", setrlimit(RLIMIT_RTTIME, &r) == 0);
+    signal(SIGXCPU, on_rt_xcpu);
+    CHILD_CHECK("fifo", set_sched(SCHED_FIFO, 10) == 0);
+    spin_quiet(300);
+    int seen = rt_xcpus;
+    set_sched(SCHED_OTHER, 0);
+    if (seen != 1) printf("rttime: %d SIGXCPUs\n", seen);
+    CHILD_CHECK("one_sigxcpu", seen == 1);
+    return 0;
+}
+
+/* Past the hard limit, SIGKILL; blocking starts the count again. */
+static int rttime_hard_child(void) {
+    struct rlimit r = {100000, 150000}; /* 100 ms, 150 ms */
+    if (setrlimit(RLIMIT_RTTIME, &r) != 0) return 2;
+    signal(SIGXCPU, SIG_IGN);
+    if (set_sched(SCHED_FIFO, 10) != 0) return 3;
+    /* 100 ms at a time, sleeping between: never killed. */
+    for (int i = 0; i < 4; i++) {
+        spin_quiet(80);
+        usleep(1000);
+    }
+    spin_quiet(1000);
+    return 4; /* should have been killed */
+}
+
+/* A real-time thread whose CPU a higher one holds runs elsewhere at once
+ * (ADR 0184): with every CPU busy with normal work and a FIFO 50 thread
+ * spinning on CPU 0, a FIFO 40 thread that last ran there wakes from
+ * 1 ms sleeps on time instead of waiting for it. */
+static volatile int hog_go, hog_stop;
+static void *hog(void *arg) {
+    (void)arg;
+    cpu_set_t one;
+    CPU_ZERO(&one);
+    CPU_SET(0, &one);
+    sched_setaffinity(0, sizeof one, &one);
+    struct sched_param sp = {.sched_priority = 50};
+    pthread_setschedparam(pthread_self(), SCHED_FIFO, &sp);
+    hog_go = 1;
+    /* At most 2 s, so a thread left waiting behind it fails, not hangs. */
+    long long until = now_ns(CLOCK_MONOTONIC) + 2000000000LL;
+    while (!hog_stop && now_ns(CLOCK_MONOTONIC) < until) {
+    }
+    return 0;
+}
+
+static int rt_push_child(void) {
+    int n = get_nprocs();
+    if (n < 2) return 0;
+    pid_t spinners[64];
+    int k = n < 64 ? n : 64;
+    for (int i = 0; i < k; i++) {
+        spinners[i] = fork();
+        if (spinners[i] == 0) {
+            for (;;) {
+            }
+        }
+    }
+    /* This thread last runs on CPU 0. */
+    cpu_set_t one, all;
+    CPU_ZERO(&one);
+    CPU_SET(0, &one);
+    CPU_ZERO(&all);
+    for (int i = 0; i < n && i < CPU_SETSIZE; i++) CPU_SET(i, &all);
+    sched_setaffinity(0, sizeof one, &one);
+    CHILD_CHECK("fifo", set_sched(SCHED_FIFO, 40) == 0);
+    pthread_t h;
+    pthread_create(&h, 0, hog, 0);
+    while (!hog_go) usleep(1000);
+    sched_setaffinity(0, sizeof all, &all);
+    long long worst = 0;
+    for (int i = 0; i < 50; i++) {
+        long long t0 = now_ns(CLOCK_MONOTONIC);
+        usleep(1000);
+        long long late = now_ns(CLOCK_MONOTONIC) - t0 - 1000000;
+        if (late > worst) worst = late;
+    }
+    hog_stop = 1;
+    pthread_join(h, 0);
+    set_sched(SCHED_OTHER, 0);
+    for (int i = 0; i < k; i++) {
+        kill(spinners[i], SIGKILL);
+        waitpid(spinners[i], 0, 0);
+    }
+    printf("rt_push: worst wake-up %lld us late\n", worst / 1000);
+    CHILD_CHECK("on_time", worst < 20000000LL);
+    return 0;
+}
+
 static void priorities(void) {
     check("nice", in_child(nice_child) == 0);
     check("rlimit_nice", in_child(nice_rlimit_child) == 0);
     check("policies", in_child(policy_child) == 0);
+    check("setattr", in_child(attr_child) == 0);
+    check("rttime_soft", in_child(rttime_soft_child) == 0);
+    int st = in_child(rttime_hard_child);
+    if (!(WIFSIGNALED(st) && WTERMSIG(st) == SIGKILL)) printf("rttime_hard: status %#x\n", st);
+    check("rttime_hard", WIFSIGNALED(st) && WTERMSIG(st) == SIGKILL);
+    check("rt_push", in_child(rt_push_child) == 0);
     check("priority_range", sched_get_priority_max(SCHED_FIFO) == 99 && sched_get_priority_min(SCHED_RR) == 1);
     check("prio_user", setpriority(PRIO_USER, 4242, 1) < 0 && errno == ESRCH);
 }

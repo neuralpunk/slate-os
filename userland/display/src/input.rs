@@ -58,6 +58,8 @@ pub const KEY_Q: u16 = 16;
 pub const KEY_E: u16 = 18;
 /// L (super + L locks, ADR 0039).
 pub const KEY_L: u16 = 38;
+/// S (super + S opens quick settings, ADR 0186).
+pub const KEY_S: u16 = 31;
 pub const KEY_UP: u16 = 103;
 pub const KEY_LEFT: u16 = 105;
 pub const KEY_RIGHT: u16 = 106;
@@ -235,6 +237,31 @@ impl Device {
 }
 
 /// Every input device, and the state their events build up.
+/// How the pointer feels (ADR 0186).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Feel {
+    /// From -2 (slowest) to 2 (fastest); 0 moves as the mouse reports.
+    pub speed: i8,
+    /// The wheel moves the content, not the view.
+    pub natural: bool,
+    /// The mouse's buttons swapped.
+    pub left_handed: bool,
+}
+
+impl Feel {
+    /// What relative motion is multiplied by: half to twice, in five
+    /// steps of a square root of two.
+    pub fn factor(&self) -> f32 {
+        match self.speed.clamp(-2, 2) {
+            -2 => 0.5,
+            -1 => 0.707,
+            0 => 1.0,
+            1 => 1.414,
+            _ => 2.0,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct Inputs {
     devices: Vec<Device>,
@@ -254,6 +281,12 @@ pub struct Inputs {
     pub displays_changed: bool,
     /// Some pointing device has moved.
     pub pointer_seen: bool,
+    /// How the person likes the pointer (ADR 0186): its speed, the wheel's
+    /// direction, the buttons' sides.
+    pub feel: Feel,
+    /// Some device reported anything (a modifier alone too) since the
+    /// program last took it: the screen wakes (ADR 0186).
+    activity: bool,
     moved: bool,
     /// The key being held for repeat, and when it repeats next (ns).
     held: Option<(u16, i64)>,
@@ -264,6 +297,10 @@ pub struct Inputs {
     pub rescan_ns: i64,
     /// seatd's seat, for a program that is not root.
     seat: Option<crate::seat::Seat>,
+    /// The session is in front (seatd enabled it; ADR 0185).
+    seat_active: bool,
+    /// The session went away (false) or came back (true) since asked.
+    seat_change: Option<bool>,
     /// The kernel's uevent socket, when devices are opened as they come.
     uevents: Option<i32>,
     /// When the newest event of the last wait happened (monotonic ns;
@@ -322,12 +359,16 @@ impl Inputs {
             areas: Vec::new(),
             displays_changed: false,
             pointer_seen: false,
+            feel: Feel::default(),
+            activity: false,
             moved: false,
             held: None,
             logo_alone: false,
             last_scan: 0,
             rescan_ns: 1_000_000_000,
             seat,
+            seat_active: true,
+            seat_change: None,
             uevents: None,
             stamp: 0,
         };
@@ -338,12 +379,71 @@ impl Inputs {
     /// Open devices that have appeared (USB keyboards come late).
     fn scan(&mut self) {
         self.last_scan = now_ns();
+        if !self.seat_active {
+            return;
+        }
         for e in fs::read_dir(b"/dev/input").unwrap_or_default() {
             if e.name.starts_with(b"event")
                 && !self.devices.iter().any(|d| d.name == e.name)
                 && let Some(d) = Device::open(&e.name, self.seat.as_mut())
             {
                 self.devices.push(d);
+            }
+        }
+    }
+
+    /// Whether the session stepped aside (`Some(false)`: stop drawing) or
+    /// came back to the front (`Some(true)`: light the displays again)
+    /// since the last call (ADR 0185).
+    pub fn take_seat_change(&mut self) -> Option<bool> {
+        self.seat_change.take()
+    }
+
+    /// Whether the session is in front.
+    pub fn seat_active(&self) -> bool {
+        self.seat_active
+    }
+
+    /// Whether there is a seat to switch sessions on.
+    pub fn has_seat(&self) -> bool {
+        self.seat.is_some()
+    }
+
+    /// Ask seatd for the session on virtual console `vt` (Ctrl+Alt+Fn,
+    /// "Switch person").
+    pub fn switch_session(&mut self, vt: i32) {
+        if let Some(s) = self.seat.as_mut() {
+            s.switch_session(vt);
+        }
+    }
+
+    /// What seatd said: step aside (the devices go; seatd revokes them
+    /// anyway) or come back (they are opened again).
+    fn seat_events(&mut self) {
+        let Some(seat) = self.seat.as_mut() else { return };
+        for e in seat.events() {
+            match e {
+                crate::seat::SeatEvent::Disable => {
+                    for d in self.devices.drain(..) {
+                        let _ = io::close(d.fd);
+                    }
+                    self.held = None;
+                    self.mods = Mods::default();
+                    self.shifts = [false; 2];
+                    self.seat_active = false;
+                    self.seat_change = Some(false);
+                    if let Some(s) = self.seat.as_mut() {
+                        s.disabled();
+                    }
+                }
+                crate::seat::SeatEvent::Enable => {
+                    self.seat_active = true;
+                    self.seat_change = Some(true);
+                    self.scan();
+                }
+            }
+            if self.seat.is_none() {
+                break;
             }
         }
     }
@@ -435,12 +535,23 @@ impl Inputs {
             self.devices.iter().map(|d| io::PollFd { fd: d.fd, events: io::POLLIN, revents: 0 }).collect();
         let devices = fds.len();
         fds.extend(extra.iter().map(|p| io::PollFd { revents: 0, ..*p }));
+        let seat_at = fds.len();
+        if let Some(s) = self.seat.as_ref() {
+            fds.push(io::PollFd { fd: s.fd(), events: io::POLLIN, revents: 0 });
+        }
         if let Some(fd) = self.uevents {
             fds.push(io::PollFd { fd, events: io::POLLIN, revents: 0 });
         }
         let _ = io::poll(&mut fds, timeout);
         for (e, p) in extra.iter_mut().zip(&fds[devices..]) {
             e.revents = p.revents;
+        }
+        if self.seat.is_some() && fds.get(seat_at).is_some_and(|p| p.revents != 0) {
+            self.seat_events();
+            // The devices changed under the descriptors polled.
+            if self.seat_change.is_some() {
+                return out;
+            }
         }
         // A device added: open it now ("ACTION@DEVPATH", then KEY=value
         // fields; SUBSYSTEM=input for event devices).
@@ -507,12 +618,30 @@ impl Inputs {
         out
     }
 
+    /// Whether anything came from a device since the last call.
+    pub fn take_activity(&mut self) -> bool {
+        core::mem::take(&mut self.activity)
+    }
+
     fn event(&mut self, dev: usize, ty: u16, code: u16, value: i32, out: &mut Vec<Input>) {
+        if ty != EV_SYN {
+            self.activity = true;
+        }
         // A button or the wheel with the logo key down makes it no tap.
         if matches!((ty, code), (EV_KEY, BTN_LEFT | BTN_TOUCH | BTN_MIDDLE | BTN_RIGHT) | (EV_REL, REL_WHEEL)) {
             self.logo_alone = false;
         }
         match (ty, code) {
+            // Left-handed: a mouse's right button is the first, its left
+            // one opens menus (touches and tablets as they are).
+            (EV_KEY, BTN_LEFT | BTN_RIGHT) if self.feel.left_handed => {
+                let swapped = if code == BTN_LEFT { BTN_RIGHT } else { BTN_TOUCH };
+                let mut f = self.feel;
+                f.left_handed = false;
+                let saved = core::mem::replace(&mut self.feel, f);
+                self.event(dev, ty, swapped, value, out);
+                self.feel = saved;
+            }
             (EV_KEY, BTN_LEFT | BTN_TOUCH) => {
                 let (x, y) = self.pointer;
                 out.push(Input::Pointer(if value != 0 { Event::PointerDown(x, y) } else { Event::PointerUp(x, y) }));
@@ -524,12 +653,14 @@ impl Inputs {
             }
             (EV_KEY, _) => self.key(code, value, out),
             // evdev's REL_WHEEL is positive away from the person.
+            // Natural scrolling turns it round: the content follows the wheel.
             (EV_REL, REL_WHEEL) if value != 0 => {
                 let (x, y) = self.pointer;
-                out.push(Input::Wheel { lines: -value, x, y });
+                let lines = if self.feel.natural { value } else { -value };
+                out.push(Input::Wheel { lines, x, y });
             }
-            (EV_REL, REL_X) => self.move_by(value as f32, 0.0),
-            (EV_REL, REL_Y) => self.move_by(0.0, value as f32),
+            (EV_REL, REL_X) => self.move_by(value as f32 * self.feel.factor(), 0.0),
+            (EV_REL, REL_Y) => self.move_by(0.0, value as f32 * self.feel.factor()),
             (EV_ABS, ABS_X | ABS_Y) => {
                 let Some(ranges) = self.devices[dev].abs else { return };
                 let axis = usize::from(code == ABS_Y);
@@ -639,6 +770,33 @@ mod tests {
         i.event(0, EV_KEY, BTN_LEFT, 0, &mut out);
         i.key(KEY_LEFTMETA, 0, &mut out);
         assert!(!out.iter().any(|e| matches!(e, Input::Key { .. })));
+    }
+
+    #[test]
+    fn the_pointer_as_liked() {
+        let mut i = Inputs::new(1000, 800);
+        let mut out = Vec::new();
+        i.pointer = (100.0, 100.0);
+        i.feel.speed = 2;
+        i.event(0, EV_REL, REL_X, 10, &mut out);
+        assert_eq!(i.pointer.0, 120.0);
+        i.feel.speed = -2;
+        i.event(0, EV_REL, REL_Y, 10, &mut out);
+        assert_eq!(i.pointer.1, 105.0);
+        // The wheel turned round.
+        i.event(0, EV_REL, REL_WHEEL, 1, &mut out);
+        i.feel.natural = true;
+        i.event(0, EV_REL, REL_WHEEL, 1, &mut out);
+        let lines: Vec<i32> =
+            out.iter().filter_map(|e| if let Input::Wheel { lines, .. } = e { Some(*lines) } else { None }).collect();
+        assert_eq!(lines, [-1, 1]);
+        // Left-handed: the right button clicks, the left opens menus.
+        out.clear();
+        i.feel.left_handed = true;
+        i.event(0, EV_KEY, BTN_RIGHT, 1, &mut out);
+        i.event(0, EV_KEY, BTN_LEFT, 1, &mut out);
+        assert!(matches!(out[0], Input::Pointer(Event::PointerDown(..))));
+        assert!(matches!(out[1], Input::Button { button: 3, down: true, .. }));
     }
 
     /// German's dead acute: a press that types nothing, then é; then ´

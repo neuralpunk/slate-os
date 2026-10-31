@@ -1768,6 +1768,10 @@ impl DrmFile {
             drop(st);
             let display = &self.dev.display;
             if work.iter().any(|w| w.present.is_some()) {
+                // The disk's password asked for on the screen: the boot
+                // splash comes back after it (ADR 0186).
+                let unlock = crate::proc::current().is_some_and(|p| p.name.lock().as_str() == "slate-unlock");
+                crate::drivers::fbcon::splash_pause(unlock);
                 crate::drivers::fbcon::set_suspended(true);
             }
             for (i, w) in work.into_iter().enumerate() {

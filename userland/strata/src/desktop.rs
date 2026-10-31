@@ -34,10 +34,20 @@ pub struct Status {
     pub battery: Option<u8>,
     /// Updates the last check found (the Software Updater's count).
     pub updates: usize,
+    /// The volume in percent and whether it is muted; None without a
+    /// sound card (ADR 0186).
+    pub volume: Option<(u32, bool)>,
 }
 
 /// How far a window's shadow reaches beyond its frame.
 pub const SHADOW_REACH: f32 = 80.0;
+
+/// Where a window's frame is seen: at `seen` (its glide, or its place),
+/// scaled by `scale` about its middle and shifted down `dy` (ADR 0186).
+pub fn mapped(seen: Area, scale: f32, dy: f32) -> Area {
+    let (w, h) = (seen.w * scale, seen.h * scale);
+    Area::new(seen.x + (seen.w - w) / 2.0, seen.y + (seen.h - h) / 2.0 + dy, w, h)
+}
 
 /// Whether two areas overlap.
 pub fn overlaps(a: &Area, b: &Area) -> bool {
@@ -206,6 +216,34 @@ pub struct Extras<'a> {
     pub drag_badge: Option<(f32, f32, usize, bool)>,
     /// A window being resized: its size in steps is shown.
     pub resizing: Option<WinId>,
+    /// Closed windows still fading (ADR 0186), drawn over the rest.
+    pub ghosts: &'a [Ghost],
+    /// How far the snap preview has faded in (1 when None).
+    pub preview_in: Option<f32>,
+    /// The size (logical) of what gliding windows' apps last drew.
+    pub drawn_sizes: &'a [(WinId, (f32, f32))],
+    /// The title bar button held down, and the top bar's control.
+    pub pressed: Option<(WinId, TitleButton)>,
+    pub bar_pressed: Option<Area>,
+    /// An app being opened: its name and the spinner's step.
+    pub opening: Option<(&'a str, u8)>,
+    /// Quick settings are open (ADR 0186).
+    pub quick: bool,
+    /// The battery's percentage hidden from the top bar (a setting).
+    pub hide_battery_percent: bool,
+    /// The volume keys' pop-up and its opacity.
+    pub osd: Option<(&'a crate::quick::Osd, f32)>,
+    /// The notifications, for their banners and the top bar's mark, the
+    /// time, and whether motion is reduced.
+    pub notes: Option<(&'a crate::notes::Notes, i64, bool)>,
+}
+
+/// A closed window as it was: drawn, fading and shrinking, from its last
+/// contents (which the session keeps) until its motion ends (ADR 0186).
+#[derive(Clone, Debug)]
+pub struct Ghost {
+    pub win: crate::wm::Window,
+    pub area: Area,
 }
 
 impl core::fmt::Debug for Extras<'_> {
@@ -256,15 +294,17 @@ pub fn desktop(
         }
         None => wm.layout(),
     };
-    for (id, a) in shown {
-        let look = extras
-            .look
-            .map_or(Look { focus: f32::from(u8::from(focused == Some(id))), opacity: 1.0, dy: 0.0 }, |l| l(id));
-        if !overlaps(&a.grow(SHADOW_REACH + look.dy.abs()), &damage) || look.opacity <= 0.0 {
+    let mut drawn: Vec<(WinId, Area, &crate::wm::Window)> =
+        shown.into_iter().filter_map(|(id, a)| wm.get(id).map(|w| (id, a, w))).collect();
+    drawn.extend(extras.ghosts.iter().map(|g| (g.win.id, g.area, &g.win)));
+    for (id, a, win) in drawn {
+        let look = extras.look.map_or(Look::still(f32::from(u8::from(focused == Some(id)))), |l| l(id));
+        // Where it is seen: gliding, or in its place.
+        let seen = look.at.unwrap_or(a);
+        if !overlaps(&seen.grow(SHADOW_REACH + look.dy.abs()), &damage) || look.opacity <= 0.0 {
             continue;
         }
-        let Some(win) = wm.get(id) else { continue };
-        let flush = wm.flush(id);
+        let flush = win.state.flush();
         let fr = Frame {
             app: &win.app,
             path: win.path.as_deref(),
@@ -280,8 +320,9 @@ pub fn desktop(
             hover: extras.hover.filter(|h| h.0 == id).map(|h| h.1),
             hover_in: extras.hover_in.unwrap_or(1.0),
             keyed: extras.keyed.filter(|h| h.0 == id).map(|h| h.1),
+            pressed: extras.pressed.filter(|h| h.0 == id).map(|h| h.1),
         };
-        let mut draw_window = |p: &mut Painter<'_>| {
+        let mut draw_window = |p: &mut Painter<'_>, a: Area| {
             draw::frame(p, pal, f, a, &fr);
             let c = draw::content(a, pal.shape.title_h);
             // The content's bottom corners follow the frame's radius.
@@ -301,9 +342,9 @@ pub fn desktop(
             }
             draw::frame_outline(p, pal, a, look.focus, flush, win.accent);
         };
-        if look.opacity >= 1.0 && look.dy == 0.0 {
-            draw_window(p);
-        } else {
+        if look.plain() {
+            draw_window(p, a);
+        } else if look.scale == 1.0 && look.at.is_none() {
             // A fading window: drawn into a transparent layer, then
             // composited at its opacity, shifted.
             let l =
@@ -312,9 +353,39 @@ pub fn desktop(
             l.set_clip(clip);
             {
                 let mut lp = Painter::new(l, &mut *p.cache, k);
-                draw_window(&mut lp);
+                draw_window(&mut lp, a);
             }
             p.canvas.composite(l, look.opacity, (look.dy * k) as i32);
+        } else {
+            // Scaling or gliding (ADR 0186): drawn whole into the layer
+            // in its place, then stretched onto where it is seen. A
+            // gliding window is drawn at the size its app last drew, so
+            // its contents keep their proportions until the new ones come.
+            let c = draw::content(a, pal.shape.title_h);
+            let a = match extras.drawn_sizes.iter().find(|(w, _)| *w == id) {
+                Some(&(_, (cw, ch))) if look.at.is_some() && cw > 0.0 && ch > 0.0 => {
+                    Area::new(a.x, a.y, cw + (a.w - c.w), ch + (a.h - c.h))
+                }
+                _ => a,
+            };
+            let l =
+                layer.get_or_insert_with(|| Canvas::new(p.canvas.width, p.canvas.height, slate_ui::Color::TRANSPARENT));
+            l.clear();
+            let reach = if flush { 0.0 } else { SHADOW_REACH };
+            let from = p.device(&a.grow(reach)).intersect(&l.bounds());
+            l.set_clip(from);
+            {
+                let mut lp = Painter::new(l, &mut *p.cache, k).at((ox, oy), (w, h));
+                draw_window(&mut lp, a);
+            }
+            let to = mapped(seen, look.scale, look.dy);
+            // The layer's part `from`, mapped as the frame is.
+            let (fx, fy) = ((from.x as f32) / k + ox, (from.y as f32) / k + oy);
+            let (fw, fh) = (from.w as f32 / k, from.h as f32 / k);
+            let sx = to.w / a.w;
+            let sy = to.h / a.h;
+            let dest = ((to.x + (fx - a.x) * sx - ox) * k, (to.y + (fy - a.y) * sy - oy) * k, fw * sx * k, fh * sy * k);
+            p.canvas.composite_mapped(l, from, dest, look.opacity);
         }
     }
     if let Some(id) = extras.resizing
@@ -325,8 +396,9 @@ pub fn desktop(
     // Where a dragged window would snap.
     if let Some(a) = extras.preview {
         let a = a.grow(-8.0);
-        p.fill(a, 12.0, pal.chalk.with_alpha(18));
-        p.border(a, 12.0, 1.5, pal.focus.with_alpha(150));
+        let k = extras.preview_in.unwrap_or(1.0).clamp(0.0, 1.0);
+        p.fill(a, 12.0, pal.chalk.with_alpha((18.0 * k) as u8));
+        p.border(a, 12.0, 1.5, pal.focus.with_alpha((150.0 * k) as u8));
     }
     let windows: Vec<PanelWindow<'_>> = wm
         .listed(wm.active)
@@ -353,19 +425,33 @@ pub fn desktop(
         date: Some(status.date.as_str()).filter(|d| !d.is_empty()),
         first: extras.list_first,
         live: extras.live,
+        pressed: extras.bar_pressed,
+        opening: extras.opening,
+        volume: status.volume,
+        quick: extras.quick,
+        unread: extras.notes.is_some_and(|(n, _, _)| n.unread()),
+        hide_percent: extras.hide_battery_percent,
     };
-    let hits = draw::bar(p, pal, f, &b);
+    let mut hits = draw::bar(p, pal, f, &b);
     if let Some(d) = extras.desk {
         draw::desk_over(p, pal, f, wm.work, d);
     }
     if let Some((x, y, n, copy)) = extras.drag_badge {
         draw::drag_badge(p, pal, f, x, y, n, copy);
     }
+    // Notifications' banners at the top right (ADR 0186).
+    if let Some((notes, now, reduced)) = extras.notes {
+        hits.banners = crate::notes::draw_banners(p, pal, f, notes, w, now, reduced);
+    }
+    // The volume and brightness keys' pop-up, over everything.
+    if let Some((o, k)) = extras.osd {
+        crate::quick::draw_osd(p, pal, f, o, k, w, h);
+    }
     hits
 }
 
 /// The shortcuts, as the "keys" app lists them.
-pub const SHORTCUTS: [(&str, &str); 11] = [
+pub const SHORTCUTS: [(&str, &str); 12] = [
     ("super", "the Applications menu"),
     ("super + enter", "open a terminal"),
     ("super + space", "the launcher"),
@@ -376,6 +462,7 @@ pub const SHORTCUTS: [(&str, &str); 11] = [
     ("super + q", "close the focused window"),
     ("super + 1–4", "switch workspace (with shift: send there)"),
     ("super + l", "lock the screen"),
+    ("super + s", "quick settings"),
     ("super + shift + e", "leave Strata"),
 ];
 

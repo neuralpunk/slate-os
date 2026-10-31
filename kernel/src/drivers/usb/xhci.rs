@@ -86,6 +86,8 @@ const TRB_NORMAL: u32 = 1;
 const TRB_SETUP: u32 = 2;
 const TRB_DATA: u32 = 3;
 const TRB_STATUS: u32 = 4;
+/// An isochronous TRB (§6.4.1.3).
+const TRB_ISOCH: u32 = 5;
 const TRB_LINK: u32 = 6;
 const TRB_ENABLE_SLOT: u32 = 9;
 const TRB_DISABLE_SLOT: u32 = 10;
@@ -104,6 +106,8 @@ const TRB_ISP: u32 = 1 << 2;
 const TRB_IOC: u32 = 1 << 5;
 const TRB_IDT: u32 = 1 << 6;
 const TRB_DIR_IN: u32 = 1 << 16;
+/// An isochronous TD's Start Isoch ASAP: the next free service interval.
+const TRB_SIA: u32 = 1 << 31;
 
 // Completion codes (§6.4.5).
 pub const CC_SUCCESS: u8 = 1;
@@ -111,6 +115,8 @@ pub const CC_STALL: u8 = 6;
 pub const CC_SHORT_PACKET: u8 = 13;
 
 // Endpoint types in endpoint contexts (§6.2.3, table 6-9).
+const EPT_ISOCH_OUT: u32 = 1;
+const EPT_ISOCH_IN: u32 = 5;
 const EPT_CONTROL: u32 = 4;
 const EPT_BULK_OUT: u32 = 2;
 const EPT_INTERRUPT_OUT: u32 = 3;
@@ -548,6 +554,15 @@ impl UsbDevice {
         self.hc.ring_doorbell(self.slot, ep.dci);
     }
 
+    /// Queue one isochronous TD of `len` bytes at `buf` (§4.11.2.5), in
+    /// the next service interval free after those queued (SIA), with an
+    /// interrupt on its completion.
+    pub fn queue_isoch(&self, ep: &Endpoint, buf: u64, len: usize) {
+        let trb = [buf as u32, (buf >> 32) as u32, len as u32, (TRB_ISOCH << 10) | TRB_SIA | TRB_IOC | TRB_ISP];
+        ep.ring.lock().push(trb);
+        self.hc.ring_doorbell(self.slot, ep.dci);
+    }
+
     /// GET_DESCRIPTOR into `buf`.
     pub fn descriptor(&self, kind: u8, buf: &mut [u8]) -> Result<usize, u8> {
         self.control(RT_DEVICE_IN, REQ_GET_DESCRIPTOR, u16::from(kind) << 8, 0, buf)
@@ -596,11 +611,17 @@ impl UsbDevice {
                     (31 - (u32::from(e.interval.max(1)) * 8).leading_zeros()).clamp(3, 10)
                 }
                 (EP_INTERRUPT, _) => u32::from(e.interval.clamp(1, 16)) - 1,
+                // Isochronous: 2^(bInterval - 1) frames (full speed, 8
+                // microframes each) or microframes (USB 2.0 §9.6.6).
+                (EP_ISOCH, SPEED_FULL) => u32::from(e.interval.clamp(1, 16)) - 1 + 3,
+                (EP_ISOCH, _) => u32::from(e.interval.clamp(1, 16)) - 1,
                 _ => 0,
             };
             let kind = match (e.kind, e.is_in()) {
                 (EP_INTERRUPT, true) => EPT_INTERRUPT_IN,
                 (EP_INTERRUPT, false) => EPT_INTERRUPT_OUT,
+                (EP_ISOCH, true) => EPT_ISOCH_IN,
+                (EP_ISOCH, false) => EPT_ISOCH_OUT,
                 (_, true) => EPT_BULK_IN,
                 (_, false) => EPT_BULK_OUT,
             };
@@ -631,9 +652,16 @@ impl UsbDevice {
                 input.write::<u32>(ctx, interval << 16);
                 input.write::<u64>(ctx + 8, ring.phys() | 1);
             }
-            input.write::<u32>(ctx + 4, (3 << 1) | (kind << 3) | (mps << 16));
-            let avg = if e.kind == EP_INTERRUPT { 8 } else { 1024 };
-            let esit = if e.kind == EP_INTERRUPT { mps } else { 0 };
+            // Error count 3, but 0 for isochronous endpoints (§6.2.3.2:
+            // they are never retried).
+            let cerr = if e.kind == EP_ISOCH { 0 } else { 3 };
+            input.write::<u32>(ctx + 4, (cerr << 1) | (kind << 3) | (mps << 16));
+            let avg = match e.kind {
+                EP_INTERRUPT => 8,
+                EP_ISOCH => mps,
+                _ => 1024,
+            };
+            let esit = if matches!(e.kind, EP_INTERRUPT | EP_ISOCH) { mps } else { 0 };
             input.write::<u32>(ctx + 16, avg | (esit << 16));
             out.push(Arc::new(Endpoint {
                 dci,
@@ -1011,6 +1039,7 @@ pub fn detach(d: &Arc<UsbDevice>) {
     super::msc::detached(d);
     super::btusb::detached(d);
     super::hid::detached(d);
+    super::audio::detached(d);
     d.hc.drop_pipes(d.slot);
     let _ = d.hc.command([0, 0, 0, (TRB_DISABLE_SLOT << 10) | (u32::from(d.slot) << 24)]);
     d.hc.dcbaa.write::<u64>(usize::from(d.slot) * 8, 0);
@@ -1180,7 +1209,7 @@ pub fn setup(hc: &Arc<Xhci>, pos: Position, speed: u32, port: String) -> Option<
             speed_id: speed,
             device: &desc,
             config: &config,
-            strings,
+            strings: strings.clone(),
             interface_strings,
             maxchild: dev.maxchild.clone(),
         },
@@ -1227,6 +1256,21 @@ pub fn setup(hc: &Arc<Xhci>, pos: Position, speed: u32, port: String) -> Option<
             }
             // A Bluetooth primary controller (Core 5.4, Vol 4, Part B).
             (0xE0, 1, 1) => super::btusb::start(&dev, iface, ids(&desc)),
+            // Audio: the control interface leads to the whole function
+            // (Audio Class 1.0, ADR 0184).
+            (1, 1, _) if crate::drivers::enabled("usb-audio") => {
+                let place = super::sys::place(&hc.sys, &port);
+                let (sys_name, sys_path) = place.map(|(_, n, p)| (n, p)).unwrap_or_default();
+                let names = super::audio::Names {
+                    maker: strings[0].as_deref(),
+                    product: strings[1].as_deref(),
+                    sys_path: &sys_path,
+                    sys_name: &sys_name,
+                };
+                if super::audio::start(&dev, &config, &names) {
+                    dev.bound(iface.number, "snd-usb-audio");
+                }
+            }
             // Mass storage, SCSI transparent command set, Bulk-Only.
             (8, 6, 0x50 | 0x62) => super::msc::start(&dev, iface, &config),
             // A hub (USB 2.0 §11.23.1).

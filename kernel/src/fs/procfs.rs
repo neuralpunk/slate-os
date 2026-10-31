@@ -66,6 +66,9 @@ enum Node {
     NetFile(&'static str),
     /// /proc/sys: a path from SYS_TREE ("sys/kernel/hostname").
     Sys(&'static str),
+    /// /proc/asound and what is in it ("", "cards", "card0/pcm0p/info"),
+    /// from the sound core (ADR 0184).
+    Asound(String),
     /// /proc/sys/net/ipv4/conf/DEV and ipv6/conf/DEV (`all`, `default`, or
     /// an interface of the reader's network namespace), and their files.
     NetConf {
@@ -616,6 +619,7 @@ fn ino_of(node: &Node) -> Ino {
         Node::NetDir => 3,
         Node::NetFile(n) => 0x1_0000 + name_hash(n),
         Node::Sys(p) => 0x2_0000 + name_hash(p),
+        Node::Asound(p) => 0x4_0000_0000 + name_hash(p),
         Node::NetConf { v6, dev, key } => {
             0x3_0000_0000 + (u64::from(*v6) << 40) + (name_hash(dev) << 8) + key.map_or(0, name_hash)
         }
@@ -661,6 +665,10 @@ impl Inode for ProcInode {
                 meta(ino, S_IFDIR | 0o555)
             }
             Node::Sys(p) if p.ends_with('/') => meta(ino, S_IFDIR | 0o555),
+            Node::Asound(p) => match crate::drivers::sound::proc_entry(p) {
+                Some(crate::drivers::sound::ProcEntry::Dir(_)) => meta(ino, S_IFDIR | 0o555),
+                _ => meta(ino, S_IFREG | 0o444),
+            },
             Node::NetConf { key: None, .. } => meta(ino, S_IFDIR | 0o555),
             Node::NetConf { .. } => meta(ino, S_IFREG | 0o644),
             Node::FdDir(_) => meta(ino, S_IFDIR | 0o500),
@@ -670,7 +678,8 @@ impl Inode for ProcInode {
             Node::SelfLink | Node::ThreadSelf | Node::PidLink(..) | Node::FdLink(..) | Node::NsLink(..) => {
                 meta(ino, S_IFLNK | 0o777)
             }
-            Node::PidFile(_, f) if PID_WRITABLE.contains(f) => meta(ino, S_IFREG | 0o644),
+            Node::PidFile(_, f) if PID_WRITABLE.contains(f) || *f == "comm" => meta(ino, S_IFREG | 0o644),
+            Node::ThreadFile(_, _, "comm") => meta(ino, S_IFREG | 0o644),
             Node::PidFile(_, "environ") => meta(ino, S_IFREG | 0o400),
             Node::Global(STRACE_FILE) => meta(ino, S_IFREG | 0o644),
             Node::Global(PROFILE_FILE) => meta(ino, S_IFREG | 0o600),
@@ -730,7 +739,9 @@ impl Inode for ProcInode {
     }
 
     fn uncached_child(&self, name: &str) -> bool {
-        matches!(self.node, Node::Root) && name.bytes().all(|b| b.is_ascii_digit())
+        // Sound cards come and go (USB).
+        (matches!(self.node, Node::Root) && (name.bytes().all(|b| b.is_ascii_digit()) || name == "asound"))
+            || matches!(self.node, Node::Asound(_))
     }
 
     fn lookup(&self, name: &str) -> Result<Arc<dyn Inode>> {
@@ -747,6 +758,9 @@ impl Inode for ProcInode {
                 }
                 if name == "sys" {
                     return Ok(self.inode(Node::Sys("sys/")));
+                }
+                if name == "asound" {
+                    return Ok(self.inode(Node::Asound(String::new())));
                 }
                 if let Some(f) = GLOBAL_FILES.iter().find(|f| **f == name && global_present(f)) {
                     return Ok(self.inode(Node::Global(f)));
@@ -812,6 +826,16 @@ impl Inode for ProcInode {
                 let f = NET_FILES.iter().find(|f| **f == name).ok_or(ENOENT)?;
                 Ok(self.inode(Node::NetFile(f)))
             }
+            Node::Asound(dir) => {
+                let path = if dir.is_empty() { String::from(name) } else { format!("{dir}/{name}") };
+                match crate::drivers::sound::proc_entry(dir) {
+                    Some(crate::drivers::sound::ProcEntry::Dir(entries)) if entries.iter().any(|(n, _)| n == name) => {
+                        Ok(self.inode(Node::Asound(path)))
+                    }
+                    Some(crate::drivers::sound::ProcEntry::Dir(_)) => Err(ENOENT),
+                    _ => Err(ENOTDIR),
+                }
+            }
             Node::NsDir(pid, tid) => {
                 let k = proc::ns::KINDS.iter().find(|k| **k == name).ok_or(ENOENT)?;
                 Ok(self.inode(Node::NsLink(*pid, *tid, k)))
@@ -842,6 +866,7 @@ impl Inode for ProcInode {
                 add("thread-self".into(), Node::ThreadSelf, FileType::Symlink);
                 add("net".into(), Node::NetDir, FileType::Directory);
                 add("sys".into(), Node::Sys("sys/"), FileType::Directory);
+                add("asound".into(), Node::Asound(String::new()), FileType::Directory);
                 for f in GLOBAL_FILES.iter().filter(|f| global_present(f)) {
                     add(f.to_string(), Node::Global(f), FileType::Regular);
                 }
@@ -881,6 +906,15 @@ impl Inode for ProcInode {
             Node::NetDir => {
                 for f in NET_FILES {
                     add(f.to_string(), Node::NetFile(f), FileType::Regular);
+                }
+            }
+            Node::Asound(dir) => {
+                if let Some(crate::drivers::sound::ProcEntry::Dir(entries)) = crate::drivers::sound::proc_entry(dir) {
+                    for (n, is_dir) in entries {
+                        let path = if dir.is_empty() { n.clone() } else { format!("{dir}/{n}") };
+                        let kind = if is_dir { FileType::Directory } else { FileType::Regular };
+                        add(n, Node::Asound(path), kind);
+                    }
                 }
             }
             Node::Sys(dir @ ("sys/net/ipv4/conf/" | "sys/net/ipv6/conf/")) => {
@@ -1041,18 +1075,36 @@ impl Inode for ProcInode {
             }
             Node::Sys(p) if p.ends_with('/') => None,
             Node::NetConf { key: None, .. } => None,
-            Node::Global(_) | Node::PidFile(..) | Node::NetFile(_) | Node::Sys(_) | Node::NetConf { .. } => {
-                Some(self.generate().map(|data| {
-                    let target = match &self.node {
-                        Node::PidFile(pid, f) if PID_WRITABLE.contains(f) => Some(WriteTarget::Pid(*pid, f)),
-                        Node::Sys(path) if sys_writable(path) => Some(WriteTarget::Sys(path)),
-                        Node::NetConf { v6, dev, key: Some(k) } => Some(WriteTarget::Conf(*v6, dev.clone(), k)),
-                        _ => None,
-                    };
-                    let f: Arc<dyn File> = Arc::new(Snapshot { data, offset: IrqSpinLock::new(0), flags, target });
-                    f
-                }))
+            Node::Asound(ref p)
+                if !matches!(
+                    crate::drivers::sound::proc_entry(p.as_str()),
+                    Some(crate::drivers::sound::ProcEntry::File(_))
+                ) =>
+            {
+                None
             }
+            // A thread's name, writable by its own process (proc(5)).
+            Node::ThreadFile(pid, tid, "comm") => Some(self.generate().map(|data| {
+                let target = Some(WriteTarget::Comm(pid, tid));
+                let f: Arc<dyn File> = Arc::new(Snapshot { data, offset: IrqSpinLock::new(0), flags, target });
+                f
+            })),
+            Node::Global(_)
+            | Node::PidFile(..)
+            | Node::NetFile(_)
+            | Node::Sys(_)
+            | Node::NetConf { .. }
+            | Node::Asound(_) => Some(self.generate().map(|data| {
+                let target = match &self.node {
+                    Node::PidFile(pid, "comm") => Some(WriteTarget::Comm(*pid, u64::from(*pid))),
+                    Node::PidFile(pid, f) if PID_WRITABLE.contains(f) => Some(WriteTarget::Pid(*pid, f)),
+                    Node::Sys(path) if sys_writable(path) => Some(WriteTarget::Sys(path)),
+                    Node::NetConf { v6, dev, key: Some(k) } => Some(WriteTarget::Conf(*v6, dev.clone(), k)),
+                    _ => None,
+                };
+                let f: Arc<dyn File> = Arc::new(Snapshot { data, offset: IrqSpinLock::new(0), flags, target });
+                f
+            })),
             _ => None,
         }
     }
@@ -1066,6 +1118,8 @@ impl Inode for ProcInode {
 #[derive(Clone)]
 enum WriteTarget {
     Pid(Pid, &'static str),
+    /// A thread's name (the main thread's is the process's).
+    Comm(Pid, u64),
     Sys(&'static str),
     /// An interface's setting (ipv6, device, key).
     Conf(bool, String, &'static str),
@@ -1109,6 +1163,7 @@ impl File for Snapshot {
     fn write(&self, buf: &[u8]) -> Result<usize> {
         match self.target.clone().ok_or(EINVAL)? {
             WriteTarget::Pid(pid, name) => write_pid_file(&*process(pid)?, name, buf),
+            WriteTarget::Comm(pid, tid) => write_comm(pid, tid, buf),
             WriteTarget::Sys(path) => write_sys_file(path, buf),
             WriteTarget::Conf(v6, dev, key) => write_conf(v6, &dev, key, buf),
         }
@@ -1119,6 +1174,25 @@ impl File for Snapshot {
     fn status_flags(&self) -> u32 {
         self.flags
     }
+}
+
+/// Name a thread of the caller's own process, as PR_SET_NAME does: its
+/// first 15 bytes, without the newline (proc(5): "a thread may modify the
+/// comm value of any other thread in the same thread group").
+fn write_comm(pid: Pid, tid: u64, buf: &[u8]) -> Result<usize> {
+    let p = process(pid)?;
+    if proc::current().is_none_or(|me| me.pid != p.pid) {
+        return Err(EINVAL);
+    }
+    let text = written_text(buf)?;
+    let name: String = text.strip_suffix('\n').unwrap_or(text).chars().take(15).collect();
+    if tid == u64::from(p.pid) {
+        *p.name.lock() = name;
+    } else {
+        let t = p.threads().into_iter().find(|t| t.tid == tid).ok_or(ESRCH)?;
+        *t.comm.lock() = Some(name);
+    }
+    Ok(buf.len())
 }
 
 /// The most lines a uid_map or gid_map takes (user_namespaces(7)).
@@ -1429,6 +1503,10 @@ impl ProcInode {
             Node::Global("slate_sched") if crate::proc::cred::current().euid != 0 => return Err(EACCES),
             Node::Global(name) => global(name, &mut s),
             Node::NetFile(name) => crate::net::proc_file(name, &mut s),
+            Node::Asound(path) => match crate::drivers::sound::proc_entry(path) {
+                Some(crate::drivers::sound::ProcEntry::File(text)) => s = text,
+                _ => return Err(ENOENT),
+            },
             Node::Sys(path) if !path.ends_with('/') => sys_file(path, &mut s),
             Node::NetConf { v6, dev, key: Some(k) } => {
                 let _ = writeln!(s, "{}", conf_value(*v6, dev, k));

@@ -271,6 +271,7 @@ fn status() -> Status {
         network: Some(true),
         battery: Some(84),
         updates: 0,
+        volume: Some((64, false)),
     }
 }
 
@@ -825,9 +826,9 @@ fn scenes() -> Vec<(&'static str, Canvas)> {
             let b = wm.add("terminal", Some("~"), false);
             let look = move |id: WinId| {
                 if id == b {
-                    crate::motion::Look { focus: 0.5, opacity: 0.5, dy: -3.0 }
+                    crate::motion::Look { focus: 0.5, opacity: 0.5, dy: -3.0, scale: 1.0, at: None }
                 } else {
-                    crate::motion::Look { focus: if id == a { 0.5 } else { 0.0 }, opacity: 1.0, dy: 0.0 }
+                    crate::motion::Look::still(if id == a { 0.5 } else { 0.0 })
                 }
             };
             let st = Status {
@@ -847,6 +848,176 @@ fn scenes() -> Vec<(&'static str, Canvas)> {
             let mut lp = Painter::new(&mut layer, &mut cache, 1.0);
             draw::launcher(&mut lp, &g, f, &launcher);
             p.canvas.composite(&layer, 0.5, 3);
+        }),
+    ));
+    // Motion of ADR 0186: a window settling as it opens (96% of its size on
+    // the way to all of it), another gliding to the left half, a third
+    // closed and fading from its last picture, the snap preview fading in.
+    out.push((
+        "motion-settle",
+        render(1280, 800, 1.0, |p, f| {
+            let mut wm = Wm::new(1280.0, 800.0);
+            let a = wm.add("keys", Some("shortcuts"), false);
+            let b = wm.add("terminal", Some("~"), false);
+            wm.snap(a, crate::wm::State::Left);
+            let gone = wm.add("files", Some("Documents"), false);
+            let gone_at = wm.frame(gone).unwrap();
+            let ghost = crate::desktop::Ghost { win: wm.get(gone).unwrap().clone(), area: gone_at };
+            wm.remove(gone);
+            let _ = wm.take_closed();
+            let left = wm.frame(a).unwrap();
+            let look = move |id: WinId| {
+                if id == a {
+                    let at = Area::new(left.x + 120.0, left.y + 40.0, left.w + 160.0, left.h - 80.0);
+                    crate::motion::Look { at: Some(at), ..crate::motion::Look::still(1.0) }
+                } else if id == b {
+                    crate::motion::Look { focus: 0.0, opacity: 0.7, dy: -2.0, scale: 0.975, at: None }
+                } else {
+                    crate::motion::Look { focus: 0.0, opacity: 0.4, dy: 0.0, scale: 0.97, at: None }
+                }
+            };
+            let st = Status {
+                clock: crate::session::clock(&slate_rt::time::gmtime(1_792_400_000)),
+                network: Some(true),
+                battery: None,
+                updates: 0,
+                ..Status::default()
+            };
+            let ghosts = [ghost];
+            let extras = Extras {
+                look: Some(&look),
+                ghosts: &ghosts,
+                preview: Some(wm.snap_area(crate::wm::State::Right)),
+                preview_in: Some(0.5),
+                ..Extras::default()
+            };
+            crate::desktop::desktop(p, &g, f, &wm, &st, extras, &mut |p, _, c| {
+                crate::desktop::keys_window(p, &g, f, c)
+            });
+        }),
+    ));
+    // Feedback of ADR 0186: a title bar's close button and the top bar's
+    // Applications button held down, an app being opened, and every
+    // pointer shape along the bottom.
+    out.push((
+        "feedback",
+        render(1280, 800, 1.0, |p, f| {
+            let mut wm = Wm::new(1280.0, 800.0);
+            let a = wm.add("keys", Some("shortcuts"), false);
+            let st = Status {
+                clock: crate::session::clock(&slate_rt::time::gmtime(1_792_400_000)),
+                network: Some(true),
+                battery: None,
+                updates: 0,
+                ..Status::default()
+            };
+            let apps = Area::new(8.0, 4.0, 110.0, 24.0);
+            let extras = Extras {
+                pressed: Some((a, TitleButton::Close)),
+                bar_pressed: Some(apps),
+                opening: Some(("Web Browser", 3)),
+                ..Extras::default()
+            };
+            crate::desktop::desktop(p, &g, f, &wm, &st, extras, &mut |p, _, c| {
+                crate::desktop::keys_window(p, &g, f, c)
+            });
+            use slate_ui::icon::Cursor;
+            let shapes = [
+                Cursor::Arrow,
+                Cursor::Hand,
+                Cursor::Text,
+                Cursor::Busy(0),
+                Cursor::Busy(4),
+                Cursor::Move,
+                Cursor::NotAllowed,
+                Cursor::ResizeH,
+                Cursor::ResizeNwse,
+            ];
+            for (i, c) in shapes.iter().enumerate() {
+                slate_ui::icon::cursor(p.canvas, 120.0 + 110.0 * i as f32, 730.0, 1.0, *c);
+            }
+        }),
+    ));
+    // Quick settings (ADR 0186), open under the top bar's status icons, with
+    // a battery, in graphite and in the light theme; and the volume keys'
+    // pop-up over a window.
+    for (name, pal, muted) in [("quick-settings", g, false), ("quick-settings-light", Palette::DAY, true)] {
+        out.push((
+            name,
+            render(1280, 800, 1.0, move |p, f| {
+                let wm = Wm::new(1280.0, 800.0);
+                let mut st = status();
+                st.volume = Some((40, muted));
+                let extras = Extras { quick: true, ..Extras::default() };
+                crate::desktop::desktop(p, &pal, f, &wm, &st, extras, &mut |_, _, _| {});
+                let q = crate::quick::Quick {
+                    volume: Some(slate_sound::mixer::Volume { card: 0, level: 0.4, muted }),
+                    dark: !pal.light(),
+                    network: Some(true),
+                    battery: Some(84),
+                    quiet: muted,
+                    notes: if muted {
+                        Vec::new()
+                    } else {
+                        std::vec![
+                            crate::notes::Listed {
+                                app: "Clock".into(),
+                                summary: "Alarm".into(),
+                                clock: "07:30".into()
+                            },
+                            crate::notes::Listed {
+                                app: "Files".into(),
+                                summary: "Copied 3 files to Documents".into(),
+                                clock: "07:12".into()
+                            },
+                        ]
+                    },
+                    dragging: false,
+                };
+                let mut layer = Canvas::new(1280, 800, Color::TRANSPARENT);
+                let mut cache = GlyphCache::new();
+                let mut lp = Painter::new(&mut layer, &mut cache, 1.0);
+                crate::quick::draw(&mut lp, &pal, f, &q, 1280.0);
+                p.canvas.composite(&layer, 1.0, 0);
+            }),
+        ));
+    }
+    // Notifications (ADR 0186): two banners, the newest on top, one urgent
+    // (an alarm, with ochre's border), and the top bar's mark for unseen
+    // ones.
+    out.push((
+        "notifications",
+        render(1280, 800, 1.0, |p, f| {
+            let mut wm = Wm::new(1280.0, 800.0);
+            wm.add("keys", Some("shortcuts"), false);
+            let mut notes = crate::notes::Notes::default();
+            notes.add(
+                7,
+                0,
+                "Firefox",
+                "Download finished",
+                "annual-report-2026.pdf has been saved to Downloads; open it from Files or the browser's list",
+                strata_proto::urgency::NORMAL,
+                0,
+                "14:31",
+            );
+            notes.add(0, 0, "Clock", "Alarm", "The alarm set for 14:32", strata_proto::urgency::CRITICAL, 100, "14:32");
+            let extras = Extras { notes: Some((&notes, 1000, false)), ..Extras::default() };
+            crate::desktop::desktop(p, &g, f, &wm, &status(), extras, &mut |p, _, c| {
+                crate::desktop::keys_window(p, &g, f, c)
+            });
+        }),
+    ));
+    out.push((
+        "volume-osd",
+        render(1280, 800, 1.0, |p, f| {
+            let mut wm = Wm::new(1280.0, 800.0);
+            wm.add("keys", Some("shortcuts"), false);
+            let osd = crate::quick::Osd { icon: Icon::Speaker, level: Some(0.55), text: "55%".to_string(), since: 0 };
+            let extras = Extras { osd: Some((&osd, 1.0)), ..Extras::default() };
+            crate::desktop::desktop(p, &g, f, &wm, &status(), extras, &mut |p, _, c| {
+                crate::desktop::keys_window(p, &g, f, c)
+            });
         }),
     ));
     // The Applications menu (ADR 0110), under its button, drawn on a layer
@@ -1252,6 +1423,15 @@ fn scenes() -> Vec<(&'static str, Canvas)> {
     ));
     boxes.removing = true;
     boxes.say("Press Enter again to remove linux and everything in it (about 1.2 GB comes back).", true);
+    // Sound: built-in sound and a USB headset, the test tune playing on
+    // the first.
+    let mut sound = at_section(S::Sound, SFocus::Content, 0);
+    sound.sound = slate_sound::parse_cards(
+        " 0 [Generic        ]: HDA-Intel - HD-Audio Generic\n                      HD-Audio Generic at 0xfc8c8000 irq 89\n \
+         1 [Headset        ]: USB-Audio - USB Headset\n                      USB Headset at usb-0000:0e:00.0-2, full speed\n",
+    );
+    sound.playing = Some(0);
+    sound.say("Playing the test tune on HD-Audio Generic…", false);
     // Pictures: the wallpaper's own (chosen), the accounts', one's own
     // account page, and a full name being typed.
     let mut own_picture = at_section(S::Appearance, SFocus::Content, 2 + slate_ui::wallpaper::Design::ALL.len());
@@ -1359,10 +1539,15 @@ fn scenes() -> Vec<(&'static str, Canvas)> {
         ("settings-bluetooth", bt),
         ("settings-bluetooth-pairing", bt_pairing),
         ("settings-bluetooth-passkey", bt_passkey),
+        ("settings-sound", sound),
+        ("settings-sound-none", at_section(S::Sound, SFocus::Sidebar, 0)),
         ("settings-boxes", boxes),
         ("settings-security", at_section(S::Security, SFocus::Content, 0)),
         ("settings-session", at_section(S::Session, SFocus::Sidebar, 0)),
         ("settings-about", at_section(S::About, SFocus::Sidebar, 0)),
+        ("settings-mouse", at_section(S::Mouse, SFocus::Content, 1)),
+        ("settings-night-light", at_section(S::NightLight, SFocus::Content, 0)),
+        ("settings-power", at_section(S::Power, SFocus::Sidebar, 0)),
     ];
     for (name, v) in &pages {
         out.push((
@@ -1663,7 +1848,7 @@ fn four_k_unfocus() {
     let id = wm.add("terminal", Some("~"), false);
     wm.get_mut(id).unwrap().rect = Area::new(572.0, 214.0, 656.0, 580.0);
     for (name, focus) in [("focused", 1.0), ("focused again", 1.0), ("unfocused", 0.3), ("unfocused again", 0.2)] {
-        let look = move |_: WinId| crate::motion::Look { focus, opacity: 1.0, dy: 0.0 };
+        let look = move |_: WinId| crate::motion::Look::still(focus);
         let ex = Extras { wall: Some(&wall), look: Some(&look), dim: true, ..Extras::default() };
         let t = Instant::now();
         {

@@ -213,6 +213,32 @@ pub fn main() -> i32 {
     }
 }
 
+/// Pass a notification on to Strata, connecting (again) if need be.
+fn tell_strata(strata: &mut Option<slate_strata_client::Connection>, f: &crate::notify::Forward) {
+    use crate::notify::Forward;
+    for _ in 0..2 {
+        if strata.is_none() {
+            match slate_strata_client::Connection::connect() {
+                Ok(c) => *strata = Some(c),
+                Err(e) => {
+                    slate_rt::eprintln!("slate-portal: notifications: {e}");
+                    return;
+                }
+            }
+        }
+        let Some(c) = strata.as_mut() else { return };
+        let sent = match f {
+            Forward::Notify { key, app, summary, body, urgency } => c.notify(*key, app, summary, body, *urgency),
+            Forward::Close { key } => c.unnotify(*key),
+        };
+        match sent {
+            Ok(()) => return,
+            // Strata went (or restarted): once more, anew.
+            Err(_) => *strata = None,
+        }
+    }
+}
+
 fn run() -> Result<(), String> {
     let address = slate_rt::env::var(b"DBUS_SESSION_BUS_ADDRESS")
         .map(|a| String::from(lossy(&a)))
@@ -236,6 +262,15 @@ fn run() -> Result<(), String> {
     if got.body.first() != Some(&Value::U32(1)) {
         return Err(format!("{NAME} is someone else's"));
     }
+    // The notification server too (ADR 0186): what the app says goes to
+    // Strata.
+    let notify_name = alloc::vec![Value::Str(crate::notify::NAME.into()), Value::U32(4)];
+    let notifying = bus.call_bus("RequestName", notify_name)?.body.first() == Some(&Value::U32(1));
+    if !notifying {
+        slate_rt::eprintln!("slate-portal: {} is someone else's", crate::notify::NAME);
+    }
+    let mut notes = crate::notify::Server::default();
+    let mut strata: Option<slate_strata_client::Connection> = None;
     // On the bus: the program slate-linux-app starts may go on (it waits
     // for this file, `PORTAL_READY` there).
     if let Some(dir) = slate_rt::env::var(b"XDG_RUNTIME_DIR") {
@@ -269,6 +304,16 @@ fn run() -> Result<(), String> {
             };
             for m in msgs {
                 let serial = bus.serial + 1;
+                if let Some((reply, fwd)) = notes.answer(serial, &m) {
+                    if let Some(r) = reply {
+                        bus.serial = serial;
+                        bus.send(&r)?;
+                    }
+                    if let Some(f) = fwd {
+                        tell_strata(&mut strata, &f);
+                    }
+                    continue;
+                }
                 if let Some(r) = answer(&look, serial, &m) {
                     bus.serial = serial;
                     bus.send(&r)?;

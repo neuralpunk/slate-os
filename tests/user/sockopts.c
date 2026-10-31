@@ -58,6 +58,9 @@ static void refused(void) {
                                        get_int(u, SOL_SOCKET, 9999) == -1000 - ENOPROTOOPT);
     check("unknown_ip_option", fails(set_int(u, IPPROTO_IP, 9999, 1), ENOPROTOOPT));
     check("unknown_level", fails(set_int(u, 9999, 1, 1), ENOPROTOOPT));
+    /* SO_PRIORITY (socket(7)): kept and read back on any socket. */
+    check("priority", set_int(u, SOL_SOCKET, SO_PRIORITY, 5) == 0 && get_int(u, SOL_SOCKET, SO_PRIORITY) == 5 &&
+                          set_int(x, SOL_SOCKET, SO_PRIORITY, 2) == 0 && get_int(x, SOL_SOCKET, SO_PRIORITY) == 2);
     check("tcp_option_on_udp", fails(set_int(u, IPPROTO_TCP, TCP_NODELAY, 1), ENOPROTOOPT));
     check("tcp_option_on_unix", fails(set_int(x, IPPROTO_TCP, TCP_NODELAY, 1), EOPNOTSUPP) &&
                                     get_int(x, IPPROTO_TCP, TCP_NODELAY) == -1000 - EOPNOTSUPP);

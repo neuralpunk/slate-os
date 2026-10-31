@@ -32,13 +32,36 @@ def run(args, keys, wait=0.4):
                     out += os.read(fd, 65536)
                 except OSError:
                     return
+
+    def drain_some(t):
+        # False once top has gone.
+        nonlocal out
+        r, _, _ = select.select([fd], [], [], t)
+        if r:
+            try:
+                out += os.read(fd, 65536)
+            except OSError:
+                return False
+        return True
     drain(wait)
     screens = []
     RAW.clear()
     for k in keys:
+        start = len(out)
         os.write(fd, k.encode())
         drain(wait)
-        RAW.append(out.decode('latin1').split('\x1b[H')[-1])
+        # A frame takes top a while on a host with many processes (0.45 s
+        # with 500): wait for one drawn after the key (up to 3 s; a prompt
+        # draws none), then for it to settle.
+        end = time.time() + 3.0
+        while b'\x1b[H' not in out[start:] and time.time() < end:
+            if not drain_some(0.05):
+                break
+        drain(0.15)
+        # Every frame drawn after the key: a message lasts only until the
+        # next refresh, which a frame begun before the key may precede.
+        after = out[start:].decode('latin1').split('\x1b[H')
+        RAW.append('\x1b[H'.join(after[1:]) if len(after) > 1 else out.decode('latin1').split('\x1b[H')[-1])
         screens.append(plain(RAW[-1]))
     exited = False
     for _ in range(20):

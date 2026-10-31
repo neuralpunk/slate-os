@@ -76,6 +76,10 @@ pub fn enabled(l: Level) -> bool {
 
 #[doc(hidden)]
 pub fn log(l: Level, module: &str, args: fmt::Arguments<'_>) {
+    // Something went wrong: the boot splash shows the console (ADR 0186).
+    if l == Level::Error {
+        crate::drivers::fbcon::splash_error();
+    }
     if enabled(l) {
         let module = match module {
             "slate_kernel" => "kernel",
